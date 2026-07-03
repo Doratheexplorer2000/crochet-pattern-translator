@@ -2,7 +2,7 @@
 
 External UAT release for the Crochet Pattern OCR Translator.
 
-Current release: RC16f
+Current release: RC17
 
 ## What This App Does
 
@@ -15,18 +15,18 @@ Current release: RC16f
 ## Run Locally
 
 ```bash
-python3 -m streamlit run Crochet_Translator_Beta_RC16f.py
+python3 -m streamlit run Crochet_Translator_Beta_RC17.py
 ```
 
 ## Streamlit Entry Point
 
 ```text
-Crochet_Translator_Beta_RC16f.py
+Crochet_Translator_Beta_RC17.py
 ```
 
 ## Required Runtime Files
 
-- `Crochet_Translator_Beta_RC16f.py`
+- `Crochet_Translator_Beta_RC17.py`
 - `stitches_1_8d.csv`
 - `stitches_1_8a.csv`
 - `symbols/`
@@ -36,4 +36,3 @@ Crochet_Translator_Beta_RC16f.py
 ## External UAT Notes
 
 This repository intentionally contains only the files required to run the external UAT build. Historical prototypes and older release candidates are not included.
-
