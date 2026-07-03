@@ -26,7 +26,7 @@ import pandas as pd
 import streamlit as st
 from PIL import Image
 
-APP_VERSION = "Pattern OCR Translator (Beta RC16f)"
+APP_VERSION = "Pattern OCR Translator (Beta RC17)"
 BASE_DIR = Path(__file__).resolve().parent
 SOURCE_CSV = BASE_DIR / "stitches_1_8d.csv"
 FALLBACK_CSV = BASE_DIR / "stitches_1_8a.csv"
@@ -439,7 +439,7 @@ def paddle_lang_from_mode(lang_mode: str) -> str:
         return "ch"
     return "en"
 
-@st.cache_resource(show_spinner=False)
+@st.cache_resource(show_spinner=False, max_entries=1)
 def get_paddle_reader(lang: str):
     """Load PaddleOCR lazily. PaddleOCR 3.x and older APIs use different kwargs."""
     from paddleocr import PaddleOCR
@@ -5779,7 +5779,6 @@ if image_file is not None:
                     "output_mode": output_mode,
                     "area_mode": area_mode,
                     "crop_box": crop_box,
-                    "working_image": working_image,
                 }
                 st.session_state["rc3_ocr_result_signature"] = current_ocr_signature
                 st.session_state["pending_ocr_run"] = False
@@ -5818,7 +5817,6 @@ if image_file is not None:
         saved_quality_metrics = result.get("quality_metrics", {})
         saved_quality_errors = result.get("quality_errors", [])
         saved_quality_warnings = result.get("quality_warnings", [])
-        saved_working_image = result.get("working_image", working_image)
         timings = result.get("timings", {})
         runtime_profile = result.get("runtime_profile", {})
         translation_profile = result.get("translation_profile", {})
