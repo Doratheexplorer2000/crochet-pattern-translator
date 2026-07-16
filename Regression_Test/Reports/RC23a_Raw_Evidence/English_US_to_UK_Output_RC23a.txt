@@ -1,0 +1,8 @@
+2SC => 2 dc
+2DC => 2 tr
+2HDC => 2 htr
+2SL => 2 ss
+2BLO => 2 blo
+2.5mm hook => 2.5mm hook
+4mm eyes => 4mm eyes
+(sc, inc) x6 => (dc, inc) x6

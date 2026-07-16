@@ -1,0 +1,41 @@
+# Pattern_001 - Alien OCR Text
+
+Workflow: Canonical visible source text input; no stored OCR artifact exists for Pattern_001
+
+Source mode: Simplified Chinese
+
+Output mode: English — US
+
+```text
+材料：2.5mm 钩针.黑色不织布.4mm 眼睛.填充棉
+头
+R1:6X (6)
+R2:6V (12)
+R3:(X.V)*6 (18)
+R4:(X.V.X)*6 (24)
+R5:(3X.V)*6 (30)
+R6:(2X.V.2X)*6 (36)
+R7:(5X.V)*6 (42)
+R8:(3X.V.3X)*6 (48)
+R9:(7X.V)*6 (54)
+R10:(4X.V.4X)*6 (60)
+R11-17:60X
+R18:(9X.A.9X)*3 (57)
+R19:57X
+R20:(17X.A)*3 (54)
+R21:54X
+R22:(8X.A.8X)*3 (51)
+R23:51X
+R24:(15X.A)*3 (48)
+R25:48X
+R26:(7X.A.7X)*3 (45)
+R27:(13X.A)*3 (42)
+R28:42X
+R29:(6X.A.6X)*3 (39)
+R30:(11X.A)*3 (36)
+R31:(2X.A.2X)*6 (30)
+R32:(3X.A)*6 (24)
+R33:(X.A.X)*6 (18)
+R34:(X.A)*6 (12)
+R35:6A
+```

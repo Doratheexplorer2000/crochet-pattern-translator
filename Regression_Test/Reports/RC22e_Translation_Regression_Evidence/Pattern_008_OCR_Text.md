@@ -1,0 +1,40 @@
+# Pattern_008 - French Rose Notes OCR Text
+
+Workflow: Whole Pattern stored OCR capture
+
+Source mode: Simplified Chinese
+
+Output mode: English — US
+
+```text
+法式玫瑰
+花瓣：
+小片x2
+R1:10F
+R2:10TV
+R3:6X,8TV,6X
+中片x3
+小红书：小红帽手作
+R1:10F
+R2:10TV
+R3:10（X，V）
+R4:2X，A,4X,14（X,2CH),4X，A,2X
+大片x5
+R1:10F
+R2:10TV
+R3:10(T,TV)
+R4:2X.A.4X.6(X.2CH),X(X.3CH.X).6(X
+2CH),4X, A，2A
+花托
+R1：环起6x
+R2:6v
+R3:6（x.v)
+R4:18X
+R5：立9CH，倒2回钩2SL，X.2T2FE.空2针引
+拔，重复6次
+叶子：
+R1：立12CH，加入铁丝，倒二回钩X，F，E，EV
+4E,F，T,W，T,F,4E,EV,E,F,X
+R2:12（X,CH)（X，CH，X),12（CH，X）
+来自华为备忘录
+```

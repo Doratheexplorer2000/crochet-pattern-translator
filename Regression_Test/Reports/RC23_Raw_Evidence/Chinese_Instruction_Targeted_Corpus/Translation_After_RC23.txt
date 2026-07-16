@@ -1,0 +1,9 @@
+起21个辫子针 -> Chain 21
+起9CH -> Chain 9
+立9CH -> Chain 9
+倒2回钩 -> Start in the 2nd chain from hook
+倒二回钩 -> Start in the 2nd chain from hook
+起21个辫子针倒2回钩19X,W -> Chain 21, Start in the 2nd chain from hook, 19 sc, 3 sc in same stitch
+倒2回钩X,F,E,EV -> Start in the 2nd chain from hook, sc, dc, tr, tr inc
+倒二回钩X,F,E,EV -> Start in the 2nd chain from hook, sc, dc, tr, tr inc
+立9CH,倒2回钩2SL,X,2T,2FE,空2针引 -> Chain 9, Start in the 2nd chain from hook, 2 sl st, sc, 2 hdc, 2 FPtr, 空2 sts引

@@ -1,0 +1,11 @@
+2SL -> 2 ss
+3SL -> 3 ss
+2SC -> 2 dc
+2DC -> 2 tr
+2HDC -> 2 htr
+2FO -> 2 fo
+2BLO -> 2 blo
+2.5mm hook -> 2.5 MM hook
+3mm -> 3 MM
+4mm eyes -> 4 MM eyes
+5 mm hook -> 5 mm hook

@@ -1,0 +1,13 @@
+--- English_US_to_UK_Output_RC22e.txt
++++ English_US_to_UK_Output_RC22e1.txt
+@@ -5,7 +5,7 @@
+ 2HDC -> 2 htr
+ 2FO -> 2 fo
+ 2BLO -> 2 blo
+-2.5mm hook -> 2.5 MM hook
+-3mm -> 3 MM
+-4mm eyes -> 4 MM eyes
++2.5mm hook -> 2.5mm hook
++3mm -> 3mm
++4mm eyes -> 4mm eyes
+ 5 mm hook -> 5 mm hook

@@ -1,0 +1,7 @@
+--- Translation_Before_RC22e1.txt
++++ Translation_After_RC23.txt
+@@ -1,2 +1,2 @@
+-起21个辫子针倒2回钩19X,W -> 起21个辫子针 Start in the 2nd chain from hook 19 sc, 3 sc in same stitch
+-倒2回钩X,F,E,EV -> Start in the 2nd chain from hook X, dc, tr, tr inc
++起21个辫子针倒2回钩19X,W -> Chain 21, Start in the 2nd chain from hook, 19 sc, 3 sc in same stitch
++倒2回钩X,F,E,EV -> Start in the 2nd chain from hook, sc, dc, tr, tr inc

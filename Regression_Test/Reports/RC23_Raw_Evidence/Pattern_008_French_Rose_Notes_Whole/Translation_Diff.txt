@@ -1,0 +1,15 @@
+--- Translation_Before_RC22e1.txt
++++ Translation_After_RC23.txt
+@@ -21,10 +21,10 @@
+ R2:6v -> R2: inc x6
+ R3:6（x.v) -> R3: (sc, inc) x6
+ R4:18X -> R4: 18 sc
+-R5：立9CH，倒2回钩2SL，X.2T2FE.空2针引 -> R5: 立9 ch, Start in the 2nd chain from hook 2 sl st, sc, 2T2FE, 空2 sts引
++R5：立9CH，倒2回钩2SL，X.2T2FE.空2针引 -> R5: Chain 9, Start in the 2nd chain from hook, 2 sl st, sc, 2T2FE, 空2 sts引
+ 拔，重复6次 -> 拔, 重复6次
+ 叶子： -> 叶子:
+-R1：立12CH，加入铁丝，倒二回钩X，F，E，EV -> R1: 立12 ch, 加入铁丝, Start in the 2nd chain from hook X, dc, tr, tr inc
++R1：立12CH，加入铁丝，倒二回钩X，F，E，EV -> R1: Chain 12, 加入铁丝, Start in the 2nd chain from hook, sc, dc, tr, tr inc
+ 4E,F，T,W，T,F,4E,EV,E,F,X -> 4 tr, dc, hdc, 3 sc in same stitch, hdc, dc, 4 tr, tr inc, tr, dc, sc
+ R2:12（X,CH)（X，CH，X),12（CH，X） -> R2: (sc, CH)(X,CH,X), 12(CH,X) x12
+ 来自华为备忘录 -> 来自华为备忘录

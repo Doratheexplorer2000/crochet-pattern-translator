@@ -1,0 +1,11 @@
+Source: Test_Pattern_Library/Pattern_001_Alien/Pattern_001_Alien_Source.jpeg
+OCR engine: PaddleOCR via run_primary_ocr()
+Preprocess: prepare_experimental_ocr_image(..., True, "1000 px")
+Trace:
+15:27:59 run_primary_ocr start
+15:27:59 run_paddle_ocr_single start
+15:28:04 save temp PNG
+15:28:04 temp PNG saved
+15:28:04 PaddleOCR call start
+15:28:15 PaddleOCR call end
+15:28:15 OCR results returned

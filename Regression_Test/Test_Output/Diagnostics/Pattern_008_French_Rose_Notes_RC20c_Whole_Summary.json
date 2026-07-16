@@ -1,0 +1,113 @@
+{
+  "record": {
+    "pattern_id": "Pattern_008",
+    "display_name": "French_Rose_Notes",
+    "run": "Whole",
+    "source": "Simplified Chinese",
+    "output": "English — US",
+    "original_size": [
+      567,
+      1384
+    ],
+    "crop_box": "Whole Pattern",
+    "cropper_display_proxy": {
+      "display_proxy_applied": true,
+      "original_width": 567,
+      "original_height": 1384,
+      "display_width": 295,
+      "display_height": 720,
+      "scale_x": 1.922034,
+      "scale_y": 1.922222,
+      "creation_seconds": 0.008711
+    },
+    "sample_default_crop_box": [
+      141,
+      346,
+      425,
+      1038
+    ],
+    "sample_display_crop_box": [
+      73,
+      180,
+      221,
+      540
+    ],
+    "sample_roundtrip_box": [
+      140,
+      346,
+      425,
+      1038
+    ],
+    "working_size": [
+      567,
+      1384
+    ],
+    "ocr_input_size": [
+      410,
+      1000
+    ],
+    "downscale": {
+      "downscale_enabled": "Yes",
+      "downscale_applied": "Yes",
+      "requested_max_height": "1000 px",
+      "original_ocr_input_width": 567,
+      "original_ocr_input_height": 1384,
+      "original_ocr_input_megapixels": 0.785,
+      "actual_paddleocr_image_width": 410,
+      "actual_paddleocr_image_height": 1000,
+      "actual_paddleocr_megapixels": 0.41,
+      "downscale_ratio": 0.7225,
+      "coordinate_scale_x": 1.382927,
+      "coordinate_scale_y": 1.384,
+      "boxes_scaled_back_for_overlay": "Yes",
+      "downscale_error": ""
+    },
+    "ocr_seconds": 8.388,
+    "ocr_box_count_raw": 30,
+    "ocr_box_count_filtered": 28,
+    "removed_noise_count": 2,
+    "translation_seconds": 18.277,
+    "translated_rows": 28,
+    "overlay_seconds": 0.039,
+    "full_label_count": 18,
+    "marker_count": 3,
+    "total_seconds": 26.729,
+    "overlay_path": "/Users/doralam/Desktop/crochet_intelligence/crochet-pattern-translator/Regression_Test/Test_Output/Overlay/Pattern_008_French_Rose_Notes_RC20c_Whole_Overlay.png",
+    "ocr_text_path": "/Users/doralam/Desktop/crochet_intelligence/crochet-pattern-translator/Regression_Test/Test_Output/OCR_Text/Pattern_008_French_Rose_Notes_RC20c_Whole_OCR_Text.txt"
+  },
+  "ocr_trace": [
+    "12:34:17 run_primary_ocr start",
+    "12:34:17 run_paddle_ocr_single start",
+    "12:34:17 save temp PNG",
+    "12:34:17 temp PNG saved",
+    "12:34:17 PaddleOCR call start",
+    "12:34:25 PaddleOCR call end",
+    "12:34:25 OCR results returned"
+  ],
+  "diagnostics": {
+    "run_primary_ocr_calls": 1,
+    "run_primary_ocr_input": {
+      "width": 410,
+      "height": 1000,
+      "pixels": 410000
+    },
+    "run_paddle_ocr_single_calls": 1,
+    "run_paddle_ocr_single_input": {
+      "width": 410,
+      "height": 1000,
+      "pixels": 410000
+    },
+    "ocr_language_model": "ch",
+    "ocr_backend": "PaddleOCR",
+    "ocr_reader_class": "PaddleOCR",
+    "detector_model": "Not exposed by current PaddleOCR object",
+    "recognizer_model": "Not exposed by current PaddleOCR object",
+    "paddle_actual_loaded_image_size": "Not exposed by current PaddleOCR API",
+    "temp_png_size_bytes": 134332,
+    "temp_png_image": {
+      "width": 410,
+      "height": 1000,
+      "pixels": 410000
+    }
+  }
+}

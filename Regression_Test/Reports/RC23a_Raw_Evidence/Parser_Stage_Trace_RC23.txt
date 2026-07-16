@@ -1,0 +1,101 @@
+Pattern OCR Translator (Beta RC23)
+========================================================================
+INPUT: 起21个辫子针
+After turning-chain parser: N/A
+After foundation parser: Chain 21
+After turning+foundation: Chain 21
+After chain-start parser: Chain 21
+split_expression_parts(after parsers): ['Chain 21']
+replace_csv_terms_in_line(original): Chain 21
+translate_expression(original): Chain 21
+translate_ocr_line(original): Chain 21
+========================================================================
+INPUT: 起18CH
+After turning-chain parser: N/A
+After foundation parser: Chain 18
+After turning+foundation: Chain 18
+After chain-start parser: Chain 18
+split_expression_parts(after parsers): ['Chain 18']
+replace_csv_terms_in_line(original): Chain 18
+translate_expression(original): Chain 18
+translate_ocr_line(original): Chain 18
+========================================================================
+INPUT: 起12锁针
+After turning-chain parser: N/A
+After foundation parser: Chain 12
+After turning+foundation: Chain 12
+After chain-start parser: Chain 12
+split_expression_parts(after parsers): ['Chain 12']
+replace_csv_terms_in_line(original): Chain 12
+translate_expression(original): Chain 12
+translate_ocr_line(original): Chain 12
+========================================================================
+INPUT: 立9CH
+After turning-chain parser: N/A
+After foundation parser: Chain 9
+After turning+foundation: Chain 9
+After chain-start parser: Chain 9
+split_expression_parts(after parsers): ['Chain 9']
+replace_csv_terms_in_line(original): Chain 9
+translate_expression(original): Chain 9
+translate_ocr_line(original): Chain 9
+========================================================================
+INPUT: 立12CH
+After turning-chain parser: N/A
+After foundation parser: Chain 12
+After turning+foundation: Chain 12
+After chain-start parser: Chain 12
+split_expression_parts(after parsers): ['Chain 12']
+replace_csv_terms_in_line(original): Chain 12
+translate_expression(original): Chain 12
+translate_ocr_line(original): Chain 12
+========================================================================
+INPUT: 9CH
+After turning-chain parser: N/A
+After foundation parser: 9CH
+After turning+foundation: 9CH
+After chain-start parser: 9CH
+split_expression_parts(after parsers): ['9CH']
+replace_csv_terms_in_line(original): 9 ch
+translate_expression(original): 9 ch
+translate_ocr_line(original): 9 ch
+========================================================================
+INPUT: 12CH
+After turning-chain parser: N/A
+After foundation parser: 12CH
+After turning+foundation: 12CH
+After chain-start parser: 12CH
+split_expression_parts(after parsers): ['12CH']
+replace_csv_terms_in_line(original): 12 ch
+translate_expression(original): 12 ch
+translate_ocr_line(original): 12 ch
+========================================================================
+INPUT: 倒2回钩
+After turning-chain parser: N/A
+After foundation parser: 倒2回钩
+After turning+foundation: 倒2回钩
+After chain-start parser: Start in the 2nd chain from hook
+split_expression_parts(after parsers): ['Start in the 2nd chain from hook']
+replace_csv_terms_in_line(original): Start in the 2nd chain from hook
+translate_expression(original): Start in the 2nd chain from hook
+translate_ocr_line(original): Start in the 2nd chain from hook
+========================================================================
+INPUT: 立9CH，倒2回钩2SL
+After turning-chain parser: N/A
+After foundation parser: Chain 9，倒2回钩2SL
+After turning+foundation: Chain 9，倒2回钩2SL
+After chain-start parser: Chain 9，Start in the 2nd chain from hook, 2SL
+split_expression_parts(after parsers): ['Chain 9', 'Start in the 2nd chain from hook', '2SL']
+replace_csv_terms_in_line(original): Chain 9,Start in the 2nd chain from hook, 2 sl st
+translate_expression(original): Chain 9, Start in the 2nd chain from hook, 2 sl st
+translate_ocr_line(original): Chain 9, Start in the 2nd chain from hook, 2 sl st
+========================================================================
+INPUT: 起21个辫子针倒2回钩19X,W
+After turning-chain parser: N/A
+After foundation parser: Chain 21, 倒2回钩19X,W
+After turning+foundation: Chain 21, 倒2回钩19X,W
+After chain-start parser: Chain 21, Start in the 2nd chain from hook, 19X,W
+split_expression_parts(after parsers): ['Chain 21', 'Start in the 2nd chain from hook', '19X', 'W']
+replace_csv_terms_in_line(original): Chain 21, Start in the 2nd chain from hook, 19 sc,W
+translate_expression(original): Chain 21, Start in the 2nd chain from hook, 19 sc, 3 sc in same stitch
+translate_ocr_line(original): Chain 21, Start in the 2nd chain from hook, 19 sc, 3 sc in same stitch

@@ -1,0 +1,604 @@
+[
+  {
+    "pattern_id": "Pattern_002",
+    "display_name": "Jellycat_Potato",
+    "run": "Whole",
+    "source": "Simplified Chinese",
+    "output": "English — US",
+    "original_size": [
+      745,
+      1054
+    ],
+    "crop_box": "Whole Pattern",
+    "working_size": [
+      745,
+      1054
+    ],
+    "preprocess_seconds": 0.019,
+    "ocr_input_size": [
+      707,
+      1000
+    ],
+    "downscale": {
+      "downscale_enabled": "Yes",
+      "downscale_applied": "Yes",
+      "requested_max_height": "1000 px",
+      "original_ocr_input_width": 745,
+      "original_ocr_input_height": 1054,
+      "original_ocr_input_megapixels": 0.785,
+      "actual_paddleocr_image_width": 707,
+      "actual_paddleocr_image_height": 1000,
+      "actual_paddleocr_megapixels": 0.707,
+      "downscale_ratio": 0.9488,
+      "coordinate_scale_x": 1.053748,
+      "coordinate_scale_y": 1.054,
+      "boxes_scaled_back_for_overlay": "Yes",
+      "downscale_error": ""
+    },
+    "ocr_seconds": 48.761,
+    "ocr_box_count_raw": 49,
+    "ocr_box_count_filtered": 44,
+    "removed_noise_count": 5,
+    "translation_seconds": 41.918,
+    "translated_rows": 39,
+    "overlay_seconds": 0.091,
+    "full_label_count": 15,
+    "marker_count": 20,
+    "total_seconds": 90.816,
+    "overlay_path": "/Users/doralam/Desktop/crochet_intelligence/crochet-pattern-translator/Regression_Test/Test_Output/Overlay/Pattern_002_Jellycat_Potato_RC20_Whole_Overlay.png",
+    "ocr_text_path": "/Users/doralam/Desktop/crochet_intelligence/crochet-pattern-translator/Regression_Test/Test_Output/OCR_Text/Pattern_002_Jellycat_Potato_RC20_Whole_OCR_Text.txt",
+    "diagnostic_path": "/Users/doralam/Desktop/crochet_intelligence/crochet-pattern-translator/Regression_Test/Test_Output/Diagnostics/Pattern_002_Jellycat_Potato_RC20_Whole_Summary.json",
+    "contains_untranslated_symbols": true,
+    "status": "PASS"
+  },
+  {
+    "pattern_id": "Pattern_002",
+    "display_name": "Jellycat_Potato",
+    "run": "SelectArea_BodyColumn",
+    "source": "Simplified Chinese",
+    "output": "English — US",
+    "original_size": [
+      745,
+      1054
+    ],
+    "crop_box": [
+      330,
+      210,
+      720,
+      830
+    ],
+    "working_size": [
+      390,
+      620
+    ],
+    "preprocess_seconds": 0.0,
+    "ocr_input_size": [
+      390,
+      620
+    ],
+    "downscale": {
+      "downscale_enabled": "Yes",
+      "downscale_applied": "No",
+      "requested_max_height": "1000 px",
+      "original_ocr_input_width": 390,
+      "original_ocr_input_height": 620,
+      "original_ocr_input_megapixels": 0.242,
+      "actual_paddleocr_image_width": 390,
+      "actual_paddleocr_image_height": 620,
+      "actual_paddleocr_megapixels": 0.242,
+      "downscale_ratio": 1.0,
+      "coordinate_scale_x": 1.0,
+      "coordinate_scale_y": 1.0,
+      "boxes_scaled_back_for_overlay": "No",
+      "downscale_error": ""
+    },
+    "ocr_seconds": 12.947,
+    "ocr_box_count_raw": 28,
+    "ocr_box_count_filtered": 27,
+    "removed_noise_count": 1,
+    "translation_seconds": 20.13,
+    "translated_rows": 27,
+    "overlay_seconds": 0.057,
+    "full_label_count": 7,
+    "marker_count": 19,
+    "total_seconds": 33.165,
+    "overlay_path": "/Users/doralam/Desktop/crochet_intelligence/crochet-pattern-translator/Regression_Test/Test_Output/Overlay/Pattern_002_Jellycat_Potato_RC20_SelectArea_BodyColumn_Overlay.png",
+    "ocr_text_path": "/Users/doralam/Desktop/crochet_intelligence/crochet-pattern-translator/Regression_Test/Test_Output/OCR_Text/Pattern_002_Jellycat_Potato_RC20_SelectArea_BodyColumn_OCR_Text.txt",
+    "diagnostic_path": "/Users/doralam/Desktop/crochet_intelligence/crochet-pattern-translator/Regression_Test/Test_Output/Diagnostics/Pattern_002_Jellycat_Potato_RC20_SelectArea_BodyColumn_Summary.json",
+    "contains_untranslated_symbols": true,
+    "status": "PASS"
+  },
+  {
+    "pattern_id": "Pattern_003",
+    "display_name": "Mushroom_Social_Post",
+    "run": "Whole",
+    "source": "Traditional Chinese",
+    "output": "English — US",
+    "original_size": [
+      602,
+      1306
+    ],
+    "crop_box": "Whole Pattern",
+    "working_size": [
+      602,
+      1306
+    ],
+    "preprocess_seconds": 0.019,
+    "ocr_input_size": [
+      461,
+      1000
+    ],
+    "downscale": {
+      "downscale_enabled": "Yes",
+      "downscale_applied": "Yes",
+      "requested_max_height": "1000 px",
+      "original_ocr_input_width": 602,
+      "original_ocr_input_height": 1306,
+      "original_ocr_input_megapixels": 0.786,
+      "actual_paddleocr_image_width": 461,
+      "actual_paddleocr_image_height": 1000,
+      "actual_paddleocr_megapixels": 0.461,
+      "downscale_ratio": 0.7657,
+      "coordinate_scale_x": 1.305857,
+      "coordinate_scale_y": 1.306,
+      "boxes_scaled_back_for_overlay": "Yes",
+      "downscale_error": ""
+    },
+    "ocr_seconds": 45.619,
+    "ocr_box_count_raw": 25,
+    "ocr_box_count_filtered": 21,
+    "removed_noise_count": 4,
+    "translation_seconds": 19.792,
+    "translated_rows": 21,
+    "overlay_seconds": 0.048,
+    "full_label_count": 17,
+    "marker_count": 0,
+    "total_seconds": 65.501,
+    "overlay_path": "/Users/doralam/Desktop/crochet_intelligence/crochet-pattern-translator/Regression_Test/Test_Output/Overlay/Pattern_003_Mushroom_Social_Post_RC20_Whole_Overlay.png",
+    "ocr_text_path": "/Users/doralam/Desktop/crochet_intelligence/crochet-pattern-translator/Regression_Test/Test_Output/OCR_Text/Pattern_003_Mushroom_Social_Post_RC20_Whole_OCR_Text.txt",
+    "diagnostic_path": "/Users/doralam/Desktop/crochet_intelligence/crochet-pattern-translator/Regression_Test/Test_Output/Diagnostics/Pattern_003_Mushroom_Social_Post_RC20_Whole_Summary.json",
+    "contains_untranslated_symbols": false,
+    "status": "PASS"
+  },
+  {
+    "pattern_id": "Pattern_003",
+    "display_name": "Mushroom_Social_Post",
+    "run": "SelectArea_TextOnly",
+    "source": "Traditional Chinese",
+    "output": "English — US",
+    "original_size": [
+      602,
+      1306
+    ],
+    "crop_box": [
+      0,
+      150,
+      600,
+      730
+    ],
+    "working_size": [
+      600,
+      580
+    ],
+    "preprocess_seconds": 0.0,
+    "ocr_input_size": [
+      600,
+      580
+    ],
+    "downscale": {
+      "downscale_enabled": "Yes",
+      "downscale_applied": "No",
+      "requested_max_height": "1000 px",
+      "original_ocr_input_width": 600,
+      "original_ocr_input_height": 580,
+      "original_ocr_input_megapixels": 0.348,
+      "actual_paddleocr_image_width": 600,
+      "actual_paddleocr_image_height": 580,
+      "actual_paddleocr_megapixels": 0.348,
+      "downscale_ratio": 1.0,
+      "coordinate_scale_x": 1.0,
+      "coordinate_scale_y": 1.0,
+      "boxes_scaled_back_for_overlay": "No",
+      "downscale_error": ""
+    },
+    "ocr_seconds": 10.027,
+    "ocr_box_count_raw": 18,
+    "ocr_box_count_filtered": 18,
+    "removed_noise_count": 0,
+    "translation_seconds": 16.24,
+    "translated_rows": 18,
+    "overlay_seconds": 0.04,
+    "full_label_count": 15,
+    "marker_count": 0,
+    "total_seconds": 26.324,
+    "overlay_path": "/Users/doralam/Desktop/crochet_intelligence/crochet-pattern-translator/Regression_Test/Test_Output/Overlay/Pattern_003_Mushroom_Social_Post_RC20_SelectArea_TextOnly_Overlay.png",
+    "ocr_text_path": "/Users/doralam/Desktop/crochet_intelligence/crochet-pattern-translator/Regression_Test/Test_Output/OCR_Text/Pattern_003_Mushroom_Social_Post_RC20_SelectArea_TextOnly_OCR_Text.txt",
+    "diagnostic_path": "/Users/doralam/Desktop/crochet_intelligence/crochet-pattern-translator/Regression_Test/Test_Output/Diagnostics/Pattern_003_Mushroom_Social_Post_RC20_SelectArea_TextOnly_Summary.json",
+    "contains_untranslated_symbols": false,
+    "status": "PASS"
+  },
+  {
+    "pattern_id": "Pattern_004",
+    "display_name": "Capybara_English",
+    "run": "Whole",
+    "source": "English — US",
+    "output": "Traditional Chinese",
+    "original_size": [
+      746,
+      1054
+    ],
+    "crop_box": "Whole Pattern",
+    "working_size": [
+      746,
+      1054
+    ],
+    "preprocess_seconds": 0.022,
+    "ocr_input_size": [
+      708,
+      1000
+    ],
+    "downscale": {
+      "downscale_enabled": "Yes",
+      "downscale_applied": "Yes",
+      "requested_max_height": "1000 px",
+      "original_ocr_input_width": 746,
+      "original_ocr_input_height": 1054,
+      "original_ocr_input_megapixels": 0.786,
+      "actual_paddleocr_image_width": 708,
+      "actual_paddleocr_image_height": 1000,
+      "actual_paddleocr_megapixels": 0.708,
+      "downscale_ratio": 0.9488,
+      "coordinate_scale_x": 1.053672,
+      "coordinate_scale_y": 1.054,
+      "boxes_scaled_back_for_overlay": "Yes",
+      "downscale_error": ""
+    },
+    "ocr_seconds": 81.825,
+    "ocr_box_count_raw": 22,
+    "ocr_box_count_filtered": 22,
+    "removed_noise_count": 0,
+    "translation_seconds": 27.317,
+    "translated_rows": 22,
+    "overlay_seconds": 0.107,
+    "full_label_count": 11,
+    "marker_count": 6,
+    "total_seconds": 109.289,
+    "overlay_path": "/Users/doralam/Desktop/crochet_intelligence/crochet-pattern-translator/Regression_Test/Test_Output/Overlay/Pattern_004_Capybara_English_RC20_Whole_Overlay.png",
+    "ocr_text_path": "/Users/doralam/Desktop/crochet_intelligence/crochet-pattern-translator/Regression_Test/Test_Output/OCR_Text/Pattern_004_Capybara_English_RC20_Whole_OCR_Text.txt",
+    "diagnostic_path": "/Users/doralam/Desktop/crochet_intelligence/crochet-pattern-translator/Regression_Test/Test_Output/Diagnostics/Pattern_004_Capybara_English_RC20_Whole_Summary.json",
+    "contains_untranslated_symbols": false,
+    "status": "PASS"
+  },
+  {
+    "pattern_id": "Pattern_004",
+    "display_name": "Capybara_English",
+    "run": "SelectArea_BodyText",
+    "source": "English — US",
+    "output": "Traditional Chinese",
+    "original_size": [
+      746,
+      1054
+    ],
+    "crop_box": [
+      45,
+      180,
+      520,
+      750
+    ],
+    "working_size": [
+      475,
+      570
+    ],
+    "preprocess_seconds": 0.0,
+    "ocr_input_size": [
+      475,
+      570
+    ],
+    "downscale": {
+      "downscale_enabled": "Yes",
+      "downscale_applied": "No",
+      "requested_max_height": "1000 px",
+      "original_ocr_input_width": 475,
+      "original_ocr_input_height": 570,
+      "original_ocr_input_megapixels": 0.271,
+      "actual_paddleocr_image_width": 475,
+      "actual_paddleocr_image_height": 570,
+      "actual_paddleocr_megapixels": 0.271,
+      "downscale_ratio": 1.0,
+      "coordinate_scale_x": 1.0,
+      "coordinate_scale_y": 1.0,
+      "boxes_scaled_back_for_overlay": "No",
+      "downscale_error": ""
+    },
+    "ocr_seconds": 14.998,
+    "ocr_box_count_raw": 15,
+    "ocr_box_count_filtered": 15,
+    "removed_noise_count": 0,
+    "translation_seconds": 17.211,
+    "translated_rows": 15,
+    "overlay_seconds": 0.077,
+    "full_label_count": 4,
+    "marker_count": 9,
+    "total_seconds": 32.304,
+    "overlay_path": "/Users/doralam/Desktop/crochet_intelligence/crochet-pattern-translator/Regression_Test/Test_Output/Overlay/Pattern_004_Capybara_English_RC20_SelectArea_BodyText_Overlay.png",
+    "ocr_text_path": "/Users/doralam/Desktop/crochet_intelligence/crochet-pattern-translator/Regression_Test/Test_Output/OCR_Text/Pattern_004_Capybara_English_RC20_SelectArea_BodyText_OCR_Text.txt",
+    "diagnostic_path": "/Users/doralam/Desktop/crochet_intelligence/crochet-pattern-translator/Regression_Test/Test_Output/Diagnostics/Pattern_004_Capybara_English_RC20_SelectArea_BodyText_Summary.json",
+    "contains_untranslated_symbols": false,
+    "status": "PASS"
+  },
+  {
+    "pattern_id": "Pattern_005",
+    "display_name": "Flowerpot_Soil_Block",
+    "run": "Whole",
+    "source": "Simplified Chinese",
+    "output": "English — US",
+    "original_size": [
+      768,
+      1022
+    ],
+    "crop_box": "Whole Pattern",
+    "working_size": [
+      768,
+      1022
+    ],
+    "preprocess_seconds": 0.02,
+    "ocr_input_size": [
+      751,
+      1000
+    ],
+    "downscale": {
+      "downscale_enabled": "Yes",
+      "downscale_applied": "Yes",
+      "requested_max_height": "1000 px",
+      "original_ocr_input_width": 768,
+      "original_ocr_input_height": 1022,
+      "original_ocr_input_megapixels": 0.785,
+      "actual_paddleocr_image_width": 751,
+      "actual_paddleocr_image_height": 1000,
+      "actual_paddleocr_megapixels": 0.751,
+      "downscale_ratio": 0.9785,
+      "coordinate_scale_x": 1.022636,
+      "coordinate_scale_y": 1.022,
+      "boxes_scaled_back_for_overlay": "Yes",
+      "downscale_error": ""
+    },
+    "ocr_seconds": 72.124,
+    "ocr_box_count_raw": 39,
+    "ocr_box_count_filtered": 37,
+    "removed_noise_count": 2,
+    "translation_seconds": 33.453,
+    "translated_rows": 24,
+    "overlay_seconds": 0.061,
+    "full_label_count": 9,
+    "marker_count": 10,
+    "total_seconds": 105.683,
+    "overlay_path": "/Users/doralam/Desktop/crochet_intelligence/crochet-pattern-translator/Regression_Test/Test_Output/Overlay/Pattern_005_Flowerpot_Soil_Block_RC20_Whole_Overlay.png",
+    "ocr_text_path": "/Users/doralam/Desktop/crochet_intelligence/crochet-pattern-translator/Regression_Test/Test_Output/OCR_Text/Pattern_005_Flowerpot_Soil_Block_RC20_Whole_OCR_Text.txt",
+    "diagnostic_path": "/Users/doralam/Desktop/crochet_intelligence/crochet-pattern-translator/Regression_Test/Test_Output/Diagnostics/Pattern_005_Flowerpot_Soil_Block_RC20_Whole_Summary.json",
+    "contains_untranslated_symbols": true,
+    "status": "PASS"
+  },
+  {
+    "pattern_id": "Pattern_005",
+    "display_name": "Flowerpot_Soil_Block",
+    "run": "SelectArea_LeftColumn",
+    "source": "Simplified Chinese",
+    "output": "English — US",
+    "original_size": [
+      768,
+      1022
+    ],
+    "crop_box": [
+      35,
+      220,
+      392,
+      900
+    ],
+    "working_size": [
+      357,
+      680
+    ],
+    "preprocess_seconds": 0.0,
+    "ocr_input_size": [
+      357,
+      680
+    ],
+    "downscale": {
+      "downscale_enabled": "Yes",
+      "downscale_applied": "No",
+      "requested_max_height": "1000 px",
+      "original_ocr_input_width": 357,
+      "original_ocr_input_height": 680,
+      "original_ocr_input_megapixels": 0.243,
+      "actual_paddleocr_image_width": 357,
+      "actual_paddleocr_image_height": 680,
+      "actual_paddleocr_megapixels": 0.243,
+      "downscale_ratio": 1.0,
+      "coordinate_scale_x": 1.0,
+      "coordinate_scale_y": 1.0,
+      "boxes_scaled_back_for_overlay": "No",
+      "downscale_error": ""
+    },
+    "ocr_seconds": 7.539,
+    "ocr_box_count_raw": 19,
+    "ocr_box_count_filtered": 19,
+    "removed_noise_count": 0,
+    "translation_seconds": 23.925,
+    "translated_rows": 19,
+    "overlay_seconds": 0.034,
+    "full_label_count": 10,
+    "marker_count": 2,
+    "total_seconds": 31.519,
+    "overlay_path": "/Users/doralam/Desktop/crochet_intelligence/crochet-pattern-translator/Regression_Test/Test_Output/Overlay/Pattern_005_Flowerpot_Soil_Block_RC20_SelectArea_LeftColumn_Overlay.png",
+    "ocr_text_path": "/Users/doralam/Desktop/crochet_intelligence/crochet-pattern-translator/Regression_Test/Test_Output/OCR_Text/Pattern_005_Flowerpot_Soil_Block_RC20_SelectArea_LeftColumn_OCR_Text.txt",
+    "diagnostic_path": "/Users/doralam/Desktop/crochet_intelligence/crochet-pattern-translator/Regression_Test/Test_Output/Diagnostics/Pattern_005_Flowerpot_Soil_Block_RC20_SelectArea_LeftColumn_Summary.json",
+    "contains_untranslated_symbols": true,
+    "status": "PASS"
+  },
+  {
+    "pattern_id": "Pattern_005",
+    "display_name": "Flowerpot_Soil_Block",
+    "run": "SelectArea_RightColumn",
+    "source": "Simplified Chinese",
+    "output": "English — US",
+    "original_size": [
+      768,
+      1022
+    ],
+    "crop_box": [
+      380,
+      210,
+      735,
+      850
+    ],
+    "working_size": [
+      355,
+      640
+    ],
+    "preprocess_seconds": 0.0,
+    "ocr_input_size": [
+      355,
+      640
+    ],
+    "downscale": {
+      "downscale_enabled": "Yes",
+      "downscale_applied": "No",
+      "requested_max_height": "1000 px",
+      "original_ocr_input_width": 355,
+      "original_ocr_input_height": 640,
+      "original_ocr_input_megapixels": 0.227,
+      "actual_paddleocr_image_width": 355,
+      "actual_paddleocr_image_height": 640,
+      "actual_paddleocr_megapixels": 0.227,
+      "downscale_ratio": 1.0,
+      "coordinate_scale_x": 1.0,
+      "coordinate_scale_y": 1.0,
+      "boxes_scaled_back_for_overlay": "No",
+      "downscale_error": ""
+    },
+    "ocr_seconds": 5.96,
+    "ocr_box_count_raw": 16,
+    "ocr_box_count_filtered": 16,
+    "removed_noise_count": 0,
+    "translation_seconds": 19.548,
+    "translated_rows": 16,
+    "overlay_seconds": 0.029,
+    "full_label_count": 9,
+    "marker_count": 3,
+    "total_seconds": 25.555,
+    "overlay_path": "/Users/doralam/Desktop/crochet_intelligence/crochet-pattern-translator/Regression_Test/Test_Output/Overlay/Pattern_005_Flowerpot_Soil_Block_RC20_SelectArea_RightColumn_Overlay.png",
+    "ocr_text_path": "/Users/doralam/Desktop/crochet_intelligence/crochet-pattern-translator/Regression_Test/Test_Output/OCR_Text/Pattern_005_Flowerpot_Soil_Block_RC20_SelectArea_RightColumn_OCR_Text.txt",
+    "diagnostic_path": "/Users/doralam/Desktop/crochet_intelligence/crochet-pattern-translator/Regression_Test/Test_Output/Diagnostics/Pattern_005_Flowerpot_Soil_Block_RC20_SelectArea_RightColumn_Summary.json",
+    "contains_untranslated_symbols": true,
+    "status": "PASS"
+  },
+  {
+    "pattern_id": "Pattern_006",
+    "display_name": "Carnation_Chart_Page",
+    "run": "Whole",
+    "source": "English — US",
+    "output": "Traditional Chinese",
+    "original_size": [
+      724,
+      1024
+    ],
+    "crop_box": "Whole Pattern",
+    "working_size": [
+      724,
+      1024
+    ],
+    "preprocess_seconds": 0.02,
+    "ocr_input_size": [
+      707,
+      1000
+    ],
+    "downscale": {
+      "downscale_enabled": "Yes",
+      "downscale_applied": "Yes",
+      "requested_max_height": "1000 px",
+      "original_ocr_input_width": 724,
+      "original_ocr_input_height": 1024,
+      "original_ocr_input_megapixels": 0.741,
+      "actual_paddleocr_image_width": 707,
+      "actual_paddleocr_image_height": 1000,
+      "actual_paddleocr_megapixels": 0.707,
+      "downscale_ratio": 0.9766,
+      "coordinate_scale_x": 1.024045,
+      "coordinate_scale_y": 1.024,
+      "boxes_scaled_back_for_overlay": "Yes",
+      "downscale_error": ""
+    },
+    "ocr_seconds": 216.884,
+    "ocr_box_count_raw": 28,
+    "ocr_box_count_filtered": 27,
+    "removed_noise_count": 1,
+    "translation_seconds": 49.602,
+    "translated_rows": 27,
+    "overlay_seconds": 0.055,
+    "full_label_count": 6,
+    "marker_count": 7,
+    "total_seconds": 266.588,
+    "overlay_path": "/Users/doralam/Desktop/crochet_intelligence/crochet-pattern-translator/Regression_Test/Test_Output/Overlay/Pattern_006_Carnation_Chart_Page_RC20_Whole_Overlay.png",
+    "ocr_text_path": "/Users/doralam/Desktop/crochet_intelligence/crochet-pattern-translator/Regression_Test/Test_Output/OCR_Text/Pattern_006_Carnation_Chart_Page_RC20_Whole_OCR_Text.txt",
+    "diagnostic_path": "/Users/doralam/Desktop/crochet_intelligence/crochet-pattern-translator/Regression_Test/Test_Output/Diagnostics/Pattern_006_Carnation_Chart_Page_RC20_Whole_Summary.json",
+    "contains_untranslated_symbols": false,
+    "status": "PASS"
+  },
+  {
+    "pattern_id": "Pattern_006",
+    "display_name": "Carnation_Chart_Page",
+    "run": "SelectArea_Instructions",
+    "source": "English — US",
+    "output": "Traditional Chinese",
+    "original_size": [
+      724,
+      1024
+    ],
+    "crop_box": [
+      35,
+      335,
+      640,
+      585
+    ],
+    "working_size": [
+      605,
+      250
+    ],
+    "preprocess_seconds": 0.0,
+    "ocr_input_size": [
+      605,
+      250
+    ],
+    "downscale": {
+      "downscale_enabled": "Yes",
+      "downscale_applied": "No",
+      "requested_max_height": "1000 px",
+      "original_ocr_input_width": 605,
+      "original_ocr_input_height": 250,
+      "original_ocr_input_megapixels": 0.151,
+      "actual_paddleocr_image_width": 605,
+      "actual_paddleocr_image_height": 250,
+      "actual_paddleocr_megapixels": 0.151,
+      "downscale_ratio": 1.0,
+      "coordinate_scale_x": 1.0,
+      "coordinate_scale_y": 1.0,
+      "boxes_scaled_back_for_overlay": "No",
+      "downscale_error": ""
+    },
+    "ocr_seconds": 9.119,
+    "ocr_box_count_raw": 10,
+    "ocr_box_count_filtered": 10,
+    "removed_noise_count": 0,
+    "translation_seconds": 33.11,
+    "translated_rows": 10,
+    "overlay_seconds": 0.067,
+    "full_label_count": 0,
+    "marker_count": 8,
+    "total_seconds": 42.32,
+    "overlay_path": "/Users/doralam/Desktop/crochet_intelligence/crochet-pattern-translator/Regression_Test/Test_Output/Overlay/Pattern_006_Carnation_Chart_Page_RC20_SelectArea_Instructions_Overlay.png",
+    "ocr_text_path": "/Users/doralam/Desktop/crochet_intelligence/crochet-pattern-translator/Regression_Test/Test_Output/OCR_Text/Pattern_006_Carnation_Chart_Page_RC20_SelectArea_Instructions_OCR_Text.txt",
+    "diagnostic_path": "/Users/doralam/Desktop/crochet_intelligence/crochet-pattern-translator/Regression_Test/Test_Output/Diagnostics/Pattern_006_Carnation_Chart_Page_RC20_SelectArea_Instructions_Summary.json",
+    "contains_untranslated_symbols": false,
+    "status": "PASS"
+  }
+]

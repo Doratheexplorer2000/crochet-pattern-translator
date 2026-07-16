@@ -1,0 +1,15 @@
+--- Counted_Token_Output_RC22e.txt
++++ Counted_Token_Output_RC22e1.txt
+@@ -5,9 +5,9 @@
+ 2FO -> 2 fo
+ 2BLO -> 2 blo
+ 倒2回鈎2SL -> Start in the 2nd chain from hook 2 sl st
+-2.5mm hook -> 2.5 MM hook
+-3mm -> 3 MM
+-4mm eyes -> 4 MM eyes
++2.5mm hook -> 2.5mm hook
++3mm -> 3mm
++4mm eyes -> 4mm eyes
+ 5 mm hook -> 5 mm hook
+ (X,V) -> (sc, inc)
+ 3(X,V) -> (sc, inc) x3

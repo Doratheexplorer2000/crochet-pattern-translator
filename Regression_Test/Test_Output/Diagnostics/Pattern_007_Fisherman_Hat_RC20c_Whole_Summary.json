@@ -1,0 +1,113 @@
+{
+  "record": {
+    "pattern_id": "Pattern_007",
+    "display_name": "Fisherman_Hat",
+    "run": "Whole",
+    "source": "Simplified Chinese",
+    "output": "English — US",
+    "original_size": [
+      780,
+      1008
+    ],
+    "crop_box": "Whole Pattern",
+    "cropper_display_proxy": {
+      "display_proxy_applied": true,
+      "original_width": 780,
+      "original_height": 1008,
+      "display_width": 380,
+      "display_height": 491,
+      "scale_x": 2.052632,
+      "scale_y": 2.052953,
+      "creation_seconds": 0.008879
+    },
+    "sample_default_crop_box": [
+      195,
+      252,
+      585,
+      756
+    ],
+    "sample_display_crop_box": [
+      95,
+      123,
+      285,
+      368
+    ],
+    "sample_roundtrip_box": [
+      195,
+      253,
+      585,
+      755
+    ],
+    "working_size": [
+      780,
+      1008
+    ],
+    "ocr_input_size": [
+      774,
+      1000
+    ],
+    "downscale": {
+      "downscale_enabled": "Yes",
+      "downscale_applied": "Yes",
+      "requested_max_height": "1000 px",
+      "original_ocr_input_width": 780,
+      "original_ocr_input_height": 1008,
+      "original_ocr_input_megapixels": 0.786,
+      "actual_paddleocr_image_width": 774,
+      "actual_paddleocr_image_height": 1000,
+      "actual_paddleocr_megapixels": 0.774,
+      "downscale_ratio": 0.9921,
+      "coordinate_scale_x": 1.007752,
+      "coordinate_scale_y": 1.008,
+      "boxes_scaled_back_for_overlay": "Yes",
+      "downscale_error": ""
+    },
+    "ocr_seconds": 33.832,
+    "ocr_box_count_raw": 35,
+    "ocr_box_count_filtered": 33,
+    "removed_noise_count": 2,
+    "translation_seconds": 12.878,
+    "translated_rows": 33,
+    "overlay_seconds": 0.038,
+    "full_label_count": 25,
+    "marker_count": 7,
+    "total_seconds": 46.775,
+    "overlay_path": "/Users/doralam/Desktop/crochet_intelligence/crochet-pattern-translator/Regression_Test/Test_Output/Overlay/Pattern_007_Fisherman_Hat_RC20c_Whole_Overlay.png",
+    "ocr_text_path": "/Users/doralam/Desktop/crochet_intelligence/crochet-pattern-translator/Regression_Test/Test_Output/OCR_Text/Pattern_007_Fisherman_Hat_RC20c_Whole_OCR_Text.txt"
+  },
+  "ocr_trace": [
+    "12:33:15 run_primary_ocr start",
+    "12:33:15 run_paddle_ocr_single start",
+    "12:33:20 save temp PNG",
+    "12:33:20 temp PNG saved",
+    "12:33:20 PaddleOCR call start",
+    "12:33:49 PaddleOCR call end",
+    "12:33:49 OCR results returned"
+  ],
+  "diagnostics": {
+    "run_primary_ocr_calls": 1,
+    "run_primary_ocr_input": {
+      "width": 774,
+      "height": 1000,
+      "pixels": 774000
+    },
+    "run_paddle_ocr_single_calls": 1,
+    "run_paddle_ocr_single_input": {
+      "width": 774,
+      "height": 1000,
+      "pixels": 774000
+    },
+    "ocr_language_model": "ch",
+    "ocr_backend": "PaddleOCR",
+    "ocr_reader_class": "PaddleOCR",
+    "detector_model": "Not exposed by current PaddleOCR object",
+    "recognizer_model": "Not exposed by current PaddleOCR object",
+    "paddle_actual_loaded_image_size": "Not exposed by current PaddleOCR API",
+    "temp_png_size_bytes": 832828,
+    "temp_png_image": {
+      "width": 774,
+      "height": 1000,
+      "pixels": 774000
+    }
+  }
+}

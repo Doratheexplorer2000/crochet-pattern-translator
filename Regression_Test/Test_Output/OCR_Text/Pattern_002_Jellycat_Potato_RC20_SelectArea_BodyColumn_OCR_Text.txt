@@ -1,0 +1,60 @@
+RAW OCR
+=======
+身体：
+R1:起11ch，倒2回钩v,8x，w,9x
+R2:2v,8x,3v,8x，V
+R3:2(x，v),8x,3(x，v),9x，V
+R4:2(2x,v）,8x,3(2x，v),10x，v
+R5:2(3x,v),8x,3(3x，v),11x，v
+R6:2（2x,v，2x),8x,3（2x,v2x),12x，V
+R7:2（5x，v),8x,3（5x,v)，13x,V
+R8-14:58x
+R15:x，A,28x,V,26x
+@子
+R16:x,A,55x
+R17:A,55x
+R18-24:56x
+R25:28x,A,26x
+R26:55x
+R27:28x,A,25x
+R28:27x,A,25x
+R29:22x，A,7x，A,20x
+R30:25x,A,24x
+R31:21x，A,6x,A,19x
+R32:20x,A,5x,A,19x
+R33:19x,A,6x，A,17x
+R34:A，14x，A,3x,A,4x,A,15x
+R35:8(3x,A)
+R36:8(x,A,x)
+R37:8(x,A)
+R38:8A收口
+
+TRANSLATED LINES
+================
+身体: -> 身体:
+R1:起11ch,倒2回钩v,8x,w,9x -> R1: 起11 ch, 倒2回钩v, 8 sc, 3 sc in same stitch, 9 sc
+R2:2v,8x,3v,8x,V -> R2: inc x2, 8 sc, inc x3, 8 sc, inc
+R3:2(x,v),8x,3(x,v),9x,V -> R3: (sc, inc) x2, 8 sc, (sc, inc) x3, 9 sc, inc
+R4:2(2x,v),8x,3(2x,v),10x,v -> R4: (2 sc, inc) x2, 8 sc, (2 sc, inc) x3, 10 sc, inc
+R5:2(3x,v),8x,3(3x,v),11x,v -> R5: (3 sc, inc) x2, 8 sc, (3 sc, inc) x3, 11 sc, inc
+R6:2(2x,v,2x),8x,3(2x,v2x),12x,V -> R6: (2 sc, inc, 2 sc) x2, 8 sc, (2 sc, v2x) x3, 12 sc, inc
+R7:2(5x,v),8x,3(5x,v),13x,V -> R7: (5 sc, inc) x2, 8 sc, (5 sc, inc) x3, 13 sc, inc
+R8-14:58x -> R8-14: 58 sc
+R15:x,A,28x,V,26x -> R15: sc, dec, 28 sc, inc, 26 sc
+R16:x,A,55x -> R16: sc, dec, 55 sc
+R17:A,55x -> R17: dec, 55 sc
+R18-24:56x -> R18-24: 56 sc
+R25:28x,A,26x -> R25: 28 sc, dec, 26 sc
+R26:55x -> R26: 55 sc
+R27:28x,A,25x -> R27: 28 sc, dec, 25 sc
+R28:27x,A,25x -> R28: 27 sc, dec, 25 sc
+R29:22x,A,7x,A,20x -> R29: 22 sc, dec, 7 sc, dec, 20 sc
+R30:25x,A,24x -> R30: 25 sc, dec, 24 sc
+R31:21x,A,6x,A,19x -> R31: 21 sc, dec, 6 sc, dec, 19 sc
+R32:20x,A,5x,A,19x -> R32: 20 sc, dec, 5 sc, dec, 19 sc
+R33:19x,A,6x,A,17x -> R33: 19 sc, dec, 6 sc, dec, 17 sc
+R34:A,14x,A,3x,A,4x,A,15x -> R34: dec, 14 sc, dec, 3 sc, dec, 4 sc, dec, 15 sc
+R35:8(3x,A) -> R35: (3 sc, dec) x8
+R36:8(x,A,x) -> R36: (sc, dec, sc) x8
+R37:8(x,A) -> R37: (sc, dec) x8
+R38:8A收口 -> R38: 8A收口

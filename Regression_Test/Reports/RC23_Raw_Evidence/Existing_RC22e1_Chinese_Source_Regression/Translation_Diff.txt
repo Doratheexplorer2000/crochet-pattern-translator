@@ -1,0 +1,11 @@
+--- Translation_Before_RC22e1.txt
++++ Translation_After_RC23.txt
+@@ -4,7 +4,7 @@
+ 2HDC -> 2 hdc
+ 2BLO -> 2 blo
+ 2FO -> 2 fo
+-倒2回鈎2SL -> Start in the 2nd chain from hook 2 sl st
++倒2回鈎2SL -> Start in the 2nd chain from hook, 2 sl st
+ 2.5mm hook -> 2.5mm hook
+ 3mm -> 3mm
+ 4mm eyes -> 4mm eyes

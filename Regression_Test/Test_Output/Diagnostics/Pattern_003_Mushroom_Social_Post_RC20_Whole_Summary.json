@@ -1,0 +1,86 @@
+{
+  "record": {
+    "pattern_id": "Pattern_003",
+    "display_name": "Mushroom_Social_Post",
+    "run": "Whole",
+    "source": "Traditional Chinese",
+    "output": "English — US",
+    "original_size": [
+      602,
+      1306
+    ],
+    "crop_box": "Whole Pattern",
+    "working_size": [
+      602,
+      1306
+    ],
+    "preprocess_seconds": 0.019,
+    "ocr_input_size": [
+      461,
+      1000
+    ],
+    "downscale": {
+      "downscale_enabled": "Yes",
+      "downscale_applied": "Yes",
+      "requested_max_height": "1000 px",
+      "original_ocr_input_width": 602,
+      "original_ocr_input_height": 1306,
+      "original_ocr_input_megapixels": 0.786,
+      "actual_paddleocr_image_width": 461,
+      "actual_paddleocr_image_height": 1000,
+      "actual_paddleocr_megapixels": 0.461,
+      "downscale_ratio": 0.7657,
+      "coordinate_scale_x": 1.305857,
+      "coordinate_scale_y": 1.306,
+      "boxes_scaled_back_for_overlay": "Yes",
+      "downscale_error": ""
+    },
+    "ocr_seconds": 45.619,
+    "ocr_box_count_raw": 25,
+    "ocr_box_count_filtered": 21,
+    "removed_noise_count": 4,
+    "translation_seconds": 19.792,
+    "translated_rows": 21,
+    "overlay_seconds": 0.048,
+    "full_label_count": 17,
+    "marker_count": 0,
+    "total_seconds": 65.501,
+    "overlay_path": "/Users/doralam/Desktop/crochet_intelligence/crochet-pattern-translator/Regression_Test/Test_Output/Overlay/Pattern_003_Mushroom_Social_Post_RC20_Whole_Overlay.png",
+    "ocr_text_path": "/Users/doralam/Desktop/crochet_intelligence/crochet-pattern-translator/Regression_Test/Test_Output/OCR_Text/Pattern_003_Mushroom_Social_Post_RC20_Whole_OCR_Text.txt"
+  },
+  "ocr_trace": [
+    "14:01:18 run_primary_ocr start",
+    "14:01:18 run_paddle_ocr_single start",
+    "14:01:18 save temp PNG",
+    "14:01:18 temp PNG saved",
+    "14:01:18 PaddleOCR call start",
+    "14:02:04 PaddleOCR call end",
+    "14:02:04 OCR results returned"
+  ],
+  "diagnostics": {
+    "run_primary_ocr_calls": 1,
+    "run_primary_ocr_input": {
+      "width": 461,
+      "height": 1000,
+      "pixels": 461000
+    },
+    "run_paddle_ocr_single_calls": 1,
+    "run_paddle_ocr_single_input": {
+      "width": 461,
+      "height": 1000,
+      "pixels": 461000
+    },
+    "ocr_language_model": "ch",
+    "ocr_backend": "PaddleOCR",
+    "ocr_reader_class": "PaddleOCR",
+    "detector_model": "Not exposed by current PaddleOCR object",
+    "recognizer_model": "Not exposed by current PaddleOCR object",
+    "paddle_actual_loaded_image_size": "Not exposed by current PaddleOCR API",
+    "temp_png_size_bytes": 413350,
+    "temp_png_image": {
+      "width": 461,
+      "height": 1000,
+      "pixels": 461000
+    }
+  }
+}

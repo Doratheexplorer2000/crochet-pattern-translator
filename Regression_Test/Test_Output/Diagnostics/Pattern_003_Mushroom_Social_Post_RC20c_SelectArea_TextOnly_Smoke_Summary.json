@@ -1,0 +1,118 @@
+{
+  "record": {
+    "pattern_id": "Pattern_003",
+    "display_name": "Mushroom_Social_Post",
+    "run": "SelectArea_TextOnly_Smoke",
+    "source": "Traditional Chinese",
+    "output": "English — US",
+    "original_size": [
+      602,
+      1306
+    ],
+    "crop_box": [
+      0,
+      150,
+      600,
+      730
+    ],
+    "cropper_display_proxy": {
+      "display_proxy_applied": true,
+      "original_width": 602,
+      "original_height": 1306,
+      "display_width": 332,
+      "display_height": 720,
+      "scale_x": 1.813253,
+      "scale_y": 1.813889,
+      "creation_seconds": 0.009725
+    },
+    "sample_default_crop_box": [
+      150,
+      326,
+      451,
+      979
+    ],
+    "sample_display_crop_box": [
+      83,
+      180,
+      249,
+      540
+    ],
+    "sample_roundtrip_box": [
+      150,
+      326,
+      452,
+      980
+    ],
+    "working_size": [
+      600,
+      580
+    ],
+    "ocr_input_size": [
+      600,
+      580
+    ],
+    "downscale": {
+      "downscale_enabled": "Yes",
+      "downscale_applied": "No",
+      "requested_max_height": "1000 px",
+      "original_ocr_input_width": 600,
+      "original_ocr_input_height": 580,
+      "original_ocr_input_megapixels": 0.348,
+      "actual_paddleocr_image_width": 600,
+      "actual_paddleocr_image_height": 580,
+      "actual_paddleocr_megapixels": 0.348,
+      "downscale_ratio": 1.0,
+      "coordinate_scale_x": 1.0,
+      "coordinate_scale_y": 1.0,
+      "boxes_scaled_back_for_overlay": "No",
+      "downscale_error": ""
+    },
+    "ocr_seconds": 6.265,
+    "ocr_box_count_raw": 18,
+    "ocr_box_count_filtered": 18,
+    "removed_noise_count": 0,
+    "translation_seconds": 10.146,
+    "translated_rows": 18,
+    "overlay_seconds": 0.017,
+    "full_label_count": 15,
+    "marker_count": 0,
+    "total_seconds": 16.433,
+    "overlay_path": "/Users/doralam/Desktop/crochet_intelligence/crochet-pattern-translator/Regression_Test/Test_Output/Overlay/Pattern_003_Mushroom_Social_Post_RC20c_SelectArea_TextOnly_Smoke_Overlay.png",
+    "ocr_text_path": "/Users/doralam/Desktop/crochet_intelligence/crochet-pattern-translator/Regression_Test/Test_Output/OCR_Text/Pattern_003_Mushroom_Social_Post_RC20c_SelectArea_TextOnly_Smoke_OCR_Text.txt"
+  },
+  "ocr_trace": [
+    "12:34:53 run_primary_ocr start",
+    "12:34:53 run_paddle_ocr_single start",
+    "12:34:53 save temp PNG",
+    "12:34:53 temp PNG saved",
+    "12:34:53 PaddleOCR call start",
+    "12:34:59 PaddleOCR call end",
+    "12:34:59 OCR results returned"
+  ],
+  "diagnostics": {
+    "run_primary_ocr_calls": 1,
+    "run_primary_ocr_input": {
+      "width": 600,
+      "height": 580,
+      "pixels": 348000
+    },
+    "run_paddle_ocr_single_calls": 1,
+    "run_paddle_ocr_single_input": {
+      "width": 600,
+      "height": 580,
+      "pixels": 348000
+    },
+    "ocr_language_model": "ch",
+    "ocr_backend": "PaddleOCR",
+    "ocr_reader_class": "PaddleOCR",
+    "detector_model": "Not exposed by current PaddleOCR object",
+    "recognizer_model": "Not exposed by current PaddleOCR object",
+    "paddle_actual_loaded_image_size": "Not exposed by current PaddleOCR API",
+    "temp_png_size_bytes": 107200,
+    "temp_png_image": {
+      "width": 600,
+      "height": 580,
+      "pixels": 348000
+    }
+  }
+}

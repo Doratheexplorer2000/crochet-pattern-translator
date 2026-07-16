@@ -1,0 +1,118 @@
+{
+  "record": {
+    "pattern_id": "Pattern_005",
+    "display_name": "Flowerpot_Soil_Block",
+    "run": "SelectArea_LeftColumn_Smoke",
+    "source": "Simplified Chinese",
+    "output": "English — US",
+    "original_size": [
+      768,
+      1022
+    ],
+    "crop_box": [
+      35,
+      220,
+      392,
+      900
+    ],
+    "cropper_display_proxy": {
+      "display_proxy_applied": true,
+      "original_width": 768,
+      "original_height": 1022,
+      "display_width": 380,
+      "display_height": 506,
+      "scale_x": 2.021053,
+      "scale_y": 2.019763,
+      "creation_seconds": 0.008919
+    },
+    "sample_default_crop_box": [
+      192,
+      255,
+      576,
+      766
+    ],
+    "sample_display_crop_box": [
+      95,
+      126,
+      285,
+      379
+    ],
+    "sample_roundtrip_box": [
+      192,
+      254,
+      576,
+      765
+    ],
+    "working_size": [
+      357,
+      680
+    ],
+    "ocr_input_size": [
+      357,
+      680
+    ],
+    "downscale": {
+      "downscale_enabled": "Yes",
+      "downscale_applied": "No",
+      "requested_max_height": "1000 px",
+      "original_ocr_input_width": 357,
+      "original_ocr_input_height": 680,
+      "original_ocr_input_megapixels": 0.243,
+      "actual_paddleocr_image_width": 357,
+      "actual_paddleocr_image_height": 680,
+      "actual_paddleocr_megapixels": 0.243,
+      "downscale_ratio": 1.0,
+      "coordinate_scale_x": 1.0,
+      "coordinate_scale_y": 1.0,
+      "boxes_scaled_back_for_overlay": "No",
+      "downscale_error": ""
+    },
+    "ocr_seconds": 4.044,
+    "ocr_box_count_raw": 19,
+    "ocr_box_count_filtered": 19,
+    "removed_noise_count": 0,
+    "translation_seconds": 14.692,
+    "translated_rows": 19,
+    "overlay_seconds": 0.012,
+    "full_label_count": 10,
+    "marker_count": 2,
+    "total_seconds": 18.752,
+    "overlay_path": "/Users/doralam/Desktop/crochet_intelligence/crochet-pattern-translator/Regression_Test/Test_Output/Overlay/Pattern_005_Flowerpot_Soil_Block_RC20c_SelectArea_LeftColumn_Smoke_Overlay.png",
+    "ocr_text_path": "/Users/doralam/Desktop/crochet_intelligence/crochet-pattern-translator/Regression_Test/Test_Output/OCR_Text/Pattern_005_Flowerpot_Soil_Block_RC20c_SelectArea_LeftColumn_Smoke_OCR_Text.txt"
+  },
+  "ocr_trace": [
+    "12:35:09 run_primary_ocr start",
+    "12:35:09 run_paddle_ocr_single start",
+    "12:35:09 save temp PNG",
+    "12:35:09 temp PNG saved",
+    "12:35:09 PaddleOCR call start",
+    "12:35:14 PaddleOCR call end",
+    "12:35:14 OCR results returned"
+  ],
+  "diagnostics": {
+    "run_primary_ocr_calls": 1,
+    "run_primary_ocr_input": {
+      "width": 357,
+      "height": 680,
+      "pixels": 242760
+    },
+    "run_paddle_ocr_single_calls": 1,
+    "run_paddle_ocr_single_input": {
+      "width": 357,
+      "height": 680,
+      "pixels": 242760
+    },
+    "ocr_language_model": "ch",
+    "ocr_backend": "PaddleOCR",
+    "ocr_reader_class": "PaddleOCR",
+    "detector_model": "Not exposed by current PaddleOCR object",
+    "recognizer_model": "Not exposed by current PaddleOCR object",
+    "paddle_actual_loaded_image_size": "Not exposed by current PaddleOCR API",
+    "temp_png_size_bytes": 378401,
+    "temp_png_image": {
+      "width": 357,
+      "height": 680,
+      "pixels": 242760
+    }
+  }
+}

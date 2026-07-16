@@ -1,0 +1,35 @@
+RAW OCR
+=======
+Body (brown yarn)
+R1: Start with magic circle, 6 sc, slst [6]
+R2: 6 sc inc ,slst [12]
+R3: (1 sc, sc inc) x 6, slst [18]
+R4: (1 sc, 1 sc, sc inc) x 6, slst [24]
+R5: 24 sc, slst [24]
+R6: (1 sc, 1 sc, 1 sc, sc inc) x6, slst [30]
+R7: 30 sc, slst [30]
+R8: (1 sc, 1 sc, 1 sc, 1 sc, sc inc) x6, slst [36]
+R9-13: 36 sc, slst [36]
+R14: (1 sc, 1 sc,1 sc, sc dec) x7, 1sc, slst [29]
+R15: (1 sc, 1 sc, sc dec) x7, 1 sc, slst [22]
+Stuffing
+R16: (1 sc, sc dec) x7, 1 sc, slst [15]
+R17: sc dec x7, 1 sc, slst [8]
+
+TRANSLATED LINES
+================
+Body (brown yarn) -> Body (brown yarn)
+R1: Start with magic circle, 6 sc, slst [6] -> R1: Start with 環狀起針，短針6針，引拔針 (6針)
+R2: 6 sc inc,slst [12] -> R2: 短針6針 加針，引拔針 (12針)
+R3: (1 sc, sc inc) x 6, slst [18] -> R3: （短針1針，短針加針）重複6次，引拔針 (18針)
+R4: (1 sc, 1 sc, sc inc) x 6, slst [24] -> R4: （短針1針，短針1針，短針加針）重複6次，引拔針 (24針)
+R5: 24 sc, slst [24] -> R5: 短針24針，引拔針 (24針)
+R6: (1 sc, 1 sc, 1 sc, sc inc) x6, slst [30] -> R6: （短針1針，短針1針，短針1針，短針加針）重複6次，引拔針 (30針)
+R7: 30 sc, slst [30] -> R7: 短針30針，引拔針 (30針)
+R8: (1 sc, 1 sc, 1 sc, 1 sc, sc inc) x6, slst [36] -> R8: （短針1針，短針1針，短針1針，短針1針，短針加針）重複6次，引拔針 (36針)
+R9-13: 36 sc, slst [36] -> R9-13: 短針36針，引拔針 (36針)
+R14: (1 sc, 1 sc,1 sc, sc dec) x7, 1sc, slst [29] -> R14: （短針1針，短針1針，短針1針，短針減針）重複7次，短針1針，引拔針 (29針)
+R15: (1 sc, 1 sc, sc dec) x7, 1 sc, slst [22] -> R15: （短針1針，短針1針，短針減針）重複7次，短針1針，引拔針 (22針)
+Stuffing -> Stuffing
+R16: (1 sc, sc dec) x7, 1 sc, slst [15] -> R16: （短針1針，短針減針）重複7次，短針1針，引拔針 (15針)
+R17: sc dec x7, 1 sc, slst [8] -> R17: 短針減針 x7，短針1針，引拔針 (8針)

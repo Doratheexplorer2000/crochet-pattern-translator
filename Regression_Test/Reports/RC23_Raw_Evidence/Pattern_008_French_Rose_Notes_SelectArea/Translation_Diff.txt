@@ -1,0 +1,10 @@
+--- Translation_Before_RC22e1.txt
++++ Translation_After_RC23.txt
+@@ -5,6 +5,6 @@
+ R2:6v -> R2: inc x6
+ R3:6(×.V) -> R3: (sc, inc) x6
+ R4:18X -> R4: 18 sc
+-R5:立9CH,倒2回钩2SL，X,2T，2FE，空2针引 -> R5: 立9 ch, Start in the 2nd chain from hook 2 sl st, sc, 2 hdc, 2 FPtr, 空2 sts引
++R5:立9CH,倒2回钩2SL，X,2T，2FE，空2针引 -> R5: Chain 9, Start in the 2nd chain from hook, 2 sl st, sc, 2 hdc, 2 FPtr, 空2 sts引
+ 拔，重复6次 -> 拔, 重复6次
+ 叶子： -> 叶子:

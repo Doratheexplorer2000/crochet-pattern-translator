@@ -1,0 +1,28 @@
+{
+  "app_version": "Pattern OCR Translator (Beta RC23)",
+  "source_image": "/Users/doralam/Desktop/crochet_intelligence/crochet-pattern-translator/Test_Pattern_Library/Real_User/Pattern_009_Sea_Salt_Phone_Bag/Pattern_009_Sea_Salt_Phone_Bag_Source.jpeg",
+  "output_dir": "/Users/doralam/Desktop/crochet_intelligence/crochet-pattern-translator/Regression_Test/Reports/RC23_Sea_Salt_Phone_Bag_Real_Run/Sea_Salt_Phone_Bag",
+  "image_size": [
+    683,
+    1148
+  ],
+  "ocr_image_size": [
+    595,
+    1000
+  ],
+  "ocr_lines": 19,
+  "line_translations": 19,
+  "overlay_path": "/Users/doralam/Desktop/crochet_intelligence/crochet-pattern-translator/Regression_Test/Reports/RC23_Sea_Salt_Phone_Bag_Real_Run/Sea_Salt_Phone_Bag/Overlay_RC23.png",
+  "timings": {
+    "Image loading": 0,
+    "Image preprocessing": 0.012705540999999987,
+    "OCR": 61.82084925,
+    "OCR cleanup / normalization": 0,
+    "Translation": 10.190619416000004,
+    "Overlay generation": 0.043494124999995165,
+    "PNG encoding": 0.023844291999992606,
+    "Translation TXT generation": 0,
+    "Diagnostic Report generation": 0.007557666000010954,
+    "TOTAL runtime": 72.13227316700001
+  }
+}

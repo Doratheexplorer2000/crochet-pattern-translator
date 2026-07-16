@@ -1,0 +1,30 @@
+法式玫瑰 -> 法式玫瑰
+花瓣： -> 花瓣:
+小片x2 -> 小片x2
+R1:10F -> R1: 10 dc
+R2:10TV -> R2: hdc inc x10
+R3:6X,8TV,6X -> R3: 6 sc, hdc inc x8, 6 sc
+中片x3 -> 中片x3
+小红书：小红帽手作 -> 小红书:小红帽手作
+R1:10F -> R1: 10 dc
+R2:10TV -> R2: hdc inc x10
+R3:10（X，V） -> R3: (sc, inc) x10
+R4:2X，A,4X,14（X,2CH),4X，A,2X -> R4: 2 sc, dec, 4 sc, (sc, 2 ch) x14, 4 sc, dec, 2 sc
+大片x5 -> 大片x5
+R1:10F -> R1: 10 dc
+R2:10TV -> R2: hdc inc x10
+R3:10(T,TV) -> R3: (hdc, hdc inc) x10
+R4:2X.A.4X.6(X.2CH),X(X.3CH.X).6(X -> R4: 2 sc, dec, 4 sc, (sc, 2 ch) x6, X(X.3 ch.X), 6(X
+2CH),4X, A，2A -> 2 ch), 4 sc, dec, dec x2
+花托 -> 花托
+R1：环起6x -> R1: MR, 6 sc
+R2:6v -> R2: inc x6
+R3:6（x.v) -> R3: (sc, inc) x6
+R4:18X -> R4: 18 sc
+R5：立9CH，倒2回钩2SL，X.2T2FE.空2针引 -> R5: Chain 9, Start in the 2nd chain from hook, 2 sl st, sc, 2T2FE, 空2 sts引
+拔，重复6次 -> 拔, 重复6次
+叶子： -> 叶子:
+R1：立12CH，加入铁丝，倒二回钩X，F，E，EV -> R1: Chain 12, 加入铁丝, Start in the 2nd chain from hook, sc, dc, tr, tr inc
+4E,F，T,W，T,F,4E,EV,E,F,X -> 4 tr, dc, hdc, 3 sc in same stitch, hdc, dc, 4 tr, tr inc, tr, dc, sc
+R2:12（X,CH)（X，CH，X),12（CH，X） -> R2: (sc, CH)(X,CH,X), 12(CH,X) x12
+来自华为备忘录 -> 来自华为备忘录

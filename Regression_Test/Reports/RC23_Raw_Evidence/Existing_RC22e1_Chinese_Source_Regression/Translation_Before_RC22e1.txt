@@ -1,0 +1,15 @@
+2SL -> 2 sl st
+3SL -> 3 sl st
+2SC -> 2 sc
+2HDC -> 2 hdc
+2BLO -> 2 blo
+2FO -> 2 fo
+倒2回鈎2SL -> Start in the 2nd chain from hook 2 sl st
+2.5mm hook -> 2.5mm hook
+3mm -> 3mm
+4mm eyes -> 4mm eyes
+5 mm hook -> 5 mm hook
+(X,V) -> (sc, inc)
+(3X,V) -> (3 sc, inc)
+3(X,V) -> (sc, inc) x3
+X,V,18X,3(X,V),18X,2 -> sc, inc, 18 sc, (sc, inc) x3, 18 sc, 2

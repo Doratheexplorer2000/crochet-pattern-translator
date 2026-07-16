@@ -1,0 +1,467 @@
+================================================
+Diagnostic Report
+================================================
+
+Note: This report is for diagnosing OCR / dictionary / overlay issues.
+
+=== Application Information ===
+App version: Pattern OCR Translator (Beta RC23)
+Timestamp: 2026-07-15 21:08:30
+Interface language: English
+Pattern language / terminology: Simplified Chinese
+Translate result to: English — US
+Platform: local regression runner
+
+=== Image Information ===
+Area selected: Whole Pattern
+Crop box: None
+OCR Resize Test: 1000 px
+Image quality status: Not captured
+Resolution: 683 x 1148 px
+Sharpness: 
+Contrast: 
+
+=== OCR Image Pipeline ===
+Original uploaded image: 683 x 1148 (784084 px)
+Selected image: 683 x 1148 (784084 px)
+Working image: 683 x 1148 (784084 px)
+Working image before downscale: Not captured
+Image actually passed to PaddleOCR: Not captured
+Image passed into run_primary_ocr(): 595 x 1000 (595000 px)
+Image passed into run_paddle_ocr_single(): 595 x 1000 (595000 px)
+Temp PNG image: 595 x 1000 (595000 px)
+Temp PNG size: 269399 bytes (0.26 MB)
+App-level resize before PaddleOCR: Not captured
+Size after downscale: Not captured
+Boxes scaled back for overlay: Not captured
+Original size before app preprocessing: Not captured
+Size after app preprocessing: Not captured
+Whole Pattern sends full image: Not captured
+Select Area sends cropped image: Not captured
+PaddleOCR actual loaded image size: Not exposed by current PaddleOCR API
+
+=== OCR Resize / Downscale Details ===
+Downscale enabled: Yes
+Downscale applied: Yes
+Requested max height: 1000 px
+Original OCR input width: 683
+Original OCR input height: 1148
+Original OCR input megapixels: 0.784
+Actual PaddleOCR image width: 595
+Actual PaddleOCR image height: 1000
+Actual PaddleOCR megapixels: 0.595
+Downscale ratio: 0.8711
+Coordinate scale_x: 1.147899
+Coordinate scale_y: 1.148
+Boxes scaled back for overlay: Yes
+PaddleOCR inference time: N/A
+OCR box count: 19
+Total time: N/A
+Downscale error: N/A
+
+=== OCR Information ===
+OCR engine: PaddleOCR
+
+=== OCR Configuration / Model ===
+OCR backend: PaddleOCR
+Language model: ch
+OCR reader class: PaddleOCR
+Detector model: Not exposed by current PaddleOCR object
+Recognizer model: Not exposed by current PaddleOCR object
+
+=== OCR Invocation Counts ===
+run_primary_ocr calls: 1
+run_paddle_ocr_single calls: 1
+
+=== OCR EXECUTION ===
+OCR started at: 2026-07-15 21:08:30
+OCR finished at: 2026-07-15 21:08:30
+OCR duration: Not captured
+OCR running state: False
+OCR run request ignored because OCR already running: Not captured
+
+=== OCR WORKLOAD ===
+Image width: Not captured
+Image height: Not captured
+Pixel count: Not captured
+Megapixels: Not captured
+OCR boxes detected: 19
+OCR text lines: 19
+Overlay items: 19
+Boxes per MP: Not captured
+PaddleOCR detect timing: Not captured
+PaddleOCR recognize timing: Not captured
+
+=== Whole Pattern Performance Diagnostics ===
+OCR input image width: 595
+OCR input image height: 1000
+OCR input megapixels: 0.595
+OCR mode: Whole Pattern
+OCR box count: 19
+Image preprocess / preparation time: N/A
+Image load time: N/A
+Crop extraction time: N/A
+PaddleOCR inference time: N/A
+OCR cleanup / postprocess time: N/A
+Translation time: N/A
+Overlay generation time: 0.043 sec
+Total time: N/A
+
+=== Top 20 OCR Boxes By Confidence ===
+text | confidence | x1,y1,x2,y2 | dimensions
+钩针：3.0mm | 0.994 | 42.5,254.9,260.6,290.4 | w=218.1, h=35.5, area=7742.5
+一直到想要的长度最后再钩3圈短针 | 0.994 | 45.9,1002.2,579.7,1033.2 | w=533.8, h=31.0, area=16547.8
+包身： | 0.994 | 39.0,640.6,129.7,684.2 | w=90.7, h=43.6, area=3954.5
+包底： | 0.991 | 40.2,303.1,129.7,345.5 | w=89.5, h=42.4, area=3794.8
+（钩远离自己的那根线） | 0.988 | 43.6,1045.8,370.8,1081.4 | w=327.2, h=35.6, area=11648.3
+线材：如意鸟4股精梳棉45、17、02 | 0.986 | 43.6,111.4,603.8,145.8 | w=560.2, h=34.4, area=19270.9
+R4:54长针 | 0.969 | 42.5,698.0,228.4,730.1 | w=185.9, h=32.1, area=5967.4
+换线重复R5～R8（每钩四圈换一次线） | 0.965 | 44.8,957.4,616.4,988.4 | w=571.6, h=31.0, area=17719.6
+两根线一起钩 | 0.961 | 125.1,161.9,326.0,197.5 | w=200.9, h=35.6, area=7152.0
+R8：（2内钩长针，1长针）*18 | 0.95 | 43.6,904.6,479.8,936.8 | w=436.2, h=32.2, area=14045.6
+R1:起21个辫子针倒2回钩19X，W， | 0.947 | 41.3,355.9,603.8,396.1 | w=562.5, h=40.2, area=22612.5
+R5:（2长针，1外钩长针）*18 | 0.94 | 41.3,746.2,481.0,781.8 | w=439.7, h=35.6, area=15653.3
+R6：(2内钩长针，1长针)*18 | 0.938 | 42.5,800.2,482.1,834.6 | w=439.6, h=34.4, area=15122.2
+海盐芝士手机包图解 | 0.932 | 43.6,9.2,423.6,51.7 | w=380.0, h=42.5, area=16150.0
+R7:(2长针，1外钩长针)*18 | 0.917 | 42.5,851.8,478.7,886.3 | w=436.2, h=34.5, area=15048.9
+R2:V，18X，3V，18X，2V（48针） | 0.9 | 42.5,455.8,599.2,490.2 | w=556.7, h=34.4, area=19150.5
+18X，V(42针） | 0.881 | 41.3,404.1,283.5,439.7 | w=242.2, h=35.6, area=8622.3
+(X，V)(54针） | 0.787 | 41.3,552.2,274.3,587.8 | w=233.0, h=35.6, area=8294.8
+R3:X,V，1X,3(X,V)，18X，2 | 0.775 | 42.5,507.4,606.1,543.0 | w=563.6, h=35.6, area=20064.2
+
+=== Largest 20 OCR Boxes ===
+text | confidence | x1,y1,x2,y2 | dimensions
+R1:起21个辫子针倒2回钩19X，W， | 0.947 | 41.3,355.9,603.8,396.1 | w=562.5, h=40.2, area=22612.5
+R3:X,V，1X,3(X,V)，18X，2 | 0.775 | 42.5,507.4,606.1,543.0 | w=563.6, h=35.6, area=20064.2
+线材：如意鸟4股精梳棉45、17、02 | 0.986 | 43.6,111.4,603.8,145.8 | w=560.2, h=34.4, area=19270.9
+R2:V，18X，3V，18X，2V（48针） | 0.9 | 42.5,455.8,599.2,490.2 | w=556.7, h=34.4, area=19150.5
+换线重复R5～R8（每钩四圈换一次线） | 0.965 | 44.8,957.4,616.4,988.4 | w=571.6, h=31.0, area=17719.6
+一直到想要的长度最后再钩3圈短针 | 0.994 | 45.9,1002.2,579.7,1033.2 | w=533.8, h=31.0, area=16547.8
+海盐芝士手机包图解 | 0.932 | 43.6,9.2,423.6,51.7 | w=380.0, h=42.5, area=16150.0
+R5:（2长针，1外钩长针）*18 | 0.94 | 41.3,746.2,481.0,781.8 | w=439.7, h=35.6, area=15653.3
+R6：(2内钩长针，1长针)*18 | 0.938 | 42.5,800.2,482.1,834.6 | w=439.6, h=34.4, area=15122.2
+R7:(2长针，1外钩长针)*18 | 0.917 | 42.5,851.8,478.7,886.3 | w=436.2, h=34.5, area=15048.9
+R8：（2内钩长针，1长针）*18 | 0.95 | 43.6,904.6,479.8,936.8 | w=436.2, h=32.2, area=14045.6
+（钩远离自己的那根线） | 0.988 | 43.6,1045.8,370.8,1081.4 | w=327.2, h=35.6, area=11648.3
+18X，V(42针） | 0.881 | 41.3,404.1,283.5,439.7 | w=242.2, h=35.6, area=8622.3
+(X，V)(54针） | 0.787 | 41.3,552.2,274.3,587.8 | w=233.0, h=35.6, area=8294.8
+钩针：3.0mm | 0.994 | 42.5,254.9,260.6,290.4 | w=218.1, h=35.5, area=7742.5
+两根线一起钩 | 0.961 | 125.1,161.9,326.0,197.5 | w=200.9, h=35.6, area=7152.0
+R4:54长针 | 0.969 | 42.5,698.0,228.4,730.1 | w=185.9, h=32.1, area=5967.4
+包身： | 0.994 | 39.0,640.6,129.7,684.2 | w=90.7, h=43.6, area=3954.5
+包底： | 0.991 | 40.2,303.1,129.7,345.5 | w=89.5, h=42.4, area=3794.8
+
+=== Smallest 20 OCR Boxes ===
+text | confidence | x1,y1,x2,y2 | dimensions
+包底： | 0.991 | 40.2,303.1,129.7,345.5 | w=89.5, h=42.4, area=3794.8
+包身： | 0.994 | 39.0,640.6,129.7,684.2 | w=90.7, h=43.6, area=3954.5
+R4:54长针 | 0.969 | 42.5,698.0,228.4,730.1 | w=185.9, h=32.1, area=5967.4
+两根线一起钩 | 0.961 | 125.1,161.9,326.0,197.5 | w=200.9, h=35.6, area=7152.0
+钩针：3.0mm | 0.994 | 42.5,254.9,260.6,290.4 | w=218.1, h=35.5, area=7742.5
+(X，V)(54针） | 0.787 | 41.3,552.2,274.3,587.8 | w=233.0, h=35.6, area=8294.8
+18X，V(42针） | 0.881 | 41.3,404.1,283.5,439.7 | w=242.2, h=35.6, area=8622.3
+（钩远离自己的那根线） | 0.988 | 43.6,1045.8,370.8,1081.4 | w=327.2, h=35.6, area=11648.3
+R8：（2内钩长针，1长针）*18 | 0.95 | 43.6,904.6,479.8,936.8 | w=436.2, h=32.2, area=14045.6
+R7:(2长针，1外钩长针)*18 | 0.917 | 42.5,851.8,478.7,886.3 | w=436.2, h=34.5, area=15048.9
+R6：(2内钩长针，1长针)*18 | 0.938 | 42.5,800.2,482.1,834.6 | w=439.6, h=34.4, area=15122.2
+R5:（2长针，1外钩长针）*18 | 0.94 | 41.3,746.2,481.0,781.8 | w=439.7, h=35.6, area=15653.3
+海盐芝士手机包图解 | 0.932 | 43.6,9.2,423.6,51.7 | w=380.0, h=42.5, area=16150.0
+一直到想要的长度最后再钩3圈短针 | 0.994 | 45.9,1002.2,579.7,1033.2 | w=533.8, h=31.0, area=16547.8
+换线重复R5～R8（每钩四圈换一次线） | 0.965 | 44.8,957.4,616.4,988.4 | w=571.6, h=31.0, area=17719.6
+R2:V，18X，3V，18X，2V（48针） | 0.9 | 42.5,455.8,599.2,490.2 | w=556.7, h=34.4, area=19150.5
+线材：如意鸟4股精梳棉45、17、02 | 0.986 | 43.6,111.4,603.8,145.8 | w=560.2, h=34.4, area=19270.9
+R3:X,V，1X,3(X,V)，18X，2 | 0.775 | 42.5,507.4,606.1,543.0 | w=563.6, h=35.6, area=20064.2
+R1:起21个辫子针倒2回钩19X，W， | 0.947 | 41.3,355.9,603.8,396.1 | w=562.5, h=40.2, area=22612.5
+
+=== Cleaned OCR ===
+海盐芝士手机包图解
+线材:如意鸟4股精梳棉45,17,02
+两根线一起钩
+钩针:3.0mm
+包底:
+R1:起21个辫子针倒2回钩19X,W,
+18X,V(42针)
+R2:V,18X,3V,18X,2V(48针)
+R3:X,V,1X,3(X,V),18X,2
+(X,V)(54针)
+包身:
+R4:54长针
+R5:(2长针,1外钩长针)*18
+R6:(2内钩长针,1长针)*18
+R7:(2长针,1外钩长针)*18
+R8:(2内钩长针,1长针)*18
+换线重复R5~R8(每钩四圈换一次线)
+一直到想要的长度最后再钩3圈短针
+(钩远离自己的那根线)
+
+=== Raw OCR ===
+海盐芝士手机包图解
+线材：如意鸟4股精梳棉45、17、02
+两根线一起钩
+钩针：3.0mm
+包底：
+R1:起21个辫子针倒2回钩19X，W，
+18X，V(42针）
+R2:V，18X，3V，18X，2V（48针）
+R3:X,V，1X,3(X,V)，18X，2
+(X，V)(54针）
+包身：
+R4:54长针
+R5:（2长针，1外钩长针）*18
+R6：(2内钩长针，1长针)*18
+R7:(2长针，1外钩长针)*18
+R8：（2内钩长针，1长针）*18
+换线重复R5～R8（每钩四圈换一次线）
+一直到想要的长度最后再钩3圈短针
+（钩远离自己的那根线）
+
+=== Translation Information ===
+
+=== Translation Statistics ===
+Pattern parser time: N/A
+CSV lookup time: N/A
+Regex processing time: N/A
+Translation replacement time: N/A
+Overlay text preparation time: N/A
+Total translation stage time: N/A
+
+OCR text line count: N/A
+Pattern rows detected: N/A
+Dictionary lookup attempts: N/A
+Dictionary matches: N/A
+Regex replacements: N/A
+Regex passes estimated: N/A
+Translated output rows: N/A
+Overlay legend entries: N/A
+
+=== Translation Cost Summary ===
+N/A
+
+=== MATCHED TERMS ===
+No matched dictionary terms found.
+
+=== UNMATCHED TERMS ===
+No unmatched candidates captured.
+
+=== CSV MATCH DETAILS ===
+No CSV match detail rows available.
+
+=== Translation Output ===
+海盐芝士手机包图解
+
+线材:如意鸟4股精梳棉45,17,02
+→ 线材:如意鸟4股精梳棉45, 17, 02
+
+两根线一起钩
+→ 两根线tog钩
+
+钩针:3.0mm
+→ hook:3.0mm
+
+包底:
+
+R1:起21个辫子针倒2回钩19X,W,
+→ R1: Chain 21, Start in the 2nd chain from hook, 19 sc, 3 sc in same stitch
+
+18X,V(42针)
+→ 18 sc, inc(42 sts)
+
+R2:V,18X,3V,18X,2V(48针)
+→ R2: inc, 18 sc, inc x3, 18 sc, inc x2(48 sts)
+
+R3:X,V,1X,3(X,V),18X,2
+→ R3: sc, inc, 1 sc, (sc, inc) x3, 18 sc, 2
+
+(X,V)(54针)
+→ (sc, inc)(54 sts)
+
+包身:
+
+R4:54长针
+→ R4: 54dc
+
+R5:(2长针,1外钩长针)*18
+→ R5: (2dc, 1FPdc) x18
+
+R6:(2内钩长针,1长针)*18
+→ R6: (2BPdc, 1dc) x18
+
+R7:(2长针,1外钩长针)*18
+→ R7: (2dc, 1FPdc) x18
+
+R8:(2内钩长针,1长针)*18
+→ R8: (2BPdc, 1dc) x18
+
+换线重复R5~R8(每钩四圈换一次线)
+
+一直到想要的长度最后再钩3圈短针
+→ 一直到想要的长度最后再钩3圈sc
+
+(钩远离自己的那根线)
+
+=== Overlay Legend ===
+线材:如意鸟4股精梳棉45,17,02 → 线材:如意鸟4股精梳棉45, 17, 02
+两根线一起钩 → 两根线tog钩
+钩针:3.0mm → hook:3.0mm
+[1] R1:起21个辫子针倒2回钩19X,W, → R1: Chain 21, Start in the 2nd chain from hook, 19 sc, 3 sc in same stitch
+18X,V(42针) → 18 sc, inc(42 sts)
+[2] R2:V,18X,3V,18X,2V(48针) → R2: inc, 18 sc, inc x3, 18 sc, inc x2(48 sts)
+R3:X,V,1X,3(X,V),18X,2 → R3: sc, inc, 1 sc, (sc, inc) x3, 18 sc, 2
+(X,V)(54针) → (sc, inc)(54 sts)
+R4:54长针 → R4: 54dc
+R5:(2长针,1外钩长针)*18 → R5: (2dc, 1FPdc) x18
+R6:(2内钩长针,1长针)*18 → R6: (2BPdc, 1dc) x18
+R7:(2长针,1外钩长针)*18 → R7: (2dc, 1FPdc) x18
+R8:(2内钩长针,1长针)*18 → R8: (2BPdc, 1dc) x18
+一直到想要的长度最后再钩3圈短针 → 一直到想要的长度最后再钩3圈sc
+
+=== Performance ===
+
+=== DEBUG TIMINGS ===
+Overlay generation: 0.043 sec
+Image loading: 0.000 sec
+Image preprocessing: 0.013 sec
+OCR: 61.821 sec
+OCR cleanup / normalization: 0.000 sec
+Translation: 10.191 sec
+PNG encoding: 0.024 sec
+Translation TXT generation: 0.000 sec
+Diagnostic Report generation: 0.000 sec
+TOTAL runtime: 72.132 sec
+
+=== Developer Information ===
+
+=== Session Diagnostics ===
+Total session_state keys: Not captured
+Cropper-related key count: Not captured
+Slider-related key count: Not captured
+Image signature history length: Not captured
+
+=== Button / OCR Diagnostics ===
+Run button click count: Not captured
+Reruns between click and OCR block: Not captured
+pending_ocr_run status: Not captured
+latest_crop_box status: Not captured
+
+=== OCR Call Trace ===
+21:07:18 run_primary_ocr start
+21:07:18 run_paddle_ocr_single start
+21:07:23 save temp PNG
+21:07:23 temp PNG saved
+21:07:23 PaddleOCR call start
+21:08:20 PaddleOCR call end
+21:08:20 OCR results returned
+
+=== Event Log ===
+No diagnostic events captured.
+
+=== Timing Validation ===
+Pattern parser time:
+Type: Cumulative / overlapping aggregate
+Calculation method: Sum of nested decorated function wall times: build_ocr_line_translations, translate_ocr_line, clean_single_ocr_line, translate_expression(), translate_piece(), split_expression_parts. These functions call each other, so their timings overlap and can exceed total translation stage time.
+
+CSV lookup time:
+Type: Cumulative / overlapping aggregate
+Calculation method: Sum of lookup_row, lookup_term, alias term-list generation, and find_matches timings. lookup_term calls lookup_row, and find_matches performs lookups, so this bucket overlaps internally.
+
+Regex processing time:
+Type: Cumulative / inclusive function timing
+Calculation method: Uses CSV replacement loops timing from replace_csv_terms_in_line. That function includes regex checks plus lookup and replacement work, so it is not regex-only exclusive time.
+
+Translation replacement time:
+Type: Cumulative / overlapping aggregate
+Calculation method: Sum of CSV replacement loops and build_overlay_export_text. CSV replacement loops already include regex and lookup work, so this overlaps with CSV lookup and regex processing.
+
+Overlay text preparation time:
+Type: Cumulative / separate-stage aggregate
+Calculation method: Sum of make_line_translation_overlay profile timing and build_readable_line_translation. make_line_translation_overlay is accounted under overlay generation, not under the top-level Translation processing timer.
+
+Total translation stage time:
+Type: Top-level wall-clock timing
+Calculation method: Measured in the OCR success block as Translation processing. It covers build_ocr_line_translations, find_matches/readable translation, and build_overlay_export_text, but not every nested/profiled bucket listed above and not overlay generation.
+
+=== Function Call Diagnostics ===
+N/A
+
+=== Lookup Validation ===
+Lookup count value: N/A
+Lookup count source: profile_count('lookup_term calls') inside lookup_term()
+Actual or estimated: Actual runtime call count for lookup_term()
+lookup_row() actual calls: N/A
+lookup_row() fast hits: N/A
+lookup_row() fallback dictionary checks: N/A
+lookup_row() fallback hits: N/A
+Dictionary matches source: lookup_row fast hits + fallback hits
+Dictionary matches actual or estimated: Actual counted successful lookup_row paths
+
+=== Regex Validation ===
+Regex count source: N/A
+Actual or estimated: Estimated
+Calculation method: The code increments profile_count('regex passes estimated') before selected regex checks/substitution sites and loop branches in replace_csv_terms_in_line(). It is not an instrumented count of actual regex engine executions or replacements.
+Regex replacements: N/A
+Regex replacements source: No active replacement counter was found; value may be N/A unless a future build instruments actual substitutions.
+
+=== Top Function Calls ===
+N/A
+
+=== Normalization Diagnostics ===
+Total norm_text() calls: N/A
+Caller breakdown:
+N/A
+
+=== Top Normalization Callers ===
+N/A
+
+=== Lookup Chain Diagnostics ===
+lookup_term() calls: N/A
+lookup_row() calls: N/A
+lookup_term() -> norm_text() calls: N/A
+lookup_row() -> norm_text() calls: N/A
+lookup_term() -> lookup_row(): lookup_term calls lookup_row once per invocation in the current code path.
+Counts are actual runtime counters from profile_count during the translation run.
+
+=== CSV Term Diagnostics ===
+CSV rows loaded: N/A
+Total searchable terms generated: N/A
+get_all_csv_terms() call count: N/A
+Average terms per call: N/A
+Generation source: profile_count('protected terms generated') inside get_all_csv_terms().
+Repeated generation check: if get_all_csv_terms() call count is greater than 1, searchable terms were regenerated multiple times during this OCR run.
+
+=== CSV Term Cache Diagnostics ===
+CSV term cache enabled: N/A
+CSV term cache key: N/A
+CSV term cache hits: N/A
+CSV term cache misses: N/A
+get_all_csv_terms() actual generation count: N/A
+get_all_csv_terms() served from cache count: N/A
+Searchable terms returned: N/A
+norm_text() total calls: N/A
+lookup_term() calls: N/A
+lookup_row() calls: N/A
+Translation processing time: N/A
+Total runtime: N/A
+Translation output hash: N/A
+Cache error: N/A
+
+=== Normalized Lookup Index Diagnostics ===
+Lookup index enabled: N/A
+Lookup index key: N/A
+Lookup index build count: N/A
+Lookup index cache hits: N/A
+Lookup index cache misses: N/A
+Lookup index size: N/A
+Duplicate normalized keys: N/A
+Indexed lookup attempts: N/A
+Indexed lookup hits: N/A
+Indexed lookup misses: N/A
+Fallback lookup attempts: N/A
+Fallback lookup hits: N/A
+Fallback lookup misses: N/A
+lookup_term() calls: N/A
+lookup_row() calls: N/A
+norm_text() total calls: N/A
+Translation processing time: N/A
+Total runtime: N/A
+Translation output hash: N/A
+Index error: N/A
