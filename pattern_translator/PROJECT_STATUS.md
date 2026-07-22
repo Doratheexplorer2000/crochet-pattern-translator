@@ -14,7 +14,7 @@ pattern_translator/app.py
 
 ## Current Production Status
 
-Crochet Pattern OCR Translator is the current OCR-based pattern translation app. RC25 is the current deployment candidate. It includes the accepted RC24c performance optimization plus the completed Pattern Translator analytics infrastructure.
+Crochet Pattern OCR Translator is the current OCR-based pattern translation app. RC25 is the current stable deployment build. It includes the accepted RC24c performance optimization plus completed Pattern Translator Google Sheets analytics.
 
 ## Current Database
 
@@ -43,9 +43,7 @@ stitches_1_8e.csv
 
 ## Current Priorities
 
-- Configure Streamlit secrets and run a live Google Sheets smoke test for Pattern Translator analytics.
-- Add Google Sheets anonymous usage analytics to Crochet Stitch Translator.
-- After analytics live validation, conduct External UAT while collecting real usage and reliability data.
+- External UAT is now the active focus.
 - Use collected evidence to evaluate how long Streamlit Community Cloud remains viable, including quota limits, sleeping, crashes, and resource failures.
 - Later, evaluate a new deployment platform. Landing-page hosting should be decided only after the deployment-platform direction is clearer; do not assume it will be hosted on Streamlit.
 - Keep OCR, parser, overlay, and database changes small and evidence-based.
@@ -62,8 +60,9 @@ stitches_1_8e.csv
 
 - Mission: prepare the latest Pattern Translator release for deployment with analytics infrastructure merged.
 - Includes: RC24c translation lookup performance optimization, anonymous Google Sheets usage analytics, current shared master database, and migrated company-owned Feedback Form URL.
-- Analytics status: implemented locally. Live Google Sheets append is not yet validated and is awaiting Streamlit secrets configuration plus live smoke testing.
-- Deployment note: Streamlit secrets are not configured in source control and must be configured manually before live analytics validation.
+- Analytics status: completed and validated on Streamlit Cloud.
+- Analytics implementation: Google Sheets writes use `open_by_key()`, removing the Google Drive API dependency.
+- Feedback workflow: single-step Feedback link opens the company-owned Google Form directly.
 
 ### RC24c
 
@@ -78,12 +77,20 @@ stitches_1_8e.csv
 ### RC21 Infrastructure: Google Sheets Usage Analytics
 
 - Mission: add anonymous Google Sheets usage analytics for Pattern Translator without changing OCR, parser, translation, overlay, Select Area, or CSV behavior.
-- Status: implemented locally. Local Google Sheets append via spreadsheet ID is validated; deployed Streamlit live smoke testing is still pending after manual redeploy.
+- Status: completed. Analytics has been validated on Streamlit Cloud.
 - Destination: `Crochet Intelligence Usage Analytics` spreadsheet, `pattern_translation` worksheet.
 - Events: `app_open`, `image_uploaded`, `select_area_started`, `select_area_confirmed`, `translation_completed`, `translation_failed`, `download_png`, and `download_txt`.
 - Privacy: only anonymous usage statistics are collected, including country, app usage, and performance. IP addresses, personal information, uploaded images, OCR text, and translations are not stored in analytics.
 - Fail-safe rule: analytics failures must never interrupt OCR, translation, downloads, or feedback workflow.
 - Feedback migration: Pattern Translator Feedback Form migration to `crochetintelligence@gmail.com` is complete.
+
+## Future Work
+
+After External UAT:
+
+- Review and refine the Analytics schema based on real user data.
+- Review the Google Feedback Form questions and workflow.
+- Reuse the improved analytics/feedback design when implementing Stitch Translator analytics.
 
 ### RC23b Hotfix 1
 
