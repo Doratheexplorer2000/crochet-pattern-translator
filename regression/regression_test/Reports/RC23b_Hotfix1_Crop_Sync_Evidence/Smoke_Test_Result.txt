@@ -1,0 +1,16 @@
+RC23b Hotfix 1 Smoke Test Result
+
+Syntax check:
+PASS
+Command: PYTHONPYCACHEPREFIX=/tmp/crochet_pycache python3 -m py_compile pattern_translator/app.py
+
+Source setting check:
+PASS
+pattern_translator/app.py contains realtime_update=True in the active streamlit-cropper call.
+
+Coordinate-chain check:
+PASS at code level.
+When the cropper returns the latest visible display box, the app maps it to original-image coordinates and uses that same box for confirmed selection, preview crop, and OCR input crop.
+
+Limitations:
+Real touch-browser event behavior still requires Human UAT.

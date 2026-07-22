@@ -1,38 +1,76 @@
-# Crochet Pattern OCR Translator
+# Crochet Intelligence
 
-External UAT release for the Crochet Pattern OCR Translator.
+Repository for the current Crochet Intelligence Streamlit applications.
 
-Current release: RC17
+## Applications
 
-## What This App Does
+- `pattern_translator/app.py`  
+  Crochet Pattern OCR Translator for image OCR, translation overlays, TXT export, and diagnostic reports.
 
-- Reads crochet pattern images with OCR.
-- Translates crochet pattern text into the selected target language.
-- Produces an overlay translation image.
-- Exports line-by-line translation TXT.
-- Exports a Diagnostic Report for feedback and troubleshooting.
+- `stitch_translator/app.py`  
+  Crochet Stitch Translator for dictionary-style stitch lookup.
+
+Both applications remain independent. They now share the same production stitch database.
+
+## Current Cross-App Priorities
+
+Immediate work:
+
+- Pattern Translator analytics is implemented locally. Configure Streamlit secrets and run live Google Sheets append smoke testing.
+- Pattern Translator RC25 is the current deployment candidate.
+- Pattern Translator Feedback Form migration to `crochetintelligence@gmail.com` is complete.
+- Add the reusable analytics implementation to Crochet Stitch Translator next.
+
+After analytics live validation:
+
+- Conduct External UAT while collecting real usage, performance, failure, and reliability data.
+- Use collected evidence to evaluate Streamlit Community Cloud viability, including quota limits, sleeping, crashes, and resource failures.
+
+Later:
+
+- Evaluate a new deployment platform.
+- Decide where the Crochet Intelligence landing page should be hosted only after the deployment-platform direction is clearer. Do not assume the landing page will be hosted on Streamlit.
+
+## Shared Knowledge Base
+
+The shared database lives at:
+
+```text
+knowledge_base/data/master_stitches.csv
+```
+
+The accepted source snapshot is archived at:
+
+```text
+knowledge_base/releases/database/stitches_1_8e.csv
+```
+
+Symbol assets live at:
+
+```text
+knowledge_base/symbols/
+```
 
 ## Run Locally
 
+Pattern Translator:
+
 ```bash
-python3 -m streamlit run Crochet_Translator_Beta_RC17.py
+python3 -m streamlit run pattern_translator/app.py
 ```
 
-## Streamlit Entry Point
+Stitch Translator:
 
-```text
-Crochet_Translator_Beta_RC17.py
+```bash
+python3 -m streamlit run stitch_translator/app.py
 ```
 
-## Required Runtime Files
+## Documentation
 
-- `Crochet_Translator_Beta_RC17.py`
-- `stitches_1_8d.csv`
-- `stitches_1_8a.csv`
-- `symbols/`
-- `requirements.txt`
-- `runtime.txt`
+- `knowledge_base/DATABASE.md`
+- `knowledge_base/CSV_SPEC.md`
+- `docs/FUTURE_ARCHITECTURE.md`
+- each app's `README.md`
+- each app's `PROJECT_STATUS.md`
 
-## External UAT Notes
-
-This repository intentionally contains only the files required to run the external UAT build. Historical prototypes and older release candidates are not included.
+Regression assets live under `regression/`.

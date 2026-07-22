@@ -1,0 +1,97 @@
+拉菲草渔夫帽
+
+R1:环起8x
+→ R1: MR, 8 sc
+
+R2:8v
+→ R2: inc x8
+
+R3:8(×.v)
+→ R3: (sc, inc) x8
+
+R4:8(2×.v)
+→ R4: (2 sc, inc) x8
+
+R5:8(3×.v)
+→ R5: (3 sc, inc) x8
+
+R6:8(4×.v)
+→ R6: (4 sc, inc) x8
+
+R7:8(5×.v)
+→ R7: (5 sc, inc) x8
+
+R8:不加减x
+→ R8: sc all around
+
+R9:8(6x,v)
+→ R9: (6 sc, inc) x8
+
+R10:(7×.v)
+→ R10: (7 sc, inc)
+
+R11:不加减x
+→ R11: sc all around
+
+R12:(10x,v)
+→ R12: (10 sc, inc)
+
+R13:不加减x
+→ R13: sc all around
+
+R14:不加减交叉x
+→ R14: cross X all around (not yet confirmed)
+
+R15:6(11x,v)
+→ R15: (11 sc, inc) x6
+
+R16:不加减交叉×
+→ R16: cross X all around (not yet confirmed)
+
+R17:不加减x
+→ R17: sc all around
+
+R18:不加减交叉×
+→ R18: cross X all around (not yet confirmed)
+
+R19:不加减x
+→ R19: sc all around
+
+R20:不加减x
+→ R20: sc all around
+
+R21:6(12x,v)
+→ R21: (12 sc, inc) x6
+
+R22:不加减x
+→ R22: sc all around
+
+R23:不加减x
+→ R23: sc all around
+
+R24:6(13x,v)
+→ R24: (13 sc, inc) x6
+
+R25:不加减x
+→ R25: sc all around
+
+R26:不加减交叉x
+→ R26: cross X all around (not yet confirmed)
+
+R27:(4×.v)
+→ R27: (4 sc, inc)
+
+R28:不加减交叉x
+→ R28: cross X all around (not yet confirmed)
+
+R29:(5x,v)
+→ R29: (5 sc, inc)
+
+R30:不加减交叉x
+→ R30: cross X all around (not yet confirmed)
+
+R31:(6x,v)
+→ R31: (6 sc, inc)
+
+R32:不加减交叉x
+→ R32: cross X all around (not yet confirmed)

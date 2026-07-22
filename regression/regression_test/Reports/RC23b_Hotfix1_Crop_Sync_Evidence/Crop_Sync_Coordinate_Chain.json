@@ -1,0 +1,35 @@
+{
+  "source_image": "/Users/doralam/Desktop/crochet_intelligence/crochet-pattern-translator/regression/test_pattern_library/Pattern_001_Alien/Pattern_001_Alien_Source.jpeg",
+  "original_size": [
+    1242,
+    1660
+  ],
+  "display_size": [
+    380,
+    508
+  ],
+  "display_scale_x": 3.268421052631579,
+  "display_scale_y": 3.267716535433071,
+  "visible_cropper_box_display_coordinates": [
+    35,
+    120,
+    245,
+    508
+  ],
+  "confirmed_crop_box_original_coordinates": [
+    114,
+    392,
+    801,
+    1660
+  ],
+  "preview_crop_size": [
+    687,
+    1268
+  ],
+  "ocr_input_crop_size": [
+    687,
+    1268
+  ],
+  "preview_and_ocr_crop_same_box": true,
+  "interpretation": "When streamlit-cropper returns the latest visible display box, the app mapping, preview crop, and OCR crop all use the same original-image crop box."
+}

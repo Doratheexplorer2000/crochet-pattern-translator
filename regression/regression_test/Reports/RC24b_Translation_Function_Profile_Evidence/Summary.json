@@ -1,0 +1,776 @@
+[
+  {
+    "case_id": "slow_rc23a_english_hdc_android",
+    "label": "RC23a English HDC Android Whole Pattern",
+    "source_diag": "/Users/doralam/Downloads/PatternOCR_DiagnosticReport_RC23a_20260717_122144.txt",
+    "translation_wall_sec": 84.090760333,
+    "ocr_input_lines": 29,
+    "translated_rows": 29,
+    "matched_terms": 9,
+    "unmatched_terms_sample_count": 14,
+    "top_functions": [
+      {
+        "function": "translate_expression",
+        "calls": 142,
+        "inclusive": 126.65875287300005,
+        "self": 0.1065106260000599,
+        "max": 3.1729261250000036
+      },
+      {
+        "function": "build_ocr_line_translations",
+        "calls": 1,
+        "inclusive": 84.074174166,
+        "self": 0.02543374900000117,
+        "max": 84.074174166
+      },
+      {
+        "function": "translate_ocr_line",
+        "calls": 29,
+        "inclusive": 84.01216196000001,
+        "self": 0.015926423000001133,
+        "max": 3.935067208999996
+      },
+      {
+        "function": "replace_csv_terms_in_line",
+        "calls": 111,
+        "inclusive": 83.62182337100002,
+        "self": 12.321767787999363,
+        "max": 0.920579
+      },
+      {
+        "function": "lookup_term",
+        "calls": 55163,
+        "inclusive": 66.08841813300145,
+        "self": 0.7790415470017795,
+        "max": 0.016543000000012853
+      },
+      {
+        "function": "lookup_row",
+        "calls": 55269,
+        "inclusive": 65.43574075699969,
+        "self": 65.00163604799896,
+        "max": 0.016493582999999035
+      },
+      {
+        "function": "translate_piece",
+        "calls": 110,
+        "inclusive": 57.81474549399994,
+        "self": 0.18470441500000612,
+        "max": 0.8468617500000022
+      },
+      {
+        "function": "get_all_csv_terms",
+        "calls": 111,
+        "inclusive": 3.195136415000004,
+        "self": 3.0366737490000038,
+        "max": 0.1861782919999999
+      },
+      {
+        "function": "norm_text",
+        "calls": 314520,
+        "inclusive": 2.4214621729999823,
+        "self": 2.4214621729999823,
+        "max": 0.00041466599999750997
+      },
+      {
+        "function": "generate_all_csv_terms_uncached",
+        "calls": 1,
+        "inclusive": 0.15846266599999992,
+        "self": 0.14470414099999873,
+        "max": 0.15846266599999992
+      },
+      {
+        "function": "clean_single_ocr_line",
+        "calls": 58,
+        "inclusive": 0.03730820999998463,
+        "self": 0.03730820999998463,
+        "max": 0.0013309590000000204
+      },
+      {
+        "function": "find_matches",
+        "calls": 1,
+        "inclusive": 0.012739916000001017,
+        "self": 0.012457746999970709,
+        "max": 0.012739916000001017
+      },
+      {
+        "function": "build_readable_line_translation",
+        "calls": 2,
+        "inclusive": 0.003773584000001051,
+        "self": 0.002561548999906904,
+        "max": 0.0019389590000002954
+      },
+      {
+        "function": "build_overlay_export_text",
+        "calls": 1,
+        "inclusive": 0.0018528749999973115,
+        "self": 1.8249999996555744e-05,
+        "max": 0.0018528749999973115
+      },
+      {
+        "function": "split_expression_parts",
+        "calls": 28,
+        "inclusive": 0.0004995009999877453,
+        "self": 0.0004995009999877453,
+        "max": 2.7375000001939043e-05
+      }
+    ],
+    "repeat_summary": {
+      "norm_text": {
+        "unique": 717,
+        "total": 314520,
+        "top5": [
+          [
+            "前半针",
+            1332
+          ],
+          [
+            "后半针",
+            1332
+          ],
+          [
+            "slip marker",
+            893
+          ],
+          [
+            "開始",
+            891
+          ],
+          [
+            "花樣",
+            891
+          ]
+        ]
+      },
+      "lookup_term": {
+        "unique": 497,
+        "total": 55163,
+        "top5": [
+          [
+            "slst",
+            112
+          ],
+          [
+            "start from ... chain from hook|start in the ... chain from hook|work in the ... chain from hook",
+            111
+          ],
+          [
+            "in flo|front loop only|front loops only|work in front loop only|work in front loops only",
+            111
+          ],
+          [
+            "join with slst|join with a slip stitch|join with a sl st|join with a slst|join with a ss",
+            111
+          ],
+          [
+            "in blo|back loop only|back loops only|work in back loop only|work in back loops only",
+            111
+          ]
+        ]
+      },
+      "lookup_row": {
+        "unique": 497,
+        "total": 55269,
+        "top5": [
+          [
+            "hdc",
+            217
+          ],
+          [
+            "slst",
+            112
+          ],
+          [
+            "start from ... chain from hook|start in the ... chain from hook|work in the ... chain from hook",
+            111
+          ],
+          [
+            "in flo|front loop only|front loops only|work in front loop only|work in front loops only",
+            111
+          ],
+          [
+            "join with slst|join with a slip stitch|join with a sl st|join with a slst|join with a ss",
+            111
+          ]
+        ]
+      },
+      "replace_csv_terms_in_line": {
+        "unique": 76,
+        "total": 111,
+        "top5": [
+          [
+            "hdc dec",
+            26
+          ],
+          [
+            "hdc inc",
+            4
+          ],
+          [
+            "Etsy:",
+            2
+          ],
+          [
+            "Body (hook 6mm)",
+            2
+          ],
+          [
+            "Barunka",
+            2
+          ]
+        ]
+      }
+    },
+    "app_profile_top_timings": [
+      [
+        "translate_expression()",
+        126.65842825000007
+      ],
+      [
+        "line-by-line translation: build_ocr_line_translations",
+        84.07416337500001
+      ],
+      [
+        "line-by-line translation: translate_ocr_line",
+        84.012092584
+      ],
+      [
+        "CSV replacement loops",
+        83.61971554000002
+      ],
+      [
+        "term lookup: lookup_term",
+        65.8104017070002
+      ],
+      [
+        "translate_piece()",
+        57.81446787299997
+      ],
+      [
+        "alias lookup / CSV term list",
+        3.1947409179999884
+      ],
+      [
+        "OCR text normalization",
+        1.5868514099999476
+      ],
+      [
+        "term lookup: lookup_row",
+        0.6307978240009551
+      ],
+      [
+        "OCR text normalization: clean_single_ocr_line",
+        0.0371545860000011
+      ],
+      [
+        "term matching: find_matches",
+        0.012736541999998963
+      ],
+      [
+        "line-by-line translation: build_readable_line_translation",
+        0.0037681250000076716
+      ],
+      [
+        "line-by-line translation: build_overlay_export_text",
+        0.0018460830000037731
+      ],
+      [
+        "expression parsing: split_expression_parts",
+        0.00041562300000919095
+      ]
+    ],
+    "app_profile_top_counts": [
+      [
+        "norm_text calls",
+        314520.0
+      ],
+      [
+        "norm_text caller: wrapper",
+        314520.0
+      ],
+      [
+        "regex passes estimated",
+        87855.0
+      ],
+      [
+        "protected terms looped",
+        55722.0
+      ],
+      [
+        "lookup_row calls",
+        55269.0
+      ],
+      [
+        "lookup_term calls",
+        55163.0
+      ],
+      [
+        "lookup_row normalized index hits",
+        55158.0
+      ],
+      [
+        "protected terms returned from cache",
+        55110.0
+      ],
+      [
+        "alias values inspected",
+        2090.0
+      ],
+      [
+        "protected terms generated",
+        501.0
+      ],
+      [
+        "translate_expression calls",
+        142.0
+      ],
+      [
+        "replace_csv_terms_in_line calls",
+        111.0
+      ],
+      [
+        "get_all_csv_terms calls",
+        111.0
+      ],
+      [
+        "lookup_row fallback dictionary checks",
+        111.0
+      ],
+      [
+        "translate_piece calls",
+        110.0
+      ],
+      [
+        "get_all_csv_terms served from cache",
+        110.0
+      ],
+      [
+        "get_all_csv_terms row scans",
+        104.0
+      ],
+      [
+        "clean_single_ocr_line calls",
+        58.0
+      ],
+      [
+        "merged OCR lines",
+        29.0
+      ],
+      [
+        "OCR lines processed",
+        29.0
+      ],
+      [
+        "translate_ocr_line calls",
+        29.0
+      ],
+      [
+        "split_expression_parts calls",
+        28.0
+      ],
+      [
+        "build_readable_line_translation calls",
+        2.0
+      ],
+      [
+        "build_ocr_line_translations calls",
+        1.0
+      ],
+      [
+        "build_overlay_export_text calls",
+        1.0
+      ],
+      [
+        "find_matches calls",
+        1.0
+      ]
+    ]
+  },
+  {
+    "case_id": "normal_rc16f_fisherman_hat",
+    "label": "RC16f Fisherman Hat Whole Pattern",
+    "source_diag": "/Users/doralam/Downloads/PatternOCR_DiagnosticReport_RC16f_20260703_115510.txt",
+    "translation_wall_sec": 22.272215042,
+    "ocr_input_lines": 33,
+    "translated_rows": 33,
+    "matched_terms": 1,
+    "unmatched_terms_sample_count": 6,
+    "top_functions": [
+      {
+        "function": "build_ocr_line_translations",
+        "calls": 1,
+        "inclusive": 22.266394542,
+        "self": 0.022783210999975267,
+        "max": 22.266394542
+      },
+      {
+        "function": "translate_ocr_line",
+        "calls": 33,
+        "inclusive": 22.24015333400004,
+        "self": 0.0018965860000719204,
+        "max": 1.5271127080000042
+      },
+      {
+        "function": "replace_csv_terms_in_line",
+        "calls": 34,
+        "inclusive": 22.17552629099997,
+        "self": 0.4117054210004909,
+        "max": 0.8616786669999925
+      },
+      {
+        "function": "lookup_term",
+        "calls": 16903,
+        "inclusive": 20.134327783000117,
+        "self": 0.21136108400027354,
+        "max": 0.00256004199999893
+      },
+      {
+        "function": "lookup_row",
+        "calls": 16927,
+        "inclusive": 19.95119149099982,
+        "self": 19.824375404999856,
+        "max": 0.0022875000000084356
+      },
+      {
+        "function": "get_all_csv_terms",
+        "calls": 34,
+        "inclusive": 1.0871538359999704,
+        "self": 0.9280654609999601,
+        "max": 0.18666195800000196
+      },
+      {
+        "function": "translate_expression",
+        "calls": 61,
+        "inclusive": 0.7736969169999384,
+        "self": 0.0031476640000249745,
+        "max": 0.664816916999996
+      },
+      {
+        "function": "translate_piece",
+        "calls": 48,
+        "inclusive": 0.7219761229999762,
+        "self": 0.0038080409999707854,
+        "max": 0.6634813750000035
+      },
+      {
+        "function": "norm_text",
+        "calls": 97643,
+        "inclusive": 0.7112651819994085,
+        "self": 0.7112651819994085,
+        "max": 0.00035641699999189314
+      },
+      {
+        "function": "generate_all_csv_terms_uncached",
+        "calls": 1,
+        "inclusive": 0.15908837500001027,
+        "self": 0.1449832769999091,
+        "max": 0.15908837500001027
+      },
+      {
+        "function": "clean_single_ocr_line",
+        "calls": 66,
+        "inclusive": 0.0041387900000131594,
+        "self": 0.0041387900000131594,
+        "max": 0.0012512499999957072
+      },
+      {
+        "function": "build_readable_line_translation",
+        "calls": 2,
+        "inclusive": 0.003999374999978045,
+        "self": 0.0028782520000305567,
+        "max": 0.002074541999988355
+      },
+      {
+        "function": "build_overlay_export_text",
+        "calls": 1,
+        "inclusive": 0.001936166999996658,
+        "self": 1.1334000006968381e-05,
+        "max": 0.001936166999996658
+      },
+      {
+        "function": "find_matches",
+        "calls": 1,
+        "inclusive": 0.0017049580000048081,
+        "self": 0.001570958000002065,
+        "max": 0.0017049580000048081
+      },
+      {
+        "function": "split_expression_parts",
+        "calls": 14,
+        "inclusive": 0.00011954299999672457,
+        "self": 0.00011954299999672457,
+        "max": 9.792000000174994e-06
+      }
+    ],
+    "repeat_summary": {
+      "norm_text": {
+        "unique": 596,
+        "total": 97643,
+        "top5": [
+          [
+            "3 sc in same stitch",
+            445
+          ],
+          [
+            "hdc inc",
+            411
+          ],
+          [
+            "hdc dec",
+            411
+          ],
+          [
+            "sl st",
+            379
+          ],
+          [
+            "bl",
+            379
+          ]
+        ]
+      },
+      "lookup_term": {
+        "unique": 498,
+        "total": 16903,
+        "top5": [
+          [
+            "start from ... chain from hook|start in the ... chain from hook|work in the ... chain from hook",
+            34
+          ],
+          [
+            "in flo|front loop only|front loops only|work in front loop only|work in front loops only",
+            34
+          ],
+          [
+            "join with slst|join with a slip stitch|join with a sl st|join with a slst|join with a ss",
+            34
+          ],
+          [
+            "in blo|back loop only|back loops only|work in back loop only|work in back loops only",
+            34
+          ],
+          [
+            "leave long end to weave in|leave for sewing|leave for assembly|leave for now",
+            34
+          ]
+        ]
+      },
+      "lookup_row": {
+        "unique": 500,
+        "total": 16927,
+        "top5": [
+          [
+            "start from ... chain from hook|start in the ... chain from hook|work in the ... chain from hook",
+            34
+          ],
+          [
+            "in flo|front loop only|front loops only|work in front loop only|work in front loops only",
+            34
+          ],
+          [
+            "join with slst|join with a slip stitch|join with a sl st|join with a slst|join with a ss",
+            34
+          ],
+          [
+            "in blo|back loop only|back loops only|work in back loop only|work in back loops only",
+            34
+          ],
+          [
+            "leave long end to weave in|leave for sewing|leave for assembly|leave for now",
+            34
+          ]
+        ]
+      },
+      "replace_csv_terms_in_line": {
+        "unique": 33,
+        "total": 34,
+        "top5": [
+          [
+            "拉菲草渔夫帽",
+            2
+          ],
+          [
+            "R1:环起8x",
+            1
+          ],
+          [
+            "R2:8v",
+            1
+          ],
+          [
+            "R3:8(×.v)",
+            1
+          ],
+          [
+            "R4:8(2×.v)",
+            1
+          ]
+        ]
+      }
+    },
+    "app_profile_top_timings": [
+      [
+        "line-by-line translation: build_ocr_line_translations",
+        22.266388667
+      ],
+      [
+        "line-by-line translation: translate_ocr_line",
+        22.240080582999965
+      ],
+      [
+        "CSV replacement loops",
+        22.174896541000024
+      ],
+      [
+        "term lookup: lookup_term",
+        20.054011064000647
+      ],
+      [
+        "alias lookup / CSV term list",
+        1.0870532910000037
+      ],
+      [
+        "translate_expression()",
+        0.7735509150000013
+      ],
+      [
+        "translate_piece()",
+        0.7218670769999989
+      ],
+      [
+        "OCR text normalization",
+        0.4621737159994268
+      ],
+      [
+        "term lookup: lookup_row",
+        0.1791330809999323
+      ],
+      [
+        "line-by-line translation: build_readable_line_translation",
+        0.003994292000001565
+      ],
+      [
+        "OCR text normalization: clean_single_ocr_line",
+        0.003986964000020521
+      ],
+      [
+        "line-by-line translation: build_overlay_export_text",
+        0.0019334580000105461
+      ],
+      [
+        "term matching: find_matches",
+        0.0017017500000093833
+      ],
+      [
+        "expression parsing: split_expression_parts",
+        8.53709999972807e-05
+      ]
+    ],
+    "app_profile_top_counts": [
+      [
+        "norm_text calls",
+        97643.0
+      ],
+      [
+        "norm_text caller: wrapper",
+        97643.0
+      ],
+      [
+        "regex passes estimated",
+        23950.0
+      ],
+      [
+        "protected terms looped",
+        17068.0
+      ],
+      [
+        "lookup_row calls",
+        16927.0
+      ],
+      [
+        "lookup_term calls",
+        16903.0
+      ],
+      [
+        "lookup_row normalized index hits",
+        16893.0
+      ],
+      [
+        "protected terms returned from cache",
+        16533.0
+      ],
+      [
+        "alias values inspected",
+        2090.0
+      ],
+      [
+        "protected terms generated",
+        501.0
+      ],
+      [
+        "get_all_csv_terms row scans",
+        104.0
+      ],
+      [
+        "clean_single_ocr_line calls",
+        66.0
+      ],
+      [
+        "translate_expression calls",
+        61.0
+      ],
+      [
+        "translate_piece calls",
+        48.0
+      ],
+      [
+        "replace_csv_terms_in_line calls",
+        34.0
+      ],
+      [
+        "get_all_csv_terms calls",
+        34.0
+      ],
+      [
+        "lookup_row fallback dictionary checks",
+        34.0
+      ],
+      [
+        "merged OCR lines",
+        33.0
+      ],
+      [
+        "OCR lines processed",
+        33.0
+      ],
+      [
+        "translate_ocr_line calls",
+        33.0
+      ],
+      [
+        "get_all_csv_terms served from cache",
+        33.0
+      ],
+      [
+        "split_expression_parts calls",
+        14.0
+      ],
+      [
+        "build_readable_line_translation calls",
+        2.0
+      ],
+      [
+        "build_ocr_line_translations calls",
+        1.0
+      ],
+      [
+        "build_overlay_export_text calls",
+        1.0
+      ],
+      [
+        "find_matches calls",
+        1.0
+      ]
+    ]
+  }
+]

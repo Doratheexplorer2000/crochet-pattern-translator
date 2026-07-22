@@ -61,3 +61,13 @@ This backlog records issues discovered during regression testing. Do not impleme
 - Category: OCR / product scope
 - Source patterns: `Pattern_006`
 - Description: Symbol chart recognition is outside current OCR-text translation scope. Pattern_006 should remain a stress/boundary pattern unless chart support becomes an approved product direction.
+
+## Knowledge Base Research
+
+### Cross Single Crochet
+
+- Priority: Backlog research
+- Category: Shared stitch database / terminology
+- Status: Research only; do not edit the CSV until terminology is validated.
+- Known Chinese names to investigate: `交叉短針`, `短針交叉針`, `交叉 X`
+- Validation required before adding: English names and aliases, US/UK usage, abbreviations, Traditional and Simplified Chinese names, Japanese name, tutorial search terms, stitch symbol if a recognised symbol exists, and whether the listed Chinese terms truly describe the same stitch.

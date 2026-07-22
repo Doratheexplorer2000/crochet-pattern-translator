@@ -1,0 +1,346 @@
+{
+  "norm_text": {
+    "unique": 717,
+    "total": 314520,
+    "top20": [
+      [
+        "前半针",
+        1332
+      ],
+      [
+        "后半针",
+        1332
+      ],
+      [
+        "slip marker",
+        893
+      ],
+      [
+        "開始",
+        891
+      ],
+      [
+        "花樣",
+        891
+      ],
+      [
+        "一圈",
+        891
+      ],
+      [
+        "在一针内钩三短针",
+        888
+      ],
+      [
+        "长长针加针",
+        888
+      ],
+      [
+        "长长针减针",
+        888
+      ],
+      [
+        "hdc",
+        877
+      ],
+      [
+        "中长针减针",
+        803
+      ],
+      [
+        "配色",
+        782
+      ],
+      [
+        "中长针加针",
+        781
+      ],
+      [
+        "跳過",
+        780
+      ],
+      [
+        "重覆",
+        780
+      ],
+      [
+        "大約",
+        780
+      ],
+      [
+        "之間",
+        780
+      ],
+      [
+        "繼續",
+        780
+      ],
+      [
+        "接下的",
+        780
+      ],
+      [
+        "主色",
+        780
+      ]
+    ]
+  },
+  "lookup_term": {
+    "unique": 497,
+    "total": 55163,
+    "top20": [
+      [
+        "slst",
+        112
+      ],
+      [
+        "start from ... chain from hook|start in the ... chain from hook|work in the ... chain from hook",
+        111
+      ],
+      [
+        "in flo|front loop only|front loops only|work in front loop only|work in front loops only",
+        111
+      ],
+      [
+        "join with slst|join with a slip stitch|join with a sl st|join with a slst|join with a ss",
+        111
+      ],
+      [
+        "in blo|back loop only|back loops only|work in back loop only|work in back loops only",
+        111
+      ],
+      [
+        "leave long end to weave in|leave for sewing|leave for assembly|leave for now",
+        111
+      ],
+      [
+        "join with slst|join with a slip stitch|join with a sl st|join with a slst",
+        111
+      ],
+      [
+        "in fl|front loop|front loops|work in front loop|work in front loops",
+        111
+      ],
+      [
+        "in bl|back loop|back loops|work in back loop|work in back loops",
+        111
+      ],
+      [
+        "3 sc in one stitch|3 single crochet in one stitch",
+        111
+      ],
+      [
+        "3 dc in one stitch|3 double crochet in one stitch",
+        111
+      ],
+      [
+        "crochet 3 single stitches in single stitch",
+        111
+      ],
+      [
+        "crochet 3 double stitches in single stitch",
+        111
+      ],
+      [
+        "double treble crochet 2 stitches together",
+        111
+      ],
+      [
+        "half double crochet 2 stitches together",
+        111
+      ],
+      [
+        "half treble crochet 2 stitches together",
+        111
+      ],
+      [
+        "magic ring|magic circle|adjustable ring",
+        111
+      ],
+      [
+        "flatten and crochet two sides together",
+        111
+      ],
+      [
+        "repeat previous instructions backward",
+        111
+      ],
+      [
+        "double crochet 2 stitches together",
+        111
+      ]
+    ]
+  },
+  "lookup_row": {
+    "unique": 497,
+    "total": 55269,
+    "top20": [
+      [
+        "hdc",
+        217
+      ],
+      [
+        "slst",
+        112
+      ],
+      [
+        "start from ... chain from hook|start in the ... chain from hook|work in the ... chain from hook",
+        111
+      ],
+      [
+        "in flo|front loop only|front loops only|work in front loop only|work in front loops only",
+        111
+      ],
+      [
+        "join with slst|join with a slip stitch|join with a sl st|join with a slst|join with a ss",
+        111
+      ],
+      [
+        "in blo|back loop only|back loops only|work in back loop only|work in back loops only",
+        111
+      ],
+      [
+        "leave long end to weave in|leave for sewing|leave for assembly|leave for now",
+        111
+      ],
+      [
+        "join with slst|join with a slip stitch|join with a sl st|join with a slst",
+        111
+      ],
+      [
+        "in fl|front loop|front loops|work in front loop|work in front loops",
+        111
+      ],
+      [
+        "in bl|back loop|back loops|work in back loop|work in back loops",
+        111
+      ],
+      [
+        "3 sc in one stitch|3 single crochet in one stitch",
+        111
+      ],
+      [
+        "3 dc in one stitch|3 double crochet in one stitch",
+        111
+      ],
+      [
+        "crochet 3 single stitches in single stitch",
+        111
+      ],
+      [
+        "crochet 3 double stitches in single stitch",
+        111
+      ],
+      [
+        "double treble crochet 2 stitches together",
+        111
+      ],
+      [
+        "half double crochet 2 stitches together",
+        111
+      ],
+      [
+        "half treble crochet 2 stitches together",
+        111
+      ],
+      [
+        "magic ring|magic circle|adjustable ring",
+        111
+      ],
+      [
+        "flatten and crochet two sides together",
+        111
+      ],
+      [
+        "repeat previous instructions backward",
+        111
+      ]
+    ]
+  },
+  "replace_csv_terms_in_line": {
+    "unique": 76,
+    "total": 111,
+    "top20": [
+      [
+        "hdc dec",
+        26
+      ],
+      [
+        "hdc inc",
+        4
+      ],
+      [
+        "Etsy:",
+        2
+      ],
+      [
+        "Body (hook 6mm)",
+        2
+      ],
+      [
+        "Barunka",
+        2
+      ],
+      [
+        "Crochet hdc",
+        2
+      ],
+      [
+        "8hdc inc (16)",
+        2
+      ],
+      [
+        "7hdc with the other paw",
+        2
+      ],
+      [
+        "WUrs",
+        2
+      ],
+      [
+        "8hdc in mr",
+        1
+      ],
+      [
+        "3. (1hdc, hdc inc) x 8 (24)",
+        1
+      ],
+      [
+        "3",
+        1
+      ],
+      [
+        "(24)",
+        1
+      ],
+      [
+        "4. (2hdc, hdc inc) x 8 (32)",
+        1
+      ],
+      [
+        "4",
+        1
+      ],
+      [
+        "(32)",
+        1
+      ],
+      [
+        "(3hdc, hdc inc) x 8 (40)",
+        1
+      ],
+      [
+        "(40)",
+        1
+      ],
+      [
+        "6. (4hdc, hdc inc) x 8 (48)",
+        1
+      ],
+      [
+        "6",
+        1
+      ]
+    ]
+  }
+}

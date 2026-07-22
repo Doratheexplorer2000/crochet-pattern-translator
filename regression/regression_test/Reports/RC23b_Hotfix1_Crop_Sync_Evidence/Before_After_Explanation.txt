@@ -1,0 +1,23 @@
+RC23b Hotfix 1 Before / After Explanation
+
+Before hotfix:
+- RC23b Mission 1 set realtime_update=False.
+- streamlit-cropper then returned updated coordinates only on mouse:dblclick.
+- On touch devices, pressing Use This Area could confirm stale crop coordinates.
+- The selected-area preview and OCR crop were internally consistent, but they could both use the wrong stale box.
+
+After hotfix:
+- realtime_update=True is restored.
+- streamlit-cropper sends coordinates on Fabric object:modified when the crop rectangle is changed.
+- The visible crop rectangle should stay synchronized with select_area_draft_crop_box.
+- Use This Area should confirm the latest crop box known to Streamlit.
+
+Unchanged:
+- crop coordinate conversion
+- preview generation
+- OCR crop generation
+- OCR / parser / translation / overlay / diagnostics / image quality thresholds / workflow
+
+Human UAT required:
+- Browser automation was not used to verify real touch events.
+- iPhone Safari and Android confirmation are required because the original defect was observed on a real touch browser.

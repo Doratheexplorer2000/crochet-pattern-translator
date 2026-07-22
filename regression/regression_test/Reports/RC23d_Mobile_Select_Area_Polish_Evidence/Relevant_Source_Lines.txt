@@ -1,0 +1,26 @@
+30: APP_VERSION = "Pattern OCR Translator (Beta RC23d)"
+39: SELECT_AREA_CROPPER_STROKE_WIDTH = 4
+4785:         f"App version: {APP_VERSION}",
+5127:         "preview_selected_area": "Preview selected area only",
+5131:         "select_area_use": "Use This Area",
+5132:         "select_area_cancel": "Start Over",
+5219:         "preview_selected_area": "只預覽已選範圍",
+5223:         "select_area_use": "使用此範圍",
+5224:         "select_area_cancel": "重新選取",
+5311:         "preview_selected_area": "只预览已选范围",
+5315:         "select_area_use": "使用此范围",
+5316:         "select_area_cancel": "重新选择",
+5403:         "preview_selected_area": "選択範囲だけをプレビュー",
+5407:         "select_area_use": "この範囲を使う",
+5408:         "select_area_cancel": "選び直す",
+5504:     version = APP_VERSION.split("Beta ", 1)[-1].rstrip(")") if "Beta " in APP_VERSION else APP_VERSION
+5945:                 if st.button(t("select_area_use"), key=button_key, type="primary"):
+5964:                 if st.button(t("select_area_cancel"), key=button_key):
+5979:                     cancel_select_area_crop("select_area_cancel_button")
+5981:                     confirm_select_area_crop("select_area_use_button")
+6006:                         realtime_update=True,
+6012:                         stroke_width=SELECT_AREA_CROPPER_STROKE_WIDTH,
+6060:                     cancel_select_area_crop("select_area_cancel_fallback_button")
+6062:                     confirm_select_area_crop("select_area_use_fallback_button")
+6090:     selected_image = crop_image_by_box(image, crop_box)
+6095:             with st.expander(t("preview_selected_area"), expanded=True):

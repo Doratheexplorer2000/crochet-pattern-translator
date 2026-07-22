@@ -1,0 +1,14 @@
+RC23b Mission 1 Overlay Font Scaling Evidence
+
+Formula comparison:
+- RC23a line label font: max(16, min(30, int(image_width / 45)))
+- RC23b line label font: max(18, min(34, int(image_width / 38)))
+- RC23a marker font minimum: 18
+- RC23b marker font minimum: 20
+
+Pattern | Size | RC23a label | RC23b label | RC23a marker | RC23b marker
+--- | --- | ---: | ---: | ---: | ---:
+Pattern_001_Alien | 1242x1660 | 27px | 32px | 27px | 32px
+Pattern_005_Flowerpot_Soil_Block | 768x1022 | 17px | 20px | 18px | 20px
+Pattern_007_Fisherman_Hat | 780x1008 | 17px | 20px | 18px | 20px
+External_UAT_English_HDC | 1440x2038 | 30px | 34px | 30px | 34px

@@ -1,0 +1,18 @@
+{
+  "app_version_rc23d": true,
+  "stroke_width_constant_4": true,
+  "stroke_width_applied_to_cropper": true,
+  "realtime_update_true_preserved": true,
+  "use_this_area_english_unchanged": true,
+  "start_over_english": true,
+  "start_over_traditional_chinese": true,
+  "start_over_simplified_chinese": true,
+  "start_over_japanese": true,
+  "final_cropped_preview_retained": true,
+  "selected_crop_sent_to_ocr_retained": true,
+  "project_status_rc23d": true,
+  "project_status_records_stroke_change": true,
+  "project_status_records_start_over": true,
+  "project_status_records_handle_limitation": true,
+  "project_status_records_android_flash": true
+}

@@ -1,0 +1,18 @@
+RC23b Mission 1 Select Area UX Evidence
+
+Changed settings:
+- streamlit-cropper realtime_update: True -> False
+- Confirmed selected-area preview display: container-width -> fixed max preview width of 360 px
+
+Reasoning:
+- realtime_update=False reduces repeated Streamlit component updates while the user is dragging/resizing the crop box. This is expected to reduce jumpiness caused by mobile touch interaction + rerender feedback.
+- Fixed-width selected-area preview reduces the apparent oversized crop preview after confirmation while preserving the actual crop coordinates and OCR pipeline.
+
+Unchanged:
+- Select Area remains the default workflow.
+- Crop coordinates are still stored in original-image coordinates.
+- Display proxy architecture remains unchanged.
+- OCR, translation, parser, overlay placement, image quality thresholds are unchanged.
+
+Human verification required:
+- Actual mobile drag smoothness and handle usability must be validated on iPhone and Android.

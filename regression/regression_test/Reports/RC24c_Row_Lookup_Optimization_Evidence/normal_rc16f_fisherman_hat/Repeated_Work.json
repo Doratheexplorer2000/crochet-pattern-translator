@@ -1,0 +1,346 @@
+{
+  "norm_text": {
+    "unique": 596,
+    "total": 97643,
+    "top20": [
+      [
+        "3 sc in same stitch",
+        445
+      ],
+      [
+        "hdc inc",
+        411
+      ],
+      [
+        "hdc dec",
+        411
+      ],
+      [
+        "sl st",
+        379
+      ],
+      [
+        "bl",
+        379
+      ],
+      [
+        "blo",
+        379
+      ],
+      [
+        "fl",
+        379
+      ],
+      [
+        "flo",
+        379
+      ],
+      [
+        "join with sl st",
+        379
+      ],
+      [
+        "sc inc",
+        377
+      ],
+      [
+        "sc dec",
+        377
+      ],
+      [
+        "tr inc",
+        345
+      ],
+      [
+        "tr dec",
+        345
+      ],
+      [
+        "leave a long tail",
+        345
+      ],
+      [
+        "BPdc",
+        345
+      ],
+      [
+        "BPdtr",
+        345
+      ],
+      [
+        "FPdc",
+        345
+      ],
+      [
+        "FPdtr",
+        345
+      ],
+      [
+        "BPhdc",
+        343
+      ],
+      [
+        "FPhdc",
+        343
+      ]
+    ]
+  },
+  "lookup_term": {
+    "unique": 498,
+    "total": 16903,
+    "top20": [
+      [
+        "start from ... chain from hook|start in the ... chain from hook|work in the ... chain from hook",
+        34
+      ],
+      [
+        "in flo|front loop only|front loops only|work in front loop only|work in front loops only",
+        34
+      ],
+      [
+        "join with slst|join with a slip stitch|join with a sl st|join with a slst|join with a ss",
+        34
+      ],
+      [
+        "in blo|back loop only|back loops only|work in back loop only|work in back loops only",
+        34
+      ],
+      [
+        "leave long end to weave in|leave for sewing|leave for assembly|leave for now",
+        34
+      ],
+      [
+        "join with slst|join with a slip stitch|join with a sl st|join with a slst",
+        34
+      ],
+      [
+        "in fl|front loop|front loops|work in front loop|work in front loops",
+        34
+      ],
+      [
+        "in bl|back loop|back loops|work in back loop|work in back loops",
+        34
+      ],
+      [
+        "3 sc in one stitch|3 single crochet in one stitch",
+        34
+      ],
+      [
+        "3 dc in one stitch|3 double crochet in one stitch",
+        34
+      ],
+      [
+        "crochet 3 single stitches in single stitch",
+        34
+      ],
+      [
+        "crochet 3 double stitches in single stitch",
+        34
+      ],
+      [
+        "double treble crochet 2 stitches together",
+        34
+      ],
+      [
+        "half double crochet 2 stitches together",
+        34
+      ],
+      [
+        "half treble crochet 2 stitches together",
+        34
+      ],
+      [
+        "magic ring|magic circle|adjustable ring",
+        34
+      ],
+      [
+        "flatten and crochet two sides together",
+        34
+      ],
+      [
+        "repeat previous instructions backward",
+        34
+      ],
+      [
+        "double crochet 2 stitches together",
+        34
+      ],
+      [
+        "treble crochet 2 stitches together",
+        34
+      ]
+    ]
+  },
+  "lookup_row": {
+    "unique": 500,
+    "total": 16927,
+    "top20": [
+      [
+        "start from ... chain from hook|start in the ... chain from hook|work in the ... chain from hook",
+        34
+      ],
+      [
+        "in flo|front loop only|front loops only|work in front loop only|work in front loops only",
+        34
+      ],
+      [
+        "join with slst|join with a slip stitch|join with a sl st|join with a slst|join with a ss",
+        34
+      ],
+      [
+        "in blo|back loop only|back loops only|work in back loop only|work in back loops only",
+        34
+      ],
+      [
+        "leave long end to weave in|leave for sewing|leave for assembly|leave for now",
+        34
+      ],
+      [
+        "join with slst|join with a slip stitch|join with a sl st|join with a slst",
+        34
+      ],
+      [
+        "in fl|front loop|front loops|work in front loop|work in front loops",
+        34
+      ],
+      [
+        "in bl|back loop|back loops|work in back loop|work in back loops",
+        34
+      ],
+      [
+        "3 sc in one stitch|3 single crochet in one stitch",
+        34
+      ],
+      [
+        "3 dc in one stitch|3 double crochet in one stitch",
+        34
+      ],
+      [
+        "crochet 3 single stitches in single stitch",
+        34
+      ],
+      [
+        "crochet 3 double stitches in single stitch",
+        34
+      ],
+      [
+        "double treble crochet 2 stitches together",
+        34
+      ],
+      [
+        "half double crochet 2 stitches together",
+        34
+      ],
+      [
+        "half treble crochet 2 stitches together",
+        34
+      ],
+      [
+        "magic ring|magic circle|adjustable ring",
+        34
+      ],
+      [
+        "flatten and crochet two sides together",
+        34
+      ],
+      [
+        "repeat previous instructions backward",
+        34
+      ],
+      [
+        "double crochet 2 stitches together",
+        34
+      ],
+      [
+        "treble crochet 2 stitches together",
+        34
+      ]
+    ]
+  },
+  "replace_csv_terms_in_line": {
+    "unique": 33,
+    "total": 34,
+    "top20": [
+      [
+        "拉菲草渔夫帽",
+        2
+      ],
+      [
+        "R1:环起8x",
+        1
+      ],
+      [
+        "R2:8v",
+        1
+      ],
+      [
+        "R3:8(×.v)",
+        1
+      ],
+      [
+        "R4:8(2×.v)",
+        1
+      ],
+      [
+        "R5:8(3×.v)",
+        1
+      ],
+      [
+        "R6:8(4×.v)",
+        1
+      ],
+      [
+        "R7:8(5×.v)",
+        1
+      ],
+      [
+        "R8:不加减x",
+        1
+      ],
+      [
+        "R9:8(6x,v)",
+        1
+      ],
+      [
+        "R10:(7×.v)",
+        1
+      ],
+      [
+        "R11:不加减x",
+        1
+      ],
+      [
+        "R12:(10x,v)",
+        1
+      ],
+      [
+        "R13:不加减x",
+        1
+      ],
+      [
+        "R14:不加减交叉x",
+        1
+      ],
+      [
+        "R15:6(11x,v)",
+        1
+      ],
+      [
+        "R16:不加减交叉×",
+        1
+      ],
+      [
+        "R17:不加减x",
+        1
+      ],
+      [
+        "R18:不加减交叉×",
+        1
+      ],
+      [
+        "R19:不加减x",
+        1
+      ]
+    ]
+  }
+}

@@ -1,0 +1,16 @@
+RC23c Smoke Test
+
+Syntax check:
+PASS
+Command: PYTHONPYCACHEPREFIX=/tmp/crochet_pycache python3 -m py_compile pattern_translator/app.py
+
+Static source checks:
+PASS
+- APP_VERSION is RC23c.
+- realtime_update=True remains active.
+- final cropped preview remains active.
+- dimmed full-image crop previews are removed from editing and confirmed states.
+- crop coordinate conversion functions are unchanged.
+
+Browser/mobile limitation:
+No real touch-browser automation was performed. Mobile Human UAT is required.

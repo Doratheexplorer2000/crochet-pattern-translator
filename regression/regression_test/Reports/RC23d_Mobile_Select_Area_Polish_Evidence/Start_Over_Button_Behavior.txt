@@ -1,0 +1,12 @@
+Evidence: current Start Over button implementation after wording rename.
+
+def cancel_select_area_crop(button_key: str) -> None:
+                if st.button(t("select_area_cancel"), key=button_key):
+                    st.session_state["select_area_editing"] = False
+                    st.session_state["select_area_draft_crop_box"] = None
+                    try:
+                        st.rerun()
+                    except Exception:
+                        pass
+
+Assessment: This preserves the existing cancel/start-over behavior: it exits editing mode and discards the draft crop box. It does not change confirmed crop coordinates, OCR, or preview generation.

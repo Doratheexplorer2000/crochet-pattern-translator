@@ -6,3 +6,4 @@ opencv-python-headless==4.10.0.84
 paddleocr==3.6.0
 paddlepaddle==3.2.2
 streamlit-cropper
+gspread==6.2.1

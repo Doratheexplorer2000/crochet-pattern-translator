@@ -1,0 +1,10 @@
+RC23d crop synchronization invariant checks
+
+Evidence
+- realtime_update=True preserved: True
+- selected_image = crop_image_by_box(image, crop_box) retained: True
+- final Preview selected area only retained: True
+- No crop coordinate conversion helpers were edited for RC23d.
+
+Assessment
+RC23d changes only visual stroke width and localized button text. Crop synchronization should remain identical to RC23c / RC23b Hotfix 1. Real touch-device Human UAT is still required.

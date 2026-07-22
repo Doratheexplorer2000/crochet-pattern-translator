@@ -1,0 +1,25 @@
+RC23c Cropper API Evidence
+
+streamlit-cropper supported arguments inspected locally:
+st_cropper(img_file, realtime_update=True, default_coords=None, box_color='blue', aspect_ratio=None, return_type='image', box_algorithm=None, key=None, should_resize_image=True, stroke_width=3)
+
+Supported by library:
+- box_color
+- stroke_width
+- realtime_update
+- default_coords
+- aspect_ratio
+- return_type
+- should_resize_image
+
+Not exposed by library:
+- resize handle size
+- resize handle color
+- separate mobile touch target size
+- floating confirmation controls
+
+Engineering decision:
+- Keep realtime_update=True for selection correctness.
+- Use supported stroke_width=5 for modest border visibility improvement.
+- Do not implement handle-size changes because the current wrapper does not expose a supported option.
+- Do not use CSS/JavaScript hacks.

@@ -1,0 +1,7 @@
+Cropper handle limitation
+
+Evidence
+The installed streamlit-cropper wrapper exposes stroke_width and box_color, but not resize handle size or handle color.
+
+Assessment
+RC23d intentionally does not change crop handle behavior, handle color, or handle size. The crop handle visibility issue remains deferred until a future frontend migration or a supported cropper API becomes available.

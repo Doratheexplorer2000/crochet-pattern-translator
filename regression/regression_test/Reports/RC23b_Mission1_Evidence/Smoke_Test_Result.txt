@@ -1,0 +1,26 @@
+RC23b Mission 1 Smoke Test Result
+
+Syntax check:
+PASS
+Command: PYTHONPYCACHEPREFIX=/tmp/crochet_pycache python3 -m py_compile pattern_translator/app.py
+Result: no syntax errors.
+
+Streamlit launch check:
+PARTIAL PASS
+Command: python3 -m streamlit run pattern_translator/app.py --server.headless true --server.port 8581 --server.address 0.0.0.0
+Result: Streamlit printed the normal startup banner and bound a Python process to TCP *:8581.
+Local HTTP probe result: blocked by sandbox with Operation not permitted / connection failure, so browser-level verification was not claimed.
+Server cleanup: process stopped cleanly.
+
+Scope check:
+- No CSV file modified.
+- No OCR recognition code intentionally modified.
+- No OCR cleanup code intentionally modified.
+- No parser or translation behavior intentionally modified.
+- No Select Area default behavior changed.
+- No image quality threshold changed.
+
+Human UAT still required:
+- iPhone Select Area drag/resize smoothness.
+- Android overlay readability.
+- Real-device cropper handle visibility.

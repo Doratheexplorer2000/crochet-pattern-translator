@@ -1,0 +1,16 @@
+{
+  "OCR text normalization: clean_single_ocr_line": 0.0371545860000011,
+  "OCR text normalization": 1.5868514099999476,
+  "alias lookup / CSV term list": 3.1947409179999884,
+  "term lookup: lookup_row": 0.6307978240009551,
+  "term lookup: lookup_term": 65.8104017070002,
+  "CSV replacement loops": 83.61971554000002,
+  "translate_piece()": 57.81446787299997,
+  "translate_expression()": 126.65842825000007,
+  "line-by-line translation: translate_ocr_line": 84.012092584,
+  "expression parsing: split_expression_parts": 0.00041562300000919095,
+  "line-by-line translation: build_ocr_line_translations": 84.07416337500001,
+  "line-by-line translation: build_readable_line_translation": 0.0037681250000076716,
+  "line-by-line translation: build_overlay_export_text": 0.0018460830000037731,
+  "term matching: find_matches": 0.012736541999998963
+}

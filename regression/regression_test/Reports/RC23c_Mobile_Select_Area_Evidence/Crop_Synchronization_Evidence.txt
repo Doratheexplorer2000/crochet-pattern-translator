@@ -1,0 +1,18 @@
+Evidence
+
+Unchanged crop-coordinate chain:
+1. streamlit-cropper returns display-image coordinates.
+2. crop_box_from_cropper_result() clamps display coordinates.
+3. crop_box_display_to_original() maps display coordinates to original-image coordinates using floor(left/top) and ceil(right/bottom).
+4. Use This Area stores select_area_confirmed_crop_box and latest_crop_box.
+5. selected_image = crop_image_by_box(image, crop_box).
+6. Preview selected area only displays selected_image.
+7. OCR uses working_image = selected_image.
+
+Assessment
+
+RC23c changes the location of confirmation controls and removes redundant previews. It does not change coordinate conversion or crop image generation.
+
+Conclusion
+
+Crop synchronization logic remains the RC23b Hotfix 1 logic. Human UAT should verify that the visible crop rectangle, final cropped preview, and OCR area still match on touch devices.

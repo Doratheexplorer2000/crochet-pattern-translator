@@ -1,0 +1,22 @@
+Evidence
+
+Before RC23c:
+- Select Area editing mode rendered the interactive cropper.
+- The primary Cancel / Use This Area controls were below the cropper and below an additional dimmed full-image selection preview.
+- Mobile users could need to scroll through the touch-capturing cropper to reach Use This Area.
+- After confirming, the app showed a full-image dimmed red-rectangle preview, then later showed Preview selected area only.
+
+After RC23c:
+- In normal cropper mode, Cancel / Use This Area render above the interactive cropper.
+- The dimmed full-image selection preview during editing is removed.
+- The dimmed full-image confirmation preview after confirmation is removed.
+- Preview selected area only remains and is still the final preview before OCR.
+- Slider fallback still has Cancel / Use This Area controls after the sliders because no touch-capturing cropper is present.
+
+Assessment
+
+This reduces the mobile need to scroll for confirmation and removes one redundant confirmation surface without changing crop coordinates or OCR input generation.
+
+Conclusion
+
+Code-level regression supports the intended workflow change. Real mobile verification is still required for touch ergonomics.

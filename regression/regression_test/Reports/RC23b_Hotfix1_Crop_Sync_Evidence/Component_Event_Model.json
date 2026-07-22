@@ -1,0 +1,6 @@
+{
+  "app_realtime_update_setting": "True",
+  "python_doc_mentions_double_click_when_false": true,
+  "frontend_true_event": true,
+  "frontend_false_event": true
+}

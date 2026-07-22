@@ -1,0 +1,35 @@
+RC23b Diagnostic Timing Aggregation Evidence
+
+Purpose:
+Demonstrate the corrected aggregation rule using the same category structure that caused the External UAT inconsistency.
+This is an aggregation proof, not a performance benchmark.
+
+Before RC23b:
+Pattern parser time was calculated by summing nested/inclusive function timings.
+Example nested values:
+{
+  "line-by-line translation: build_ocr_line_translations": 71.709,
+  "line-by-line translation: translate_ocr_line": 58.0,
+  "OCR text normalization: clean_single_ocr_line": 0.647,
+  "translate_expression()": 91.0,
+  "translate_piece()": 76.0,
+  "expression parsing: split_expression_parts": 3.0
+}
+Old parser aggregate: 300.356 sec
+Top-level translation stage: 71.709 sec
+Result: parser bucket can exceed total stage time.
+
+After RC23b:
+Pattern parser time uses only the top-level inclusive build_ocr_line_translations() timing.
+New parser aggregate: 71.709 sec
+Top-level translation stage: 71.709 sec
+Result: parser bucket is internally consistent with total translation stage time.
+
+Diagnostic wording changed:
+- Before: Cumulative / overlapping aggregate
+- After: Top-level inclusive timing
+
+Unchanged:
+- Detailed nested profile timings remain available elsewhere.
+- No performance optimization was performed.
+- No translation behavior was modified.

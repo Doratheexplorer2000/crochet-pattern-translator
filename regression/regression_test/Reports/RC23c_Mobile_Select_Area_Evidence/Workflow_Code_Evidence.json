@@ -1,0 +1,14 @@
+{
+  "app_version": "Pattern OCR Translator (Beta RC23c)",
+  "cropper_realtime_update_true": true,
+  "cropper_stroke_width_constant": "5",
+  "cropper_uses_supported_stroke_width": true,
+  "cropper_mode_top_use_button": true,
+  "cropper_mode_top_cancel_button": true,
+  "fallback_use_button": true,
+  "fallback_cancel_button": true,
+  "editing_dimmed_full_image_preview_removed": true,
+  "confirmed_dimmed_full_image_preview_removed": true,
+  "final_cropped_preview_retained": true,
+  "crop_coordinate_conversion_unchanged": true
+}

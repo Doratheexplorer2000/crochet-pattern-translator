@@ -1,0 +1,39 @@
+=== Translation Statistics ===
+Pattern parser time: 300.356 sec
+CSV lookup time: 62.748 sec
+Regex processing time: 71.390 sec
+Translation replacement time: 71.394 sec
+Overlay text preparation time: 0.055 sec
+Total translation stage time: 71.709 sec
+
+OCR text line count: 29
+Pattern rows detected: 29
+Dictionary lookup attempts: 55163
+Dictionary matches: 0
+Regex replacements: N/A
+Regex passes estimated: 87855
+
+=== Timing Validation ===
+Pattern parser time:
+Type: Cumulative / overlapping aggregate
+Calculation method: Sum of nested decorated function wall times: build_ocr_line_translations, translate_ocr_line, clean_single_ocr_line, translate_expression(), translate_piece(), split_expression_parts. These functions call each other, so their timings overlap and can exceed total translation stage time.
+
+CSV lookup time:
+Type: Cumulative / overlapping aggregate
+Calculation method: Sum of lookup_row, lookup_term, alias term-list generation, and find_matches timings. lookup_term calls lookup_row, and find_matches performs lookups, so this bucket overlaps internally.
+
+Regex processing time:
+Type: Cumulative / inclusive function timing
+Calculation method: Uses CSV replacement loops timing from replace_csv_terms_in_line. That function includes regex checks plus lookup and replacement work, so it is not regex-only exclusive time.
+
+Translation replacement time:
+Type: Cumulative / overlapping aggregate
+Calculation method: Sum of CSV replacement loops and build_overlay_export_text. CSV replacement loops already include regex and lookup work, so this overlaps with CSV lookup and regex processing.
+
+Overlay text preparation time:
+Type: Cumulative / separate-stage aggregate
+Calculation method: Sum of make_line_translation_overlay profile timing and build_readable_line_translation. make_line_translation_overlay is accounted under overlay generation, not under the top-level Translation processing timer.
+
+Total translation stage time:
+Type: Top-level wall-clock timing
+Calculation method: Measured in the OCR success block as Translation processing. It covers build_ocr_line_translations, find_matches/readable translation, and build_overlay_export_text, but not every nested/profiled bucket listed above and not overlay generation.
