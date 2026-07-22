@@ -26,7 +26,7 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 from PIL import Image
-from analytics import (
+from crochet_intelligence.analytics import (
     WORKSHEET_PATTERN_TRANSLATION,
     ensure_analytics_session,
     get_session_translation_no,
