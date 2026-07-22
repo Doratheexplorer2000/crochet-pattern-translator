@@ -78,9 +78,9 @@ stitches_1_8e.csv
 ### RC21 Infrastructure: Google Sheets Usage Analytics
 
 - Mission: add anonymous Google Sheets usage analytics for Pattern Translator without changing OCR, parser, translation, overlay, Select Area, or CSV behavior.
-- Status: implemented locally. Live Google Sheets append is not yet validated and is awaiting Streamlit secrets configuration plus live smoke testing.
+- Status: implemented locally. Local Google Sheets append via spreadsheet ID is validated; deployed Streamlit live smoke testing is still pending after manual redeploy.
 - Destination: `Crochet Intelligence Usage Analytics` spreadsheet, `pattern_translation` worksheet.
-- Events: `app_open`, `image_uploaded`, `select_area_started`, `select_area_confirmed`, `translation_completed`, `translation_failed`, `download_png`, `download_txt`, and `feedback_clicked`.
+- Events: `app_open`, `image_uploaded`, `select_area_started`, `select_area_confirmed`, `translation_completed`, `translation_failed`, `download_png`, and `download_txt`.
 - Privacy: only anonymous usage statistics are collected, including country, app usage, and performance. IP addresses, personal information, uploaded images, OCR text, and translations are not stored in analytics.
 - Fail-safe rule: analytics failures must never interrupt OCR, translation, downloads, or feedback workflow.
 - Feedback migration: Pattern Translator Feedback Form migration to `crochetintelligence@gmail.com` is complete.

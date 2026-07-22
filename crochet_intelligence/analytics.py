@@ -11,6 +11,7 @@ from typing import Dict, Iterable, Mapping, Optional
 
 
 SPREADSHEET_NAME = "Crochet Intelligence Usage Analytics"
+SPREADSHEET_ID = "1XqLnKIiiMQajkrl0IWyKywscqAL7tEitVHiE1PLUTBM"
 WORKSHEET_PATTERN_TRANSLATION = "pattern_translation"
 
 ANALYTICS_COLUMNS = [
@@ -169,17 +170,25 @@ def _ensure_header(worksheet: object, worksheet_name: str) -> None:
             _console_log(f"header check failed: {exc}")
 
 
-def _append_row(credentials: Dict[str, object], worksheet_name: str, row: Dict[str, str]) -> None:
+def _append_row(credentials: Dict[str, object], worksheet_name: str, row: Dict[str, str], event_type: str) -> None:
+    stage = "authentication"
     try:
         import gspread  # Imported lazily so missing analytics dependencies never break app startup.
 
         client = gspread.service_account_from_dict(credentials)
-        sheet = client.open(SPREADSHEET_NAME)
+        stage = "spreadsheet_open"
+        sheet = client.open_by_key(SPREADSHEET_ID)
+        stage = "worksheet_open"
         worksheet = sheet.worksheet(worksheet_name)
+        stage = "header_check"
         _ensure_header(worksheet, worksheet_name)
+        stage = "append_row"
         worksheet.append_row([row.get(column, "") for column in ANALYTICS_COLUMNS], value_input_option="RAW")
     except Exception as exc:
-        _console_log(f"Google Sheets append failed: {exc}")
+        _console_log(
+            f"event={event_type or 'unknown'} stage={stage} failed: "
+            f"{type(exc).__name__}: {exc}"
+        )
 
 
 def track_event(
@@ -224,7 +233,7 @@ def track_event(
         }
         thread = threading.Thread(
             target=_append_row,
-            args=(credentials, worksheet_name, row),
+            args=(credentials, worksheet_name, row, str(event_type or "")),
             daemon=True,
         )
         thread.start()

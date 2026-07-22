@@ -5590,7 +5590,6 @@ def init_rc3_state():
     st.session_state.setdefault("duplicate_ocr_run_ignored_count", 0)
     st.session_state.setdefault("debug_report_ready", False)
     st.session_state.setdefault("last_successful_download_key", None)
-    st.session_state.setdefault("feedback_form_requested", False)
     st.session_state.setdefault("rc10b_diagnostic_events", [])
     st.session_state.setdefault("rc10b_image_signature_history", [])
     st.session_state.setdefault("rc10b_last_image_present", False)
@@ -5928,7 +5927,6 @@ if image_file is not None:
         st.session_state["rc10b_last_cropper_box"] = None
         st.session_state["debug_report_ready"] = False
         st.session_state["last_successful_download_key"] = None
-        st.session_state["feedback_form_requested"] = False
         st.session_state["rc3_image_signature"] = current_signature
         track_analytics_event("image_uploaded")
 
@@ -6595,11 +6593,7 @@ if image_file is not None:
         )
         st.markdown(f"<div class='report-action'>{html.escape(t('report_feedback_action'))}</div>", unsafe_allow_html=True)
         st.markdown(f"<div class='report-helper'>{html.escape(t('report_feedback_helper'))}</div>", unsafe_allow_html=True)
-        if st.button(t("send_feedback"), key="open_feedback_form_button"):
-            track_analytics_event("feedback_clicked")
-            st.session_state["feedback_form_requested"] = True
-        if st.session_state.get("feedback_form_requested"):
-            st.link_button(t("send_feedback"), FEEDBACK_FORM_URL)
+        st.link_button(t("send_feedback"), FEEDBACK_FORM_URL)
 
         if DEBUG_MODE and timings:
             with st.expander("Debug timings", expanded=False):
