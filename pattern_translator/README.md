@@ -2,7 +2,7 @@
 
 Mobile-first OCR translation for crochet pattern images.
 
-Current deployment candidate: **RC25**
+Current stable build: **RC25**
 
 Application entry point:
 
@@ -22,25 +22,30 @@ pattern_translator/app.py
 
 ## Current Product Status
 
-RC25 is the current Pattern Translator deployment candidate. It includes the accepted RC24c performance optimization plus the completed Pattern Translator analytics infrastructure.
+RC25 is the current Pattern Translator stable build. The first External UAT phase has concluded with positive results from real crochet users.
 
 Key validated behavior:
 
-- Select Area is the recommended default workflow.
-- Whole Pattern remains available.
+- Core OCR and translation workflow was successfully validated by real crochet users.
+- Overlay translation concept was validated.
+- Google Sheets analytics successfully collected real-world usage data.
+- The primary remaining issues are UX improvements rather than translation accuracy.
+- Whole Pattern proved more reliable in real-world testing and will become the default workflow.
+- Select Area remains available as an advanced / experimental feature until a future deployment platform improves cropper reliability.
 - `knowledge_base/data/master_stitches.csv` is the current production database.
 - `stitches_1_8e.csv` is archived as the accepted source snapshot.
 - Chinese foundation-chain and turning-chain semantics are separated.
-- Anonymous Google Sheets Usage Analytics is implemented locally and records app events and performance metrics without storing personal information, IP addresses, uploaded images, OCR text, or translations. Live Google Sheets append is awaiting Streamlit secrets configuration and live smoke testing.
+- Anonymous Google Sheets Usage Analytics records app events and performance metrics without storing personal information, IP addresses, uploaded images, OCR text, or translations.
 - Translation lookup performance was improved in RC24c by replacing repeated pandas row retrieval with a lightweight row lookup cache.
 - Regression evidence is stored under `regression/regression_test/Reports/`.
 
 ## Current Project Status
 
 - Official version: `Pattern OCR Translator (Beta RC25)`
-- Development phase: deployment preparation and analytics live validation before the next External UAT round
+- Current phase: Phase 1 - Product Hardening
 - Current production database: `knowledge_base/data/master_stitches.csv`
-- Next planned milestone: configure Streamlit secrets, deploy RC25 manually, and validate live Google Sheets append
+- Phase 1 priorities: make Whole Pattern the default workflow, upgrade Analytics to v2, build the Crochet Intelligence Landing Page, then evaluate and migrate to a more suitable deployment platform if appropriate.
+- Future testing: continue with occasional trusted-user testing and incremental fixes based on production evidence. Plan for a Soft Launch after Landing Page completion instead of another formal External UAT cycle.
 
 ## Run Locally
 

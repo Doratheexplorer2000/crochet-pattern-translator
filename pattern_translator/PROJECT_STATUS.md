@@ -1,6 +1,6 @@
 # Crochet Pattern Translator Project Status
 
-Last updated: 2026-07-22
+Last updated: 2026-07-27
 
 ## Current Version
 
@@ -14,7 +14,7 @@ pattern_translator/app.py
 
 ## Current Production Status
 
-Crochet Pattern OCR Translator is the current OCR-based pattern translation app. RC25 is the current stable deployment build. It includes the accepted RC24c performance optimization plus completed Pattern Translator Google Sheets analytics.
+Crochet Pattern OCR Translator is the current OCR-based pattern translation app. RC25 is the current stable deployment build. The first External UAT phase has concluded with positive results from real crochet users.
 
 ## Current Database
 
@@ -43,9 +43,17 @@ stitches_1_8e.csv
 
 ## Current Priorities
 
-- External UAT is now the active focus.
-- Use collected evidence to evaluate how long Streamlit Community Cloud remains viable, including quota limits, sleeping, crashes, and resource failures.
-- Later, evaluate a new deployment platform. Landing-page hosting should be decided only after the deployment-platform direction is clearer; do not assume it will be hosted on Streamlit.
+Current Phase: Phase 1 - Product Hardening.
+
+Phase 1 priorities, in order:
+
+1. Make Whole Pattern the default workflow.
+2. Upgrade Analytics to v2.
+3. Build the Crochet Intelligence Landing Page.
+4. Evaluate and migrate to a more suitable deployment platform if appropriate.
+
+- Continue occasional testing with trusted users and incremental fixes based on real production usage.
+- Plan for a Soft Launch after Landing Page completion instead of another formal External UAT cycle.
 - Keep OCR, parser, overlay, and database changes small and evidence-based.
 - Preserve the shared database strategy with Crochet Stitch Translator.
 
@@ -55,6 +63,16 @@ stitches_1_8e.csv
 - A download session reset was observed once on iPhone Safari and remains under monitoring.
 
 ## Current Release Notes
+
+### External UAT Phase 1
+
+- Status: completed.
+- Core OCR and translation workflow was successfully validated by real crochet users.
+- Overlay translation concept was validated.
+- Google Sheets analytics successfully collected real-world usage data.
+- Primary remaining issues are UX improvements rather than translation accuracy.
+- Whole Pattern mode proved more reliable than Select Area in real-world testing. Translation speed difference between Whole Pattern and Select Area is small, and Whole Pattern provides better future opportunities for overlay placement improvements.
+- Decision: Whole Pattern will become the default workflow. Select Area will remain available as an advanced / experimental feature until future deployment platform improvements make the cropper more reliable.
 
 ### RC25
 
@@ -88,6 +106,7 @@ stitches_1_8e.csv
 
 After External UAT:
 
+- Analytics v2 should record one genuine app visit per user session, eliminate system-generated `app_open` entries from automatic Streamlit wake-up / rerun events, keep raw logs, and add a cleaner summary/dashboard.
 - Review and refine the Analytics schema based on real user data.
 - Review the Google Feedback Form questions and workflow.
 - Reuse the improved analytics/feedback design when implementing Stitch Translator analytics.
