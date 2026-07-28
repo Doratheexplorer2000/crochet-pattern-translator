@@ -34,7 +34,7 @@ from crochet_intelligence.analytics import (
     track_event as analytics_track_event,
 )
 
-APP_VERSION = "Pattern OCR Translator (Beta RC25)"
+APP_VERSION = "Pattern OCR Translator (Beta RC26)"
 APP_DIR = Path(__file__).resolve().parent
 REPO_ROOT = APP_DIR.parent
 KNOWLEDGE_BASE_DIR = REPO_ROOT / "knowledge_base"
@@ -5129,7 +5129,7 @@ INTERFACE_LANGUAGES = {
         "upload_prompt": "Upload pattern image",
         "original_image": "Original image",
         "translation_area": "Translation area",
-        "translation_area_tip": "💡 Whole Pattern is available, but Select Area is usually faster and more accurate, especially for patterns with multiple sections or columns.",
+        "translation_area_tip": "💡 Select Area is optional and experimental. Use it when you need to translate only part of an image.",
         "area_label": "Area to Translate",
         "area_select": "Select Area",
         "area_left": "Left Column",
@@ -5221,7 +5221,7 @@ INTERFACE_LANGUAGES = {
         "upload_prompt": "上載圖樣圖片",
         "original_image": "原始圖片",
         "translation_area": "翻譯範圍",
-        "translation_area_tip": "💡 你仍可使用整個圖樣，但選取範圍通常更快、更準確，特別適合有多個段落或多欄的圖樣。",
+        "translation_area_tip": "💡 選取範圍是選用的實驗功能。需要只翻譯圖片的一部分時可以使用。",
         "area_label": "要翻譯的範圍",
         "area_select": "選取範圍",
         "area_left": "左欄",
@@ -5313,7 +5313,7 @@ INTERFACE_LANGUAGES = {
         "upload_prompt": "上传图样图片",
         "original_image": "原始图片",
         "translation_area": "翻译范围",
-        "translation_area_tip": "💡 你仍可使用整个图样，但选取范围通常更快、更准确，特别适合有多个段落或多栏的图样。",
+        "translation_area_tip": "💡 选取范围是选用的实验功能。需要只翻译图片的一部分时可以使用。",
         "area_label": "要翻译的范围",
         "area_select": "选取范围",
         "area_left": "左栏",
@@ -5405,7 +5405,7 @@ INTERFACE_LANGUAGES = {
         "upload_prompt": "パターン画像をアップロード",
         "original_image": "元の画像",
         "translation_area": "翻訳する範囲",
-        "translation_area_tip": "💡 パターン全体も使用できますが、範囲を選択するほうが通常は速く、より正確です。複数のセクションや列があるパターンに特に適しています。",
+        "translation_area_tip": "💡 範囲選択は任意の実験的な機能です。画像の一部だけを翻訳したい場合に使用してください。",
         "area_label": "翻訳する範囲",
         "area_select": "範囲を選択",
         "area_left": "左の列",
@@ -5962,9 +5962,9 @@ if image_file is not None:
 
     st.subheader(t("translation_area"))
 
-    area_options = ["Select Area", "Whole Pattern"]
+    area_options = ["Whole Pattern", "Select Area"]
     if st.session_state.get("translation_area_mode_radio") not in area_options:
-        st.session_state["translation_area_mode_radio"] = "Select Area"
+        st.session_state["translation_area_mode_radio"] = "Whole Pattern"
     area_mode = st.radio(
         t("area_label"),
         area_options,
@@ -5973,7 +5973,7 @@ if image_file is not None:
         index=area_options.index(st.session_state["translation_area_mode_radio"]),
         format_func=lambda value: t(AREA_LABEL_KEYS.get(value, value)),
     )
-    if area_mode == "Whole Pattern":
+    if area_mode == "Select Area":
         st.caption(t("translation_area_tip"))
 
     area_map = {

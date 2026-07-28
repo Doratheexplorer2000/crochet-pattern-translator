@@ -1,6 +1,6 @@
 # Crochet Intelligence
 
-Repository for the current Crochet Intelligence Streamlit applications.
+Repository for the current Crochet Intelligence applications.
 
 ## Applications
 
@@ -14,22 +14,33 @@ Both applications remain independent. They now share the same production stitch 
 
 ## Current Cross-App Priorities
 
-Immediate work:
+Current focus:
 
-- Pattern Translator analytics is implemented locally. Configure Streamlit secrets and run live Google Sheets append smoke testing.
-- Pattern Translator RC25 is the current deployment candidate.
+- Pattern Translator RC26 is the current stable local build.
+- Whole Pattern is now the default Pattern Translator workflow.
+- Select Area remains available as an optional / experimental workflow.
+- RC26 passed local developer validation and Human UAT.
+- RC26 is intentionally local only: no commit, no push, and no Streamlit Community Cloud deployment.
+- RC27a Railway preparation completed.
+- RC27b Railway deployment spike passed.
+- Railway is validated as the preferred production deployment platform for Pattern Translator.
+- Pattern Translator successfully runs on Railway using Docker.
+- PaddleOCR, Google Sheets analytics, downloads, overlay generation, restart validation, and post-restart OCR all passed on Railway.
+- Railway Hobby resource usage during the spike was suitable for low-volume production: peak RAM approximately 1.84 GB, normal RAM approximately 1.29 GB, and peak CPU approximately 1.39 vCPU.
+- Streamlit Community Cloud is retained temporarily as a backup platform during migration.
 - Pattern Translator Feedback Form migration to `crochetintelligence@gmail.com` is complete.
-- Add the reusable analytics implementation to Crochet Stitch Translator next.
+- Pattern Translator analytics is implemented and validated, but `app_open` duplicate passive entries are a known Streamlit Community Cloud lifecycle limitation. The analytics model will be revisited after migration to a new deployment platform.
 
-After analytics live validation:
+Next:
 
-- Conduct External UAT while collecting real usage, performance, failure, and reliability data.
-- Use collected evidence to evaluate Streamlit Community Cloud viability, including quota limits, sleeping, crashes, and resource failures.
+- Upgrade Analytics to v2.
+- Prepare the Railway production deployment path.
+- Decide where the Crochet Intelligence landing page should be hosted after the Railway production path is clearer.
+- Add the reusable analytics implementation to Crochet Stitch Translator.
 
 Later:
 
-- Evaluate a new deployment platform.
-- Decide where the Crochet Intelligence landing page should be hosted only after the deployment-platform direction is clearer. Do not assume the landing page will be hosted on Streamlit.
+- Continue incremental trusted-user testing and prepare for Soft Launch.
 
 ## Shared Knowledge Base
 
@@ -64,6 +75,26 @@ Stitch Translator:
 ```bash
 python3 -m streamlit run stitch_translator/app.py
 ```
+
+## Deployment Workflow
+
+Recommended Pattern Translator workflow:
+
+```text
+Developer
+↓
+Local development
+↓
+Local validation
+↓
+Human UAT
+↓
+Railway deployment
+↓
+Production validation
+```
+
+Streamlit Community Cloud is no longer the primary deployment direction for Pattern Translator, but remains a temporary backup during migration.
 
 ## Documentation
 

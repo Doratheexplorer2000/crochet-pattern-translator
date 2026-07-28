@@ -263,3 +263,41 @@ Conclusion
 - Only claims that are fully supported by the evidence.
 
 Do not mix these three sections together.
+
+---
+
+# 16. Local-only Release Candidates
+
+Some RCs may be intentionally local only.
+
+When an RC is marked local only:
+
+- do not commit;
+- do not push;
+- do not deploy;
+- record the local validation status in existing project documentation;
+- wait for explicit approval before any repository or deployment action.
+
+Local-only completion means the requested local engineering and Human UAT checks are complete. It does not imply public release or deployment readiness.
+
+---
+
+# 17. Deployment Workflow
+
+Pattern Translator production deployment direction is Railway.
+
+Recommended workflow:
+
+Developer
+↓
+Local development
+↓
+Local validation
+↓
+Human UAT
+↓
+Railway deployment
+↓
+Production validation
+
+Streamlit Community Cloud may remain as a temporary backup during migration, but should not be treated as the primary production platform unless explicitly reinstated.
