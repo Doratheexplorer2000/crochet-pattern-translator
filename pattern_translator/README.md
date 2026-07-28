@@ -2,7 +2,7 @@
 
 Mobile-first OCR translation for crochet pattern images.
 
-Current stable build: **RC26**
+Current production baseline: **RC28**
 
 Application entry point:
 
@@ -22,7 +22,7 @@ pattern_translator/app.py
 
 ## Current Product Status
 
-RC26 is the current Pattern Translator stable local build. The first External UAT phase has concluded with positive results from real crochet users. RC27 validated Railway as the preferred production deployment platform.
+RC28 is the current Pattern Translator production baseline. The first External UAT phase has concluded with positive results from real crochet users. RC27 validated Railway as the preferred production deployment platform, and RC28 completed the Railway production release.
 
 Key validated behavior:
 
@@ -33,12 +33,14 @@ Key validated behavior:
 - Whole Pattern proved more reliable in real-world testing and is now the default workflow.
 - Select Area remains available as an advanced / experimental feature until a future deployment platform improves cropper reliability.
 - RC26 passed local developer validation and Human UAT.
-- RC26 is intentionally local only: no commit, no push, and no Streamlit Community Cloud deployment.
 - RC27a Railway preparation completed, and RC27b Railway deployment spike passed.
 - Pattern Translator successfully runs on Railway using Docker.
 - Railway validation passed for PaddleOCR initialization, Google Sheets analytics, downloads, overlay generation, restart recovery, and post-restart OCR.
+- RC28 fixed the Diagnostic Report Railway session-state regression.
+- Railway production validation completed successfully.
+- Desktop Human UAT passed on Railway production.
 - Railway Hobby usage during the spike remained suitable for low-volume production: peak RAM approximately 1.84 GB, normal RAM approximately 1.29 GB, and peak CPU approximately 1.39 vCPU.
-- Railway is now the production deployment direction. Streamlit Community Cloud remains a temporary backup platform during migration.
+- Railway is now the primary production deployment platform. Streamlit Community Cloud remains a backup platform.
 - `app_open` analytics behavior remains unchanged. Duplicate passive `app_open` rows are a known Streamlit Community Cloud lifecycle limitation and will be revisited after migration to a new deployment platform.
 - `knowledge_base/data/master_stitches.csv` is the current production database.
 - `stitches_1_8e.csv` is archived as the accepted source snapshot.
@@ -49,11 +51,17 @@ Key validated behavior:
 
 ## Current Project Status
 
-- Official version: `Pattern OCR Translator (Beta RC26)`
-- Current phase: Railway migration preparation after RC27 validation
+- Official production baseline: `RC28`
+- Current app version string: `Pattern OCR Translator (Beta RC26)`
+- Current phase: Railway production hardening
 - Current production database: `knowledge_base/data/master_stitches.csv`
-- Current focus: prepare the production migration path on Railway, keep Streamlit Community Cloud temporarily as backup, then revisit Analytics v2 and landing-page hosting decisions once Railway production deployment is ready.
+- Current focus: operate Pattern Translator on Railway as the primary production platform, keep Streamlit Community Cloud as backup, then revisit Analytics v2 and landing-page hosting decisions after more production evidence.
 - Future testing: continue with occasional trusted-user testing and incremental fixes based on production evidence. Plan for a Soft Launch after Landing Page completion instead of another formal External UAT cycle.
+
+Known non-blocking polish items:
+
+- Version number is not currently shown in the UI.
+- Minor overlay text box alignment refinement is deferred.
 
 ## Run Locally
 
@@ -79,7 +87,7 @@ Railway deployment
 Production validation
 ```
 
-Railway is the preferred production deployment platform after RC27 validation. Streamlit Community Cloud is retained temporarily as a backup platform during migration.
+Railway is the primary production deployment platform after RC28 production validation. Streamlit Community Cloud is retained as a backup platform.
 
 ## Required Runtime Files
 

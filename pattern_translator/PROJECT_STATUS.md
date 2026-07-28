@@ -1,10 +1,12 @@
 # Crochet Pattern Translator Project Status
 
-Last updated: 2026-07-28
+Last updated: 2026-07-29
 
 ## Current Version
 
-Application version: `Pattern OCR Translator (Beta RC26)`
+Production baseline: `RC28`
+
+Application version string: `Pattern OCR Translator (Beta RC26)`
 
 Entry point:
 
@@ -14,7 +16,7 @@ pattern_translator/app.py
 
 ## Current Production Status
 
-Crochet Pattern OCR Translator is the current OCR-based pattern translation app. RC26 is the current stable local build. The first External UAT phase has concluded with positive results from real crochet users. RC27 validated Railway as the preferred production deployment platform.
+Crochet Pattern OCR Translator is the current OCR-based pattern translation app. RC28 is the current production baseline. The first External UAT phase has concluded with positive results from real crochet users. Railway is now the primary production deployment platform.
 
 ## Current Database
 
@@ -43,13 +45,13 @@ stitches_1_8e.csv
 
 ## Current Priorities
 
-Current Phase: Railway migration preparation after RC27 validation.
+Current Phase: Railway production hardening after RC28 release.
 
 Current focus:
 
-1. Prepare the production migration path on Railway.
-2. Keep Streamlit Community Cloud temporarily as a backup platform during migration.
-3. Revisit Analytics v2 and landing-page hosting decisions after the Railway production path is ready.
+1. Operate Pattern Translator on Railway as the primary production platform.
+2. Keep Streamlit Community Cloud as a backup platform.
+3. Revisit Analytics v2 and landing-page hosting decisions after more Railway production evidence is available.
 
 - Continue occasional testing with trusted users and incremental fixes based on real production usage.
 - Plan for a Soft Launch after Landing Page completion instead of another formal External UAT cycle.
@@ -59,9 +61,20 @@ Current focus:
 ## Known Issues
 
 - Android overlay font may appear relatively small.
-- A download session reset was observed once on iPhone Safari and remains under monitoring.
+- Version number is not currently shown in the UI.
+- Minor overlay text box alignment refinement is deferred.
 
 ## Current Release Notes
+
+### RC28
+
+- Mission: finalize Railway production release after RC26 Whole Pattern default workflow, RC27 Railway migration, and the Diagnostic Report download hotfix.
+- Status: completed.
+- Diagnostic Report fix: Railway session-state regression after Diagnostic Report download was fixed by preventing the Diagnostic Report download button from triggering a Streamlit rerun.
+- Validation: local validation passed, Railway production deployment passed, and Railway Desktop Human UAT passed.
+- Production baseline: RC28 is now the Pattern Translator production baseline.
+- Deployment platform: Railway is now the primary production deployment platform. Streamlit Community Cloud remains available as a backup platform.
+- Non-blocking items: version number is not currently shown in the UI; minor overlay text box alignment refinement is deferred.
 
 ### External UAT Phase 1
 

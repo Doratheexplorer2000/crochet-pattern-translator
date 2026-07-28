@@ -16,27 +16,29 @@ Both applications remain independent. They now share the same production stitch 
 
 Current focus:
 
-- Pattern Translator RC26 is the current stable local build.
+- Pattern Translator RC28 is the current production baseline.
 - Whole Pattern is now the default Pattern Translator workflow.
 - Select Area remains available as an optional / experimental workflow.
 - RC26 passed local developer validation and Human UAT.
-- RC26 is intentionally local only: no commit, no push, and no Streamlit Community Cloud deployment.
 - RC27a Railway preparation completed.
 - RC27b Railway deployment spike passed.
-- Railway is validated as the preferred production deployment platform for Pattern Translator.
+- RC28 Railway production release completed.
+- Railway is now the primary production deployment platform for Pattern Translator.
 - Pattern Translator successfully runs on Railway using Docker.
 - PaddleOCR, Google Sheets analytics, downloads, overlay generation, restart validation, and post-restart OCR all passed on Railway.
+- The Diagnostic Report Railway session-state regression was fixed and verified in Railway production.
+- Railway production validation and Desktop Human UAT passed.
 - Railway Hobby resource usage during the spike was suitable for low-volume production: peak RAM approximately 1.84 GB, normal RAM approximately 1.29 GB, and peak CPU approximately 1.39 vCPU.
-- Streamlit Community Cloud is retained temporarily as a backup platform during migration.
+- Streamlit Community Cloud is retained as a backup platform.
 - Pattern Translator Feedback Form migration to `crochetintelligence@gmail.com` is complete.
 - Pattern Translator analytics is implemented and validated, but `app_open` duplicate passive entries are a known Streamlit Community Cloud lifecycle limitation. The analytics model will be revisited after migration to a new deployment platform.
 
 Next:
 
 - Upgrade Analytics to v2.
-- Prepare the Railway production deployment path.
-- Decide where the Crochet Intelligence landing page should be hosted after the Railway production path is clearer.
+- Decide where the Crochet Intelligence landing page should be hosted after Railway production operation has more evidence.
 - Add the reusable analytics implementation to Crochet Stitch Translator.
+- Address non-blocking polish items: expose the version number in the UI and refine minor overlay text box alignment.
 
 Later:
 
