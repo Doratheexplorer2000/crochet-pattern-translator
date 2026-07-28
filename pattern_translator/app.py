@@ -5535,6 +5535,7 @@ def download_button_rc3(
     key: str,
     success_message: Optional[str] = None,
     analytics_event_type: Optional[str] = None,
+    prevent_rerun: bool = False,
 ):
     """Render a download button and show a shared public confirmation after click."""
     def mark_download_complete(download_key: str = key) -> None:
@@ -5552,7 +5553,7 @@ def download_button_rc3(
             file_name=file_name,
             mime=mime,
             key=key,
-            on_click=mark_download_complete,
+            on_click="ignore" if prevent_rerun else mark_download_complete,
         )
     except TypeError:
         # Older Streamlit fallback. Results are still preserved by session_state.
@@ -5562,9 +5563,9 @@ def download_button_rc3(
             file_name=file_name,
             mime=mime,
             key=key,
-            on_click=mark_download_complete,
+            on_click="ignore" if prevent_rerun else mark_download_complete,
         )
-    if st.session_state.get("last_successful_download_key") == key:
+    if not prevent_rerun and st.session_state.get("last_successful_download_key") == key:
         try:
             default_success = t("download_success")
         except Exception:
@@ -6590,6 +6591,7 @@ if image_file is not None:
             mime="text/plain",
             key="download_debug_report_txt",
             success_message=t("diagnostic_download_success"),
+            prevent_rerun=True,
         )
         st.markdown(f"<div class='report-action'>{html.escape(t('report_feedback_action'))}</div>", unsafe_allow_html=True)
         st.markdown(f"<div class='report-helper'>{html.escape(t('report_feedback_helper'))}</div>", unsafe_allow_html=True)
