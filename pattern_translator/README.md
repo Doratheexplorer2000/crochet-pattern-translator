@@ -47,15 +47,20 @@ Key validated behavior:
 - Chinese foundation-chain and turning-chain semantics are separated.
 - Anonymous Google Sheets Usage Analytics records app events and performance metrics without storing personal information, IP addresses, uploaded images, OCR text, or translations.
 - Translation lookup performance was improved in RC24c by replacing repeated pandas row retrieval with a lightweight row lookup cache.
+- RC42 completed the first local Engine Extraction by moving the CSV terminology / lookup engine into `pattern_translator/engine/terminology.py`.
+- Streamlit cache behavior was intentionally preserved through app-level wrappers.
+- RC42 regression confirmed `209 / 209` translation cases identical, Human UAT passed, and no user-visible behavior changed.
+- RC42 remains local only: no production deployment and no GitHub push. RC28 remains the current production baseline.
 - Regression evidence is stored under `regression/regression_test/Reports/`.
 
 ## Current Project Status
 
 - Official production baseline: `RC28`
 - Current app version string: `Pattern OCR Translator (Beta RC26)`
-- Current phase: Railway production hardening
+- Current phase: phased post-Streamlit migration preparation
+- Latest local extraction: `RC42` terminology engine extraction completed and Human UAT passed.
 - Current production database: `knowledge_base/data/master_stitches.csv`
-- Current focus: operate Pattern Translator on Railway as the primary production platform, keep Streamlit Community Cloud as backup, then revisit Analytics v2 and landing-page hosting decisions after more production evidence.
+- Current focus: preserve RC28 as the Railway production baseline, begin migration locally only, and separate business logic from Streamlit before replacing the frontend.
 - Future testing: continue with occasional trusted-user testing and incremental fixes based on production evidence. Plan for a Soft Launch after Landing Page completion instead of another formal External UAT cycle.
 
 Known non-blocking polish items:
@@ -133,9 +138,9 @@ Future RCs should provide raw evidence, not only PASS/FAIL summaries.
 
 ## Future Architecture
 
-Both current apps should remain independent during Streamlit deployment.
+RC40 approved a phased post-Streamlit migration for Pattern Translator. The migration starts locally only and should not change GitHub, Railway production, or the Streamlit backup path until validated.
 
-Shared Python utilities and a unified Crochet Intelligence platform are future migration topics, not current implementation requirements.
+The first migration objective is to separate OCR, parser, translation, overlay, diagnostics, analytics integration, and knowledge-base access from Streamlit UI/session code. RC28 on Railway remains the production rollback target throughout migration.
 
 See:
 

@@ -301,3 +301,21 @@ Railway deployment
 Production validation
 
 Streamlit Community Cloud may remain as a temporary backup during migration, but should not be treated as the primary production platform unless explicitly reinstated.
+
+---
+
+# 18. Migration Safety
+
+Architecture migration work must preserve the current production baseline as a rollback target.
+
+For the approved post-Streamlit migration:
+
+- begin locally only;
+- do not push migration work to GitHub until the local baseline and first extraction step have been reviewed;
+- do not deploy migration builds to Railway until explicitly approved;
+- keep RC28 Railway production fully recoverable;
+- separate business logic from Streamlit before replacing the frontend;
+- do not rewrite business logic that has already passed Human UAT and regression simply because the presentation layer changes;
+- prefer Git tags and local branches over duplicating the repository.
+
+Migration commits should be small and organized by reversible engineering step, such as baseline capture, business-logic extraction, API introduction, frontend prototype, and deployment spike.

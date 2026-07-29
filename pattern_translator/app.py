@@ -17,7 +17,6 @@ import hashlib
 import math
 import tempfile
 import time
-import sys
 import unicodedata
 from pathlib import Path
 from typing import Callable, Dict, List, Tuple, Optional
@@ -33,6 +32,7 @@ from crochet_intelligence.analytics import (
     increment_session_translation_no,
     track_event as analytics_track_event,
 )
+from pattern_translator.engine import terminology as terminology_engine
 
 APP_VERSION = "Pattern OCR Translator (Beta RC26)"
 APP_DIR = Path(__file__).resolve().parent
@@ -78,6 +78,13 @@ def profile_function(time_name: str, count_name: str):
                     profile_add_time(time_name, time.perf_counter() - profile_start)
         return wrapped
     return decorator
+
+
+terminology_engine.configure_profile_context(
+    lambda: TRANSLATION_PROFILE,
+    profile_count,
+    profile_add_time,
+)
 
 st.set_page_config(page_title="Crochet Translator", page_icon="🧶", layout="centered")
 
@@ -165,45 +172,11 @@ div[data-testid="stFileUploader"] section:hover {
 # -----------------------------
 # Text normalisation
 # -----------------------------
-ZH_VARIANTS = str.maketrans({
-    "钩": "鈎", "勾": "鈎", "针": "針", "锁": "鎖", "长": "長",
-    "编": "編", "织": "織", "线": "線", "绕": "繞", "组": "組",
-    "环": "環", "双": "雙", "单": "單", "减": "減", "裏": "裡",
-    "里": "裡", "辫": "辮", "结": "結", "记": "記", "内": "內",
-    "后": "後",
-})
-
 def norm_text(value: object) -> str:
-    profile_count("norm_text calls")
-    if TRANSLATION_PROFILE is not None:
-        try:
-            caller = sys._getframe(1).f_code.co_name
-        except Exception:
-            caller = "unknown"
-        profile_count(f"norm_text caller: {caller}")
-    profile_start = time.perf_counter() if TRANSLATION_PROFILE is not None else None
-    if value is None or pd.isna(value):
-        if profile_start is not None:
-            profile_add_time("OCR text normalization", time.perf_counter() - profile_start)
-        return ""
-    text = str(value).strip()
-    text = unicodedata.normalize("NFKC", text)
-    text = text.translate(ZH_VARIANTS)
-    text = text.lower()
-    text = re.sub(r"[\u200b\u200c\u200d]", "", text)
-    text = re.sub(r"[“”‘’'\"`´]", "", text)
-    text = re.sub(r"\s+", " ", text)
-    out = text.strip()
-    if profile_start is not None:
-        profile_add_time("OCR text normalization", time.perf_counter() - profile_start)
-    return out
+    return terminology_engine.norm_text(value)
 
 def split_aliases(value: object) -> List[str]:
-    if value is None or pd.isna(value):
-        return []
-    raw = str(value)
-    parts = re.split(r"[|,;；，/]+", raw)
-    return [p.strip() for p in parts if p.strip()]
+    return terminology_engine.split_aliases(value)
 
 # -----------------------------
 # Load data and build index
@@ -218,62 +191,19 @@ def load_database() -> pd.DataFrame:
     return df
 
 def get_active_search_df(df: pd.DataFrame) -> pd.DataFrame:
-    if df is None or df.empty or "search_status" not in df.columns:
-        return df
-    status = df["search_status"].fillna("").astype(str).str.strip().str.lower()
-    return df[(status == "") | (status == "active")].copy()
+    return terminology_engine.get_active_search_df(df)
 
 def get_source_columns(source_mode: str) -> List[str]:
-    if source_mode in ["English — UK", "English UK terms"]:
-        return ["UK_term", "UK_term_alias", "UK_abb", "UK_abb1"]
-    if source_mode in ["English — US", "English US terms"]:
-        return ["US_term", "US_term_alias", "US_abb", "US_abb1"]
-    if source_mode in ["Traditional Chinese", "Simplified Chinese", "Chinese"]:
-        return ["Chinese_term", "Chinese_term_alias", "Chinese_abb"]
-    if source_mode == "Japanese":
-        return ["Japanese", "Japanese_alias"]
-    return [
-        "US_term", "US_term_alias", "US_abb", "US_abb1",
-        "UK_term", "UK_term_alias", "UK_abb", "UK_abb1",
-        "Chinese_term", "Chinese_term_alias", "Chinese_abb",
-        "Japanese", "Japanese_alias",
-    ]
+    return terminology_engine.get_source_columns(source_mode)
 
 @st.cache_data
 def build_term_index(df: pd.DataFrame, source_mode: str) -> Dict[str, int]:
-    df = get_active_search_df(df)
-    cols = [c for c in get_source_columns(source_mode) if c in df.columns]
-    index: Dict[str, int] = {}
-    for i, row in df.iterrows():
-        for col in cols:
-            values = [row.get(col, "")] + split_aliases(row.get(col, ""))
-            for v in values:
-                key = norm_text(v)
-                if key and key not in index:
-                    index[key] = i
-    return index
+    return terminology_engine.build_term_index(df, source_mode)
 
 
 @st.cache_data
 def build_all_term_index(df: pd.DataFrame) -> Dict[str, int]:
-    df = get_active_search_df(df)
-    fallback_cols = [
-        "US_term", "US_term_alias", "US_abb", "US_abb1",
-        "UK_term", "UK_term_alias", "UK_abb", "UK_abb1",
-        "Chinese_term", "Chinese_term_alias", "Chinese_abb",
-        "Japanese", "Japanese_alias",
-    ]
-    all_index: Dict[str, int] = {}
-    for i, row in df.iterrows():
-        for col in fallback_cols:
-            if col not in df.columns:
-                continue
-            values = [row.get(col, "")] + split_aliases(row.get(col, ""))
-            for value in values:
-                key = norm_text(value)
-                if key and key not in all_index:
-                    all_index[key] = i
-    return all_index
+    return terminology_engine.build_all_term_index(df)
 
 
 # -----------------------------
@@ -1073,29 +1003,11 @@ def find_matches(ocr_text: str, df: pd.DataFrame, index: Dict[str, int]) -> Tupl
 # -----------------------------
 # Pattern parser / interpreter
 # -----------------------------
-SIMP_MAP = str.maketrans({
-    "針": "针", "鎖": "锁", "長": "长", "環": "环", "編": "编", "織": "织",
-    "線": "线", "減": "减", "鈎": "钩", "鉤": "钩", "雙": "双", "單": "单",
-    "組": "组", "記": "记", "裡": "里", "辮": "辫", "結": "结", "狀": "状",
-    "內": "内", "後": "后",
-})
-
 def to_simplified(text: str) -> str:
-    return str(text).translate(SIMP_MAP)
+    return terminology_engine.to_simplified(text)
 
 def term_from_row(row: pd.Series, output_mode: str, prefer_abbrev: bool = False) -> str:
-    """Return the same crochet concept in the user's chosen output language."""
-    if output_mode == "Traditional Chinese":
-        return str(row.get("Chinese_term", "") or row.get("US_term", "")).strip()
-    if output_mode == "Simplified Chinese":
-        return to_simplified(str(row.get("Chinese_term", "") or row.get("US_term", "")).strip())
-    if output_mode in ["English — US", "English US terms"]:
-        return str((row.get("US_abb", "") if prefer_abbrev else row.get("US_term", "")) or row.get("US_term", "")).strip()
-    if output_mode in ["English — UK", "English UK terms"]:
-        return str((row.get("UK_abb", "") if prefer_abbrev else row.get("UK_term", "")) or row.get("UK_term", "") or row.get("US_term", "")).strip()
-    if output_mode == "Japanese":
-        return str(row.get("Japanese", "") or row.get("US_term", "")).strip()
-    return str(row.get("Chinese_term", "") or row.get("US_term", "")).strip()
+    return terminology_engine.term_from_row(row, output_mode, prefer_abbrev=prefer_abbrev)
 
 def format_counted_term(term_text: str, number: str, kind: str, output_mode: str) -> str:
     kind = kind.lower()
@@ -1452,22 +1364,7 @@ def row_to_chinese(row: pd.Series) -> str:
     return zh or str(row.get("US_term", "")).strip()
 
 
-NORMALIZED_LOOKUP_INDEX_STATS = {
-    "enabled": "Yes",
-    "last_key": "",
-    "build_count": 0,
-    "cache_hits": 0,
-    "cache_misses": 0,
-    "index_size": 0,
-    "duplicate_keys": 0,
-    "indexed_lookup_attempts": 0,
-    "indexed_lookup_hits": 0,
-    "indexed_lookup_misses": 0,
-    "fallback_lookup_attempts": 0,
-    "fallback_lookup_hits": 0,
-    "fallback_lookup_misses": 0,
-    "index_error": "",
-}
+NORMALIZED_LOOKUP_INDEX_STATS = terminology_engine.NORMALIZED_LOOKUP_INDEX_STATS
 
 
 def build_normalized_lookup_index(
@@ -1475,405 +1372,66 @@ def build_normalized_lookup_index(
     all_term_index: Dict[str, int],
     source_mode: str,
 ) -> Dict[str, int]:
-    NORMALIZED_LOOKUP_INDEX_STATS["last_key"] = f"source_mode:{source_mode}"
-    NORMALIZED_LOOKUP_INDEX_STATS["cache_misses"] += 1
-    NORMALIZED_LOOKUP_INDEX_STATS["build_count"] += 1
-    combined: Dict[str, int] = {}
-    duplicate_count = 0
-    for term_key, row_idx in index.items():
-        if term_key and term_key not in combined:
-            combined[term_key] = row_idx
-        elif term_key:
-            duplicate_count += 1
-    for term_key, row_idx in all_term_index.items():
-        if term_key and term_key not in combined:
-            combined[term_key] = row_idx
-        elif term_key:
-            duplicate_count += 1
-    NORMALIZED_LOOKUP_INDEX_STATS["index_size"] = len(combined)
-    NORMALIZED_LOOKUP_INDEX_STATS["duplicate_keys"] = duplicate_count
-    return combined
+    return terminology_engine.build_normalized_lookup_index(index, all_term_index, source_mode)
 
 
 def build_row_lookup_cache(df: pd.DataFrame) -> Dict[int, Dict[str, object]]:
-    row_cache = df.attrs.get("row_lookup_cache")
-    if isinstance(row_cache, dict):
-        return row_cache
-    row_cache = {row_idx: row.to_dict() for row_idx, row in df.iterrows()}
-    df.attrs["row_lookup_cache"] = row_cache
-    return row_cache
+    return terminology_engine.build_row_lookup_cache(df)
 
 
 def cached_lookup_row(df: pd.DataFrame, row_idx: int) -> Optional[Dict[str, object]]:
-    return build_row_lookup_cache(df).get(row_idx)
+    return terminology_engine.cached_lookup_row(df, row_idx)
 
 
 def lookup_row(term: str, index: Dict[str, int], df: pd.DataFrame) -> Optional[Dict[str, object]]:
-    profile_count("lookup_row calls")
-    profile_start = time.perf_counter() if TRANSLATION_PROFILE is not None else None
-    key = norm_text(term)
-    try:
-        NORMALIZED_LOOKUP_INDEX_STATS["indexed_lookup_attempts"] += 1
-        normalized_index = df.attrs.get("normalized_lookup_index", {})
-        if normalized_index and key in normalized_index:
-            NORMALIZED_LOOKUP_INDEX_STATS["indexed_lookup_hits"] += 1
-            profile_count("lookup_row normalized index hits")
-            if profile_start is not None:
-                profile_add_time("term lookup: lookup_row", time.perf_counter() - profile_start)
-            return cached_lookup_row(df, normalized_index[key])
-        NORMALIZED_LOOKUP_INDEX_STATS["indexed_lookup_misses"] += 1
-    except Exception as e:
-        NORMALIZED_LOOKUP_INDEX_STATS["index_error"] = str(e)
-        NORMALIZED_LOOKUP_INDEX_STATS["indexed_lookup_misses"] += 1
-
-    NORMALIZED_LOOKUP_INDEX_STATS["fallback_lookup_attempts"] += 1
-    if key in index:
-        NORMALIZED_LOOKUP_INDEX_STATS["fallback_lookup_hits"] += 1
-        profile_count("lookup_row fast hits")
-        if profile_start is not None:
-            profile_add_time("term lookup: lookup_row", time.perf_counter() - profile_start)
-        return cached_lookup_row(df, index[key])
-    # Search across all key columns as fallback, useful when source mode is Chinese but OCR produced English-style terms.
-    # RC9c preserves the old fallback search order, but uses a prebuilt dictionary instead of scanning the CSV per lookup.
-    all_term_index = df.attrs.get("all_term_index", {})
-    if not all_term_index:
-        all_term_index = build_all_term_index(df)
-        df.attrs["all_term_index"] = all_term_index
-    profile_count("lookup_row fallback dictionary checks")
-    if key in all_term_index:
-        NORMALIZED_LOOKUP_INDEX_STATS["fallback_lookup_hits"] += 1
-        profile_count("lookup_row fallback hits")
-        if profile_start is not None:
-            profile_add_time("term lookup: lookup_row", time.perf_counter() - profile_start)
-        return cached_lookup_row(df, all_term_index[key])
-    NORMALIZED_LOOKUP_INDEX_STATS["fallback_lookup_misses"] += 1
-    if profile_start is not None:
-        profile_add_time("term lookup: lookup_row", time.perf_counter() - profile_start)
-    return None
+    return terminology_engine.lookup_row(term, index, df)
 
 def lookup_term(term: str, index: Dict[str, int], df: pd.DataFrame, output_mode: str = "Traditional Chinese", prefer_abbrev: bool = False) -> str:
-    profile_count("lookup_term calls")
-    profile_start = time.perf_counter() if TRANSLATION_PROFILE is not None else None
-    try:
-        row = lookup_row(term, index, df)
-        if row is not None:
-            return term_from_row(row, output_mode, prefer_abbrev=prefer_abbrev)
-        fallback_zh = {
-            "sc": "短針", "x": "短針", "inc": "加針", "v": "加針", "dec": "減針", "a": "減針", "mr": "環狀起針",
-            "magic ring": "環狀起針", "magic circle": "環狀起針", "adjustable ring": "環狀起針",
-            "slst": "引拔針", "sl st": "引拔針", "sl": "引拔針", "hdc": "中長針", "t": "中長針", "dc": "長針", "f": "長針", "tr": "長長針", "e": "長長針",
-            "fo": "收線", "blo": "後半針", "flo": "前半針", "ch": "鎖針", "chain": "鎖針", "chains": "鎖針", "st": "針", "sts": "針", "stitch": "針", "stitches": "針",
-        }
-        fallback_us = {
-            "x": "sc", "v": "inc", "a": "dec", "t": "hdc", "f": "dc", "e": "tr", "sl": "sl st",
-            "sc": "sc", "inc": "inc", "dec": "dec", "mr": "MR", "magic ring": "MR", "magic circle": "MR", "adjustable ring": "MR", "slst": "sl st", "sl st": "sl st", "ch": "ch", "chain": "ch", "chains": "ch", "st": "st", "sts": "sts", "stitch": "stitch", "stitches": "stitches",
-        }
-        key = norm_text(term)
-        if output_mode == "Simplified Chinese":
-            return to_simplified(fallback_zh.get(key, term))
-        if output_mode == "Traditional Chinese":
-            return fallback_zh.get(key, term)
-        if output_mode in ["English — US", "English — UK", "English US terms", "English UK terms"]:
-            return fallback_us.get(key, term)
-        if output_mode == "Japanese":
-            zh = fallback_zh.get(key, term)
-            jp = {"短針":"細編み", "加針":"増し目", "減針":"減らし目", "環狀起針":"輪の作り目", "引拔針":"引き抜き編み", "中長針":"中長編み", "長針":"長編み"}
-            return jp.get(zh, term)
-        return term
-    finally:
-        if profile_start is not None:
-            profile_add_time("term lookup: lookup_term", time.perf_counter() - profile_start)
+    return terminology_engine.lookup_term(term, index, df, output_mode, prefer_abbrev=prefer_abbrev)
 
 
-CSV_TERM_CACHE: Dict[Tuple[object, ...], Tuple[str, ...]] = {}
-CSV_TERM_CACHE_STATS = {
-    "hits": 0,
-    "misses": 0,
-    "generation_count": 0,
-    "served_from_cache_count": 0,
-    "last_key": "",
-    "last_error": "",
-    "last_terms_returned": 0,
-}
+CSV_TERM_CACHE_STATS = terminology_engine.CSV_TERM_CACHE_STATS
 
 
 def csv_term_cache_key(df: pd.DataFrame) -> Tuple[object, ...]:
-    try:
-        content_hash = hashlib.md5(
-            pd.util.hash_pandas_object(df.astype(str), index=True).values.tobytes()
-        ).hexdigest()
-    except Exception:
-        content_hash = "content-hash-unavailable"
-    return (
-        int(len(df)),
-        tuple(str(col) for col in df.columns),
-        tuple(int(v) for v in df.shape),
-        content_hash,
-    )
+    return terminology_engine.csv_term_cache_key(df)
 
 
 def generate_all_csv_terms_uncached(df: pd.DataFrame) -> List[str]:
-    """Return all searchable terms/aliases from the crochet CSV.
-
-    This powers V24's term-replacement engine: do not hard-code whole
-    sentences; scan every OCR line for known crochet terms from the CSV.
-    """
-    cols = [
-        "US_term", "US_term_alias", "US_abb", "US_abb1",
-        "UK_term", "UK_term_alias", "UK_abb", "UK_abb1",
-        "Chinese_term", "Chinese_term_alias", "Chinese_abb",
-        "Japanese", "Japanese_alias",
-    ]
-    df = get_active_search_df(df)
-    seen = set()
-    terms: List[str] = []
-    for _, row in df.iterrows():
-        profile_count("get_all_csv_terms row scans")
-        for col in cols:
-            if col not in df.columns:
-                continue
-            vals = [row.get(col, "")] + split_aliases(row.get(col, ""))
-            for v in vals:
-                profile_count("alias values inspected")
-                t = unicodedata.normalize("NFKC", str(v)).strip()
-                if not t:
-                    continue
-                key = norm_text(t)
-                # Keep single-letter stitch symbols only; avoid broad accidental words.
-                if len(key) == 1 and key not in {"x", "v", "a", "t", "f", "e"}:
-                    continue
-                if key not in seen:
-                    seen.add(key)
-                    terms.append(t)
-    # Longest first so "magic ring" is replaced before "ring", and "sl st" before "st".
-    terms.sort(key=lambda x: len(norm_text(x)), reverse=True)
-    profile_count("protected terms generated", len(terms))
-    return terms
+    return terminology_engine.generate_all_csv_terms_uncached(df)
 
 
 def get_all_csv_terms(df: pd.DataFrame) -> List[str]:
-    profile_count("get_all_csv_terms calls")
-    profile_start = time.perf_counter() if TRANSLATION_PROFILE is not None else None
-    try:
-        key = csv_term_cache_key(df)
-        key_text = hashlib.md5(repr(key).encode("utf-8")).hexdigest()
-        CSV_TERM_CACHE_STATS["last_key"] = key_text
-        if key in CSV_TERM_CACHE:
-            CSV_TERM_CACHE_STATS["hits"] += 1
-            CSV_TERM_CACHE_STATS["served_from_cache_count"] += 1
-            terms = list(CSV_TERM_CACHE[key])
-            CSV_TERM_CACHE_STATS["last_terms_returned"] = len(terms)
-            profile_count("get_all_csv_terms served from cache")
-            profile_count("protected terms returned from cache", len(terms))
-            return terms
-        CSV_TERM_CACHE_STATS["misses"] += 1
-        CSV_TERM_CACHE_STATS["generation_count"] += 1
-        terms = generate_all_csv_terms_uncached(df)
-        CSV_TERM_CACHE[key] = tuple(terms)
-        CSV_TERM_CACHE_STATS["last_terms_returned"] = len(terms)
-        return list(terms)
-    except Exception as e:
-        CSV_TERM_CACHE_STATS["last_error"] = str(e)
-        terms = generate_all_csv_terms_uncached(df)
-        CSV_TERM_CACHE_STATS["last_terms_returned"] = len(terms)
-        return terms
-    finally:
-        if profile_start is not None:
-            profile_add_time("alias lookup / CSV term list", time.perf_counter() - profile_start)
+    return terminology_engine.get_all_csv_terms(df)
 
 
 def _ascii_term_regex(term: str) -> str:
-    """Regex for English/abbreviation terms with safe boundaries."""
-    escaped = re.escape(term.strip())
-    escaped = re.sub(r"\\\s+", r"\\s+", escaped)
-    return rf"(?<![A-Za-z0-9]){escaped}(?![A-Za-z0-9])"
+    return terminology_engine._ascii_term_regex(term)
 
 
 def _looks_like_prose_line(text: str) -> bool:
-    """Return True for ordinary instruction sentences mixed with crochet terms.
-
-    Formulae like "ch, (sc, inc)x8, slst (24)" should still go through
-    the expression parser. Sentences like "Start with 8sc in a Magic ring"
-    should prefer CSV term replacement.
-    """
-    s = str(text or "").strip()
-    if not s:
-        return False
-    crochet_words = {
-        "sc", "inc", "dec", "hdc", "dc", "tr", "slst", "sl", "st", "sts",
-        "ch", "mr", "blo", "flo", "fo", "magic", "ring", "circle",
-        "stitch", "stitches", "chain", "chains",
-    }
-    words = re.findall(r"[A-Za-z]{3,}", s)
-    non_crochet = [w for w in words if w.lower() not in crochet_words]
-    return bool(non_crochet)
+    return terminology_engine.looks_like_prose_line(text)
 
 
 def replace_csv_terms_in_line(text: str, index: Dict[str, int], df: pd.DataFrame, output_mode: str) -> str:
-    """Replace known crochet terms inside a normal sentence.
-
-    Example:
-        turn and slst until the end
-        -> 反轉 and 引拔 until the end
-
-    This is intentionally *not* a general translation engine. Unknown ordinary
-    language remains unchanged. The goal is to protect and translate crochet
-    terminology wherever it appears in a sentence.
-    """
-    profile_count("replace_csv_terms_in_line calls")
-    profile_start = time.perf_counter() if TRANSLATION_PROFILE is not None else None
-    s = normalize_decimal_mm(unicodedata.normalize("NFKC", str(text or "")).strip())
-    if not s:
-        if profile_start is not None:
-            profile_add_time("CSV replacement loops", time.perf_counter() - profile_start)
-        return ""
-
-    generated_terms: List[str] = []
-
-    def protect_generated_term(value: str) -> str:
-        marker = f"@@RC9D_TERM_{len(generated_terms)}@@"
-        generated_terms.append(str(value))
-        return marker
-
-    def restore_generated_terms(value: str) -> str:
-        out_value = str(value)
-        for i, original_value in enumerate(generated_terms):
-            out_value = out_value.replace(f"@@RC9D_TERM_{i}@@", original_value)
-        return out_value
-
-    s = replace_turning_chain_instructions(s, index, df, output_mode, protect=protect_generated_term)
-    s = replace_foundation_chain_instructions(s, output_mode, protect=protect_generated_term)
-    s = replace_chain_start_instructions(s, df, output_mode, protect=protect_generated_term)
-
-    def stitch_count_repl(m: re.Match) -> str:
-        return protect_generated_term(format_stitch_count(m.group(1), output_mode))
-
-    profile_count("regex passes estimated")
-    s = re.sub(r"(?<![A-Za-z0-9.])(\d+)\s*[針针](?![A-Za-z0-9])", stitch_count_repl, s)
-
-    # 1) Compact counted terms: 8sc, 4ch, 6sts, 2 dc.
-    counted_pat = re.compile(
-        rf"(?<![A-Za-z0-9])(\d+)\s*({COUNTED_TOKEN_TERM_PATTERN})\b",
+    return terminology_engine.replace_csv_terms_in_line(
+        text,
+        index,
+        df,
+        output_mode,
+        normalize_decimal_mm_func=normalize_decimal_mm,
+        replace_turning_chain_instructions_func=replace_turning_chain_instructions,
+        replace_foundation_chain_instructions_func=replace_foundation_chain_instructions,
+        replace_chain_start_instructions_func=replace_chain_start_instructions,
+        format_stitch_count_func=format_stitch_count,
+        translate_counted_token_func=translate_counted_token,
+        format_counted_term_func=format_counted_term,
+        translate_around_connector_func=translate_around_connector,
+        counted_token_term_pattern=COUNTED_TOKEN_TERM_PATTERN,
     )
-
-    def counted_repl(m: re.Match) -> str:
-        n, term = m.groups()
-        return translate_counted_token(n, term, index, df, output_mode, protect=protect_generated_term)
-
-    profile_count("regex passes estimated")
-    out = counted_pat.sub(counted_repl, s)
-
-    # V29: term-before-number shorthand, e.g. ch1 / ch 1 / sc 6.
-    # Many English patterns write "ch1" at the end of a long round, or
-    # "sc 6 into magic ring". V25/V28 only handled number-before-term
-    # such as 8sc / 4ch, so ch1 was left untranslated.
-    term_number_pat = re.compile(
-        r"(?<![A-Za-z0-9])(sl\s*st|slst|sts?|stitches?|sc|inc|dec|hdc|dc|tr|mr|ch|blo|flo|fo)\s*(\d+)(?![A-Za-z0-9])",
-        flags=re.I,
-    )
-
-    def term_number_repl(m: re.Match) -> str:
-        term, n = m.groups()
-        term_clean = re.sub(r"\s+", "", term)
-        key = norm_text(term_clean)
-        if key in {"st", "sts", "stitch", "stitches"}:
-            if output_mode == "Simplified Chinese":
-                return protect_generated_term(f"{n}针")
-            if output_mode == "Traditional Chinese":
-                return protect_generated_term(f"{n}針")
-            if output_mode == "Japanese":
-                return protect_generated_term(f"{n}目")
-            return f"{n} {protect_generated_term(lookup_term(term_clean, index, df, output_mode, prefer_abbrev=True))}"
-        term_text = lookup_term(term_clean, index, df, output_mode, prefer_abbrev=(output_mode in ["English — US", "English — UK", "English US terms", "English UK terms"]))
-        return format_counted_term(protect_generated_term(term_text), n, term_kind(term_clean, index, df), output_mode)
-
-    profile_count("regex passes estimated")
-    out = term_number_pat.sub(term_number_repl, out)
-
-    # V29: safe repair for common OCR confusion in crochet shorthand.
-    # "linc" is usually OCR's lowercase L + inc, meaning "1inc".
-    profile_count("regex passes estimated")
-    out = re.sub(r"(?<![A-Za-z0-9])linc(?![A-Za-z0-9])", lambda m: term_number_repl(type('M', (), {'groups': lambda self: ('inc','1')})()), out, flags=re.I)
-
-    # 2) Phrase and token replacement from CSV terms/aliases.
-    protected_terms = get_all_csv_terms(df)
-    # V25: include common OCR spellings that may not appear literally in CSV.
-    protected_terms.extend([
-        "slst", "sl st", "magic ring", "magic circle", "adjustable ring",
-        "stitch", "stitches", "sts", "turn", "fasten off", "weave in ends",
-    ])
-    # De-duplicate while preserving longest-first order.
-    seen_terms = set()
-    protected_terms = sorted(
-        [t for t in protected_terms if not (norm_text(t) in seen_terms or seen_terms.add(norm_text(t)))],
-        key=lambda x: len(norm_text(x)),
-        reverse=True,
-    )
-    for term in protected_terms:
-        profile_count("protected terms looped")
-        key = norm_text(term)
-        if not key:
-            continue
-        # Never replace bare single-letter symbols inside ordinary sentences.
-        # Example: the English article "a" must not become "減針".
-        # Counted forms such as 2A / 6X are handled earlier by counted_pat.
-        if re.fullmatch(r"[A-Za-z]", key):
-            profile_count("regex passes estimated")
-            continue
-        replacement = lookup_term(term, index, df, output_mode, prefer_abbrev=(output_mode in ["English — US", "English — UK", "English US terms", "English UK terms"]))
-        if not replacement:
-            continue
-        # Avoid replacing single-letter symbols in prose unless they are clearly separated.
-        if re.fullmatch(r"[A-Za-z0-9 ]+", term):
-            profile_count("regex passes estimated")
-            if norm_text(replacement) == key:
-                continue
-            pat = re.compile(_ascii_term_regex(term), flags=re.I)
-            profile_count("regex passes estimated")
-            out = pat.sub(replacement, out)
-        else:
-            # Chinese/Japanese terms: direct safe replacement.
-            out = out.replace(term, replacement)
-            cjk_variants = {
-                "針": "[針针]", "內": "[內内]", "後": "[後后]", "環": "[環环]",
-                "鎖": "[鎖锁]", "長": "[長长]", "減": "[減减]", "線": "[線线]",
-                "繞": "[繞绕]", "鈎": "[鈎钩勾]", "鉤": "[鉤钩勾]",
-            }
-            variant_pat = "".join(cjk_variants.get(ch, re.escape(ch)) for ch in term)
-            profile_count("regex passes estimated")
-            out = re.sub(variant_pat, replacement, out)
-
-    # V28: small crochet-context connectors. Check the ORIGINAL sentence, not
-    # only the already-replaced output. In v27, "6 inc around" became
-    # "加針6次 around" first, so the old English-token check missed "around".
-    profile_count("regex passes estimated")
-    has_crochet_context = bool(re.search(
-        r"\b(sc|inc|dec|hdc|dc|tr|sl\s*st|slst|ch|sts?|stitches?|blo|flo|fo|mr|magic\s+ring|x|v|a)\b",
-        s,
-        flags=re.I,
-    )) or bool(re.search(r"\b(?:work\s+|rnd\s+)?around\b", s, flags=re.I))
-    if has_crochet_context:
-        profile_count("regex passes estimated")
-        out = translate_around_connector(out, output_mode)
-
-    if profile_start is not None:
-        profile_add_time("CSV replacement loops", time.perf_counter() - profile_start)
-    return restore_generated_terms(out)
 
 def term_kind(term: str, index: Dict[str, int], df: pd.DataFrame) -> str:
-    row = lookup_row(term, index, df)
-    if row is not None:
-        cat = norm_text(row.get("category", ""))
-        if "increase" in cat:
-            return "increase"
-        if "decrease" in cat:
-            return "decrease"
-    key = norm_text(term)
-    if key in ["inc", "v"]:
-        return "increase"
-    if key in ["dec", "a"]:
-        return "decrease"
-    return "stitch"
+    return terminology_engine.term_kind(term, index, df)
 
 @profile_function("expression parsing: split_expression_parts", "split_expression_parts calls")
 def split_expression_parts(text: str) -> List[str]:

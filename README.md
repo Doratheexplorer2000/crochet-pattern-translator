@@ -32,11 +32,15 @@ Current focus:
 - Streamlit Community Cloud is retained as a backup platform.
 - Pattern Translator Feedback Form migration to `crochetintelligence@gmail.com` is complete.
 - Pattern Translator analytics is implemented and validated, but `app_open` duplicate passive entries are a known Streamlit Community Cloud lifecycle limitation. The analytics model will be revisited after migration to a new deployment platform.
+- RC42 completed the first local Engine Extraction by moving the CSV terminology / lookup engine into `pattern_translator/engine/terminology.py`.
+- RC42 regression confirmed `209 / 209` translation cases identical, Human UAT passed, and no user-visible behavior changed.
+- RC42 remains local only: no production deployment and no GitHub push. RC28 remains the current production baseline.
 
 Next:
 
-- Upgrade Analytics to v2.
-- Decide where the Crochet Intelligence landing page should be hosted after Railway production operation has more evidence.
+- Begin the phased post-Streamlit migration locally only.
+- First migration objective: separate Pattern Translator business logic from Streamlit before replacing the frontend.
+- Keep the existing RC28 Railway production path fully recoverable as the rollback target.
 - Add the reusable analytics implementation to Crochet Stitch Translator.
 - Address non-blocking polish items: expose the version number in the UI and refine minor overlay text box alignment.
 
@@ -97,6 +101,12 @@ Production validation
 ```
 
 Streamlit Community Cloud is no longer the primary deployment direction for Pattern Translator, but remains a temporary backup during migration.
+
+## Migration Strategy
+
+The project has approved a phased post-Streamlit migration as a strategic initiative. Migration starts locally only: no GitHub migration branch, deployment, or production change should occur until the local baseline and first extraction steps have been validated.
+
+The current RC28 Railway deployment remains the production baseline and rollback target. Preserve the production entry point, OCR pipeline, parser and translation logic, overlay generation, shared knowledge base, analytics module, Docker/Railway files, requirements, and current documentation through Git history and a local migration branch rather than duplicating the whole repository.
 
 ## Documentation
 

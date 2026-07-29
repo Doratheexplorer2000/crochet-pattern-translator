@@ -18,6 +18,8 @@ pattern_translator/app.py
 
 Crochet Pattern OCR Translator is the current OCR-based pattern translation app. RC28 is the current production baseline. The first External UAT phase has concluded with positive results from real crochet users. Railway is now the primary production deployment platform.
 
+RC42 completed the first local Engine Extraction by moving the CSV terminology / lookup engine into `pattern_translator/engine/terminology.py`. Streamlit cache behavior was intentionally preserved through app-level wrappers. Regression confirmed `209 / 209` cases identical, Human UAT passed, and no user-visible behavior changed. RC42 remains local only with no production deployment and no GitHub push.
+
 ## Current Database
 
 Production database:
@@ -45,13 +47,14 @@ stitches_1_8e.csv
 
 ## Current Priorities
 
-Current Phase: Railway production hardening after RC28 release.
+Current Phase: phased post-Streamlit migration preparation.
 
 Current focus:
 
-1. Operate Pattern Translator on Railway as the primary production platform.
-2. Keep Streamlit Community Cloud as a backup platform.
-3. Revisit Analytics v2 and landing-page hosting decisions after more Railway production evidence is available.
+1. Preserve RC28 as the current Railway production baseline and rollback target.
+2. Begin migration locally only; no GitHub migration branch, deployment, or production change yet.
+3. Continue small, validated Engine Extraction RCs after RC42 before replacing the frontend.
+4. Keep Streamlit Community Cloud as a backup platform during migration.
 
 - Continue occasional testing with trusted users and incremental fixes based on real production usage.
 - Plan for a Soft Launch after Landing Page completion instead of another formal External UAT cycle.
@@ -66,6 +69,15 @@ Current focus:
 
 ## Current Release Notes
 
+### RC42
+
+- Mission: first Engine Extraction RC after RC41 architecture analysis.
+- Scope: extract only the CSV terminology / lookup engine into `pattern_translator/engine/terminology.py`.
+- Cache handling: Streamlit cache behavior intentionally preserved through app-level wrappers.
+- Validation: automated regression confirmed `209 / 209` translation cases identical; Human UAT passed.
+- Behavior: no user-visible behavior changes.
+- Release handling: local only. No production deployment and no GitHub push. RC28 remains the current production baseline.
+
 ### RC28
 
 - Mission: finalize Railway production release after RC26 Whole Pattern default workflow, RC27 Railway migration, and the Diagnostic Report download hotfix.
@@ -75,6 +87,14 @@ Current focus:
 - Production baseline: RC28 is now the Pattern Translator production baseline.
 - Deployment platform: Railway is now the primary production deployment platform. Streamlit Community Cloud remains available as a backup platform.
 - Non-blocking items: version number is not currently shown in the UI; minor overlay text box alignment refinement is deferred.
+
+### RC40 Architecture Decision
+
+- Decision: begin a phased post-Streamlit migration after RC40 architecture review.
+- Rationale: RC28 is a stable production baseline, and RC30b confirmed Streamlit is now the primary architectural limitation rather than Railway.
+- Migration rule: start locally only. Do not create a GitHub migration branch, push, deploy, or change production until local extraction work has been reviewed and validated.
+- First objective: separate OCR, parser, translation, overlay, diagnostics, analytics integration, and knowledge-base access from Streamlit UI/session code while preserving current behavior.
+- Rollback target: RC28 Railway production remains the fully recoverable production path.
 
 ### External UAT Phase 1
 
@@ -168,4 +188,4 @@ After platform direction is clearer:
 - Parser rules handle instructions; the CSV remains the source of truth for terminology.
 - Accepted RCs become the Current Reference Build only after regression and Human UAT.
 - Regression evidence should include raw outputs, not only summaries.
-- Shared Python modules are intentionally postponed until after a future platform migration.
+- Shared Python modules for Pattern Translator may now be introduced only as part of the approved local post-Streamlit migration, beginning with business-logic extraction from Streamlit.
