@@ -33,8 +33,10 @@ Current focus:
 - Pattern Translator Feedback Form migration to `crochetintelligence@gmail.com` is complete.
 - Pattern Translator analytics is implemented and validated, but `app_open` duplicate passive entries are a known Streamlit Community Cloud lifecycle limitation. The analytics model will be revisited after migration to a new deployment platform.
 - RC42 completed the first local Engine Extraction by moving the CSV terminology / lookup engine into `pattern_translator/engine/terminology.py`.
-- RC42 regression confirmed `209 / 209` translation cases identical, Human UAT passed, and no user-visible behavior changed.
-- RC42 remains local only: no production deployment and no GitHub push. RC28 remains the current production baseline.
+- RC43 completed the second local Engine Extraction by moving pure line-translation logic into `pattern_translator/engine/line_translation.py`.
+- RC43 regression confirmed `220 / 220` direct corpus cases identical, Human UAT passed, and no user-visible behavior changed.
+- RC43 reduced `pattern_translator/app.py` by approximately 759 lines.
+- Engine extraction remains local only: no production deployment and no GitHub push. RC28 remains the current production baseline.
 
 Next:
 
