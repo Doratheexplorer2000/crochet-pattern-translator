@@ -18,7 +18,7 @@ pattern_translator/app.py
 
 Crochet Pattern OCR Translator is the current OCR-based pattern translation app. RC28 is the current production baseline. The first External UAT phase has concluded with positive results from real crochet users. Railway is now the primary production deployment platform.
 
-RC42 completed the first local Engine Extraction by moving the CSV terminology / lookup engine into `pattern_translator/engine/terminology.py`. RC43 completed the second local Engine Extraction by moving pure line-translation logic into `pattern_translator/engine/line_translation.py`. RC44 completed the third local Engine Extraction by moving Diagnostic Report construction and formatting into `pattern_translator/engine/diagnostic_report.py`. Regression and Human UAT passed, and no user-visible behavior changed. Engine extraction remains local only with no production deployment and no GitHub push.
+RC42 completed the first local Engine Extraction by moving the CSV terminology / lookup engine into `pattern_translator/engine/terminology.py`. RC43 completed the second local Engine Extraction by moving pure line-translation logic into `pattern_translator/engine/line_translation.py`. RC44 completed the third local Engine Extraction by moving Diagnostic Report construction and formatting into `pattern_translator/engine/diagnostic_report.py`. RC45 completed Boundary Cleanup by removing redundant pass-through wrappers between `app.py` and the engine modules while retaining Streamlit cache wrappers and genuine application adapters. Regression and Human UAT passed, and no user-visible behavior changed. Engine migration remains local only with no production deployment and no GitHub push.
 
 ## Current Database
 
@@ -53,7 +53,7 @@ Current focus:
 
 1. Preserve RC28 as the current Railway production baseline and rollback target.
 2. Begin migration locally only; no GitHub migration branch, deployment, or production change yet.
-3. Continue small, validated Engine Extraction RCs after RC44 before replacing the frontend.
+3. Continue small, validated local migration RCs after RC45 before replacing the frontend.
 4. Keep Streamlit Community Cloud as a backup platform during migration.
 
 - Continue occasional testing with trusted users and incremental fixes based on real production usage.
@@ -68,6 +68,16 @@ Current focus:
 - Minor overlay text box alignment refinement is deferred.
 
 ## Current Release Notes
+
+### RC45
+
+- Mission: local Boundary Cleanup after RC44 Diagnostic Report Engine extraction.
+- Scope: remove redundant pass-through wrappers between `app.py` and the existing engine modules; update internal call sites to invoke the owning engine directly where appropriate.
+- Architecture: `engine/terminology.py`, `engine/line_translation.py`, and `engine/diagnostic_report.py` now own their extracted business logic more clearly. `app.py` primarily contains application orchestration, Streamlit integration, OCR, overlay rendering, session state, and remaining application-specific responsibilities.
+- App impact: `pattern_translator/app.py` reduced from approximately 4468 lines to approximately 4229 lines, a net reduction of approximately 239 lines.
+- Validation: translation regression identical; TXT regression identical; Diagnostic Report regression identical; `220 / 220` direct corpus outputs identical; Human UAT passed.
+- Behavior: no user-visible behavior changes.
+- Release handling: local only. No production deployment and no GitHub push. RC28 remains the current production baseline.
 
 ### RC44
 

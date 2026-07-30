@@ -57,6 +57,10 @@ Key validated behavior:
 - RC44 reduced `pattern_translator/app.py` from approximately 5432 lines to approximately 4462 lines.
 - RC44 regression confirmed zero-byte representative Diagnostic Report diff, identical translation/TXT regressions, unchanged existing regression corpus, Human UAT passed, and no user-visible behavior changed.
 - RC44 Human UAT found a missing `_debug_cell` helper reference during OCR diagnostic metadata generation. A local hotfix restored the helper only where required in `app.py`, while the Diagnostic Report Engine retained its own private helper; repeated Human UAT passed.
+- RC45 completed local Boundary Cleanup by removing redundant pass-through wrappers between `app.py` and the engine modules.
+- Internal call sites now invoke the owning engine directly where appropriate; Streamlit cache wrappers and genuine application adapters were intentionally retained.
+- RC45 reduced `pattern_translator/app.py` from approximately 4468 lines to approximately 4229 lines, a net reduction of approximately 239 lines.
+- RC45 regression confirmed identical translation, TXT, Diagnostic Report, and `220 / 220` direct corpus outputs; Human UAT passed, and no user-visible behavior changed.
 - Engine extraction remains local only: no production deployment and no GitHub push. RC28 remains the current production baseline.
 - Regression evidence is stored under `regression/regression_test/Reports/`.
 
@@ -65,7 +69,7 @@ Key validated behavior:
 - Official production baseline: `RC28`
 - Current app version string: `Pattern OCR Translator (Beta RC26)`
 - Current phase: phased post-Streamlit migration preparation
-- Latest local extraction: `RC44` diagnostic report engine extraction completed and Human UAT passed.
+- Latest local migration step: `RC45` Boundary Cleanup completed and Human UAT passed.
 - Current production database: `knowledge_base/data/master_stitches.csv`
 - Current focus: preserve RC28 as the Railway production baseline, begin migration locally only, and separate business logic from Streamlit before replacing the frontend.
 - Future testing: continue with occasional trusted-user testing and incremental fixes based on production evidence. Plan for a Soft Launch after Landing Page completion instead of another formal External UAT cycle.

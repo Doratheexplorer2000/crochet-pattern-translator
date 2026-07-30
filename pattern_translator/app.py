@@ -19,7 +19,7 @@ import tempfile
 import time
 import unicodedata
 from pathlib import Path
-from typing import Callable, Dict, List, Tuple, Optional
+from typing import Dict, List, Tuple, Optional
 
 import numpy as np
 import pandas as pd
@@ -177,15 +177,6 @@ div[data-testid="stFileUploader"] section:hover {
 )
 
 # -----------------------------
-# Text normalisation
-# -----------------------------
-def norm_text(value: object) -> str:
-    return terminology_engine.norm_text(value)
-
-def split_aliases(value: object) -> List[str]:
-    return terminology_engine.split_aliases(value)
-
-# -----------------------------
 # Load data and build index
 # -----------------------------
 @st.cache_data
@@ -196,12 +187,6 @@ def load_database() -> pd.DataFrame:
         st.stop()
     df = pd.read_csv(csv_path).fillna("")
     return df
-
-def get_active_search_df(df: pd.DataFrame) -> pd.DataFrame:
-    return terminology_engine.get_active_search_df(df)
-
-def get_source_columns(source_mode: str) -> List[str]:
-    return terminology_engine.get_source_columns(source_mode)
 
 @st.cache_data
 def build_term_index(df: pd.DataFrame, source_mode: str) -> Dict[str, int]:
@@ -820,7 +805,7 @@ def prepare_two_column_rows(rows: pd.DataFrame, image_width: int, lang_mode: str
 
     # De-duplicate repeated overlap recognitions by normalized text.
     # Keep the higher-confidence reading, then sort left column top-down, then right column top-down.
-    work["_norm"] = work["text"].map(lambda x: norm_text(x))
+    work["_norm"] = work["text"].map(lambda x: terminology_engine.norm_text(x))
     work = work.sort_values(["_norm", "confidence"], ascending=[True, False])
     work = work.drop_duplicates(subset=["_norm"], keep="first")
     work = work.sort_values(["column_order", "y", "global_x"]).drop(columns=["_norm"])
@@ -898,7 +883,7 @@ def normalize_pattern_rounds(text: str) -> str:
 
 def clean_ocr_text(raw: str) -> str:
     text = unicodedata.normalize("NFKC", raw)
-    text = normalize_decimal_mm(text)
+    text = line_translation_engine.normalize_decimal_mm(text)
     # Common OCR repairs in amigurumi patterns.
     replacements = {
         "；": ":",
@@ -935,7 +920,7 @@ def clean_ocr_text(raw: str) -> str:
     text = re.sub(r"\bR[lI]0\s*[:：]", "R10:", text, flags=re.IGNORECASE)
     text = re.sub(r"\bR[lI]{2}\s*[:：]", "R11:", text, flags=re.IGNORECASE)
     text = text.replace("。", ".").replace("，", ",").replace("、", ",")
-    text = normalize_decimal_mm(text)
+    text = line_translation_engine.normalize_decimal_mm(text)
     text = re.sub(r"([xvaftesl])\s*[.]\s*([xvaftesl])", r"\1,\2", text, flags=re.I)
     text = re.sub(r"([XVAFTESL])\s*[.]\s*([XVAFTESL])", r"\1,\2", text)
 
@@ -947,7 +932,7 @@ def clean_ocr_text(raw: str) -> str:
     text = re.sub(r"(?<=\d)\s*([xvatfe])\b", lambda m: m.group(1).upper(), text, flags=re.I)
     text = re.sub(r"(?<=[(,，、.。\s])([xvatfe])(?=[),，、.。\s])", lambda m: m.group(1).upper(), text, flags=re.I)
     text = re.sub(r"(?<=[不加減交叉])([xvatfe])\b", lambda m: m.group(1).upper(), text, flags=re.I)
-    text = normalize_decimal_mm(text)
+    text = line_translation_engine.normalize_decimal_mm(text)
     text = re.sub(r"[ \t]+", " ", text)
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()
@@ -956,7 +941,7 @@ def clean_ocr_text(raw: str) -> str:
 # Matching
 # -----------------------------
 def make_candidates(ocr_text: str) -> List[str]:
-    text = norm_text(ocr_text)
+    text = terminology_engine.norm_text(ocr_text)
     candidates = set()
 
     for line in text.splitlines():
@@ -988,7 +973,7 @@ def find_matches(ocr_text: str, df: pd.DataFrame, index: Dict[str, int]) -> Tupl
     unmatched = []
 
     for cand in candidates:
-        key = norm_text(cand)
+        key = terminology_engine.norm_text(cand)
         if not key or len(key) <= 1:
             continue
         if key in index:
@@ -1013,192 +998,9 @@ def find_matches(ocr_text: str, df: pd.DataFrame, index: Dict[str, int]) -> Tupl
 
     return pd.DataFrame(matched_rows), unmatched[:40]
 
-# -----------------------------
-# Pattern parser / interpreter
-# -----------------------------
-def to_simplified(text: str) -> str:
-    return terminology_engine.to_simplified(text)
-
-def term_from_row(row: pd.Series, output_mode: str, prefer_abbrev: bool = False) -> str:
-    return terminology_engine.term_from_row(row, output_mode, prefer_abbrev=prefer_abbrev)
-
-def format_counted_term(term_text: str, number: str, kind: str, output_mode: str) -> str:
-    return line_translation_engine.format_counted_term(term_text, number, kind, output_mode)
-
-def format_stitch_count(number: str, output_mode: str) -> str:
-    return line_translation_engine.format_stitch_count(number, output_mode)
-
-
-CHAIN_START_INSTRUCTION_ID = line_translation_engine.CHAIN_START_INSTRUCTION_ID
-FOUNDATION_CHAIN_INSTRUCTION_RE = line_translation_engine.FOUNDATION_CHAIN_INSTRUCTION_RE
-TURNING_CHAIN_INSTRUCTION_RE = line_translation_engine.TURNING_CHAIN_INSTRUCTION_RE
-CHAIN_START_INSTRUCTION_RE = line_translation_engine.CHAIN_START_INSTRUCTION_RE
-BARE_CHAIN_START_RECOVERY_RE = line_translation_engine.BARE_CHAIN_START_RECOVERY_RE
-CHAIN_START_BEFORE_CONTEXT_RE = line_translation_engine.CHAIN_START_BEFORE_CONTEXT_RE
-CHAIN_START_AFTER_CONTEXT_RE = line_translation_engine.CHAIN_START_AFTER_CONTEXT_RE
-INSTRUCTION_CONTINUATION_RE = line_translation_engine.INSTRUCTION_CONTINUATION_RE
-
-
-def parse_small_chinese_number(value: str) -> Optional[int]:
-    return line_translation_engine.parse_small_chinese_number(value)
-
-
-def english_ordinal(number: int) -> str:
-    return line_translation_engine.english_ordinal(number)
-
-
-def get_chain_start_instruction_row(df: pd.DataFrame) -> Optional[pd.Series]:
-    return line_translation_engine.get_chain_start_instruction_row(df)
-
-
-def chain_start_template_from_row(row: pd.Series, output_mode: str) -> str:
-    return line_translation_engine.chain_start_template_from_row(row, output_mode)
-
-
-def format_chain_start_instruction(number: int, df: pd.DataFrame, output_mode: str) -> str:
-    return line_translation_engine.format_chain_start_instruction(number, df, output_mode)
-
-
-def format_foundation_chain_instruction(number: int, output_mode: str) -> str:
-    return line_translation_engine.format_foundation_chain_instruction(number, output_mode)
-
-
-def format_turning_chain_instruction(number: int, index: Dict[str, int], df: pd.DataFrame, output_mode: str) -> str:
-    return line_translation_engine.format_turning_chain_instruction(number, index, df, output_mode)
-
-
-def instruction_suffix(source: str, end: int) -> str:
-    return line_translation_engine.instruction_suffix(source, end)
-
-
-def instruction_prefix(source: str, start: int) -> str:
-    return line_translation_engine.instruction_prefix(source, start)
-
-
-def replace_foundation_chain_instructions(text: str, output_mode: str, protect: Optional[Callable[[str], str]]=None) -> str:
-    return line_translation_engine.replace_foundation_chain_instructions(text, output_mode, protect)
-
-
-def replace_turning_chain_instructions(text: str, index: Dict[str, int], df: pd.DataFrame, output_mode: str, protect: Optional[Callable[[str], str]]=None) -> str:
-    return line_translation_engine.replace_turning_chain_instructions(text, index, df, output_mode, protect)
-
-
-def has_bare_chain_start_context(source: str, start: int, end: int) -> bool:
-    return line_translation_engine.has_bare_chain_start_context(source, start, end)
-
-
-def replace_chain_start_instructions(text: str, df: pd.DataFrame, output_mode: str, protect: Optional[Callable[[str], str]]=None) -> str:
-    return line_translation_engine.replace_chain_start_instructions(text, df, output_mode, protect)
-
-
-def translate_chain_start_expression_if_full(text: str, df: pd.DataFrame, output_mode: str) -> Optional[str]:
-    return line_translation_engine.translate_chain_start_expression_if_full(text, df, output_mode)
-
-
-def contains_chinese_stitch_count(text: str) -> bool:
-    return line_translation_engine.contains_chinese_stitch_count(text)
-
-def format_group_with_stitch_count(inner: str, count: str, index: Dict[str, int], df: pd.DataFrame, output_mode: str) -> str:
-    return line_translation_engine.format_group_with_stitch_count(inner, count, index, df, output_mode)
-
-def format_symbol_with_stitch_count(term: str, count: str, index: Dict[str, int], df: pd.DataFrame, output_mode: str) -> str:
-    return line_translation_engine.format_symbol_with_stitch_count(term, count, index, df, output_mode)
-
-def lookup_expression_symbol(term: str, index: Dict[str, int], df: pd.DataFrame, output_mode: str) -> str:
-    return line_translation_engine.lookup_expression_symbol(term, index, df, output_mode)
-
-COUNTED_TOKEN_TERM_PATTERN = line_translation_engine.COUNTED_TOKEN_TERM_PATTERN
-
-
-def translate_counted_token(number: str, term: str, index: Dict[str, int], df: pd.DataFrame, output_mode: str, protect: Optional[Callable[[str], str]]=None) -> str:
-    return line_translation_engine.translate_counted_token(number, term, index, df, output_mode, protect)
-
-def normalize_decimal_mm(text: str) -> str:
-    return line_translation_engine.normalize_decimal_mm(text)
-
-def translate_around_connector(text: str, output_mode: str) -> str:
-    return line_translation_engine.translate_around_connector(text, output_mode)
-
-def join_parts(parts: List[str], output_mode: str) -> str:
-    return line_translation_engine.join_parts(parts, output_mode)
-
-def repeat_phrase(inner: str, repeat: str, output_mode: str) -> str:
-    return line_translation_engine.repeat_phrase(inner, repeat, output_mode)
-
-def row_to_chinese(row: pd.Series) -> str:
-    return line_translation_engine.row_to_chinese(row)
-
-
 NORMALIZED_LOOKUP_INDEX_STATS = terminology_engine.NORMALIZED_LOOKUP_INDEX_STATS
 
-
-def build_normalized_lookup_index(
-    index: Dict[str, int],
-    all_term_index: Dict[str, int],
-    source_mode: str,
-) -> Dict[str, int]:
-    return terminology_engine.build_normalized_lookup_index(index, all_term_index, source_mode)
-
-
-def build_row_lookup_cache(df: pd.DataFrame) -> Dict[int, Dict[str, object]]:
-    return terminology_engine.build_row_lookup_cache(df)
-
-
-def cached_lookup_row(df: pd.DataFrame, row_idx: int) -> Optional[Dict[str, object]]:
-    return terminology_engine.cached_lookup_row(df, row_idx)
-
-
-def lookup_row(term: str, index: Dict[str, int], df: pd.DataFrame) -> Optional[Dict[str, object]]:
-    return terminology_engine.lookup_row(term, index, df)
-
-def lookup_term(term: str, index: Dict[str, int], df: pd.DataFrame, output_mode: str = "Traditional Chinese", prefer_abbrev: bool = False) -> str:
-    return terminology_engine.lookup_term(term, index, df, output_mode, prefer_abbrev=prefer_abbrev)
-
-
 CSV_TERM_CACHE_STATS = terminology_engine.CSV_TERM_CACHE_STATS
-
-
-def csv_term_cache_key(df: pd.DataFrame) -> Tuple[object, ...]:
-    return terminology_engine.csv_term_cache_key(df)
-
-
-def generate_all_csv_terms_uncached(df: pd.DataFrame) -> List[str]:
-    return terminology_engine.generate_all_csv_terms_uncached(df)
-
-
-def get_all_csv_terms(df: pd.DataFrame) -> List[str]:
-    return terminology_engine.get_all_csv_terms(df)
-
-
-def _ascii_term_regex(term: str) -> str:
-    return terminology_engine._ascii_term_regex(term)
-
-
-def _looks_like_prose_line(text: str) -> bool:
-    return terminology_engine.looks_like_prose_line(text)
-
-
-def replace_csv_terms_in_line(text: str, index: Dict[str, int], df: pd.DataFrame, output_mode: str) -> str:
-    return line_translation_engine.replace_csv_terms_in_line(text, index, df, output_mode)
-
-def term_kind(term: str, index: Dict[str, int], df: pd.DataFrame) -> str:
-    return terminology_engine.term_kind(term, index, df)
-
-def split_expression_parts(text: str) -> List[str]:
-    return line_translation_engine.split_expression_parts(text)
-
-def translate_group_part(part: str, index: Dict[str, int], df: pd.DataFrame, output_mode: str='Traditional Chinese') -> str:
-    return line_translation_engine.translate_group_part(part, index, df, output_mode)
-
-def translate_piece(piece: str, index: Dict[str, int], df: pd.DataFrame, output_mode: str='Traditional Chinese') -> str:
-    return line_translation_engine.translate_piece(piece, index, df, output_mode)
-
-def translate_expression(expr: str, index: Dict[str, int], df: pd.DataFrame, output_mode: str='Traditional Chinese') -> str:
-    return line_translation_engine.translate_expression(expr, index, df, output_mode)
-
-
-def repair_ocr_round_token(token: str) -> str:
-    return line_translation_engine.repair_ocr_round_token(token)
 
 
 def normalize_chinese_pattern_text(text: str) -> str:
@@ -1209,12 +1011,12 @@ def normalize_chinese_pattern_text(text: str) -> str:
     by moving the orphan (7XV) into R10 and repairing Rl0/Rl1/R2g.
     """
     text = unicodedata.normalize("NFKC", text)
-    text = normalize_decimal_mm(text)
+    text = line_translation_engine.normalize_decimal_mm(text)
     text = text.replace("：", ":").replace("；", ":").replace(";", ":")
     text = text.replace("，", ",").replace("、", ",").replace("。", ".")
-    text = normalize_decimal_mm(text)
+    text = line_translation_engine.normalize_decimal_mm(text)
     text = re.sub(r"([xvaftesl])\s*[.]\s*([xvaftesl])", r"\1,\2", text, flags=re.I)
-    text = normalize_decimal_mm(text)
+    text = line_translation_engine.normalize_decimal_mm(text)
     text = re.sub(r"\bIOX\b", "10X", text, flags=re.I)
     text = re.sub(r"\bI0X\b", "10X", text, flags=re.I)
     text = re.sub(r"\bGX\b", "6X", text, flags=re.I)
@@ -1225,7 +1027,7 @@ def normalize_chinese_pattern_text(text: str) -> str:
     i = 0
     while i < len(raw_lines):
         line = raw_lines[i]
-        line = repair_ocr_round_token(line)
+        line = line_translation_engine.repair_ocr_round_token(line)
         line = re.sub(r"\br\s*(\d+)", r"R\1", line, flags=re.I)
         line = re.sub(r"\bR(\d+)\s*[.;]", r"R\1:", line, flags=re.I)
         line = re.sub(r"\bR[gq]\s*:", "R9:", line, flags=re.I)
@@ -1240,7 +1042,7 @@ def normalize_chinese_pattern_text(text: str) -> str:
         # Example: (XV) / R3:8 -> R3: 8 (XV)
         # Example: (7XV) / Rl0: -> R10: (7XV)
         if orphan_bracket and i + 1 < len(raw_lines):
-            nxt = repair_ocr_round_token(raw_lines[i + 1].strip())
+            nxt = line_translation_engine.repair_ocr_round_token(raw_lines[i + 1].strip())
             if re.fullmatch(r"R\d+\s*:\s*\d*\s*", nxt, flags=re.I):
                 fixed.append(f"{nxt} {line}".strip())
                 i += 2
@@ -1358,7 +1160,7 @@ def build_interpretation(clean_text: str, index: Dict[str, int], df: pd.DataFram
     rounds = extract_rounds(clean_text)
     rows = []
     for r in rounds:
-        translated = translate_expression(str(r["Original"]), index, df, output_mode)
+        translated = line_translation_engine.translate_expression(str(r["Original"]), index, df, output_mode)
         output_col = "解讀" if output_mode in ["Traditional Chinese", "Simplified Chinese"] else "Interpretation"
         rows.append({
             "Round": r["Round"],
@@ -1368,15 +1170,6 @@ def build_interpretation(clean_text: str, index: Dict[str, int], df: pd.DataFram
         })
     return pd.DataFrame(rows)
 
-
-# -----------------------------
-# Visual overlay + readable line output
-# -----------------------------
-def get_output_column_name(output_mode: str) -> str:
-    return line_translation_engine.get_output_column_name(output_mode)
-
-def build_line_by_line_text(interpretation_df: pd.DataFrame, output_mode: str) -> str:
-    return line_translation_engine.build_line_by_line_text(interpretation_df, output_mode)
 
 def _load_overlay_font(size: int):
     from PIL import ImageFont
@@ -1510,7 +1303,7 @@ def make_translation_overlay(image: Image.Image, ocr_rows: pd.DataFrame, interpr
     draw = ImageDraw.Draw(overlay)
     font_size = max(14, min(28, int(w / 45)))
     font = _load_overlay_font(font_size)
-    output_col = get_output_column_name(output_mode)
+    output_col = line_translation_engine.get_output_column_name(output_mode)
 
     used_slots = []
     for _, row in interpretation_df.head(40).iterrows():
@@ -1562,22 +1355,6 @@ def make_translation_overlay(image: Image.Image, ocr_rows: pd.DataFrame, interpr
             cursor_y += (bb[3] - bb[1]) + 4
 
     return Image.alpha_composite(img, overlay).convert("RGB")
-
-
-
-# -----------------------------
-# Line translation mode
-# -----------------------------
-def clean_single_ocr_line(text: str) -> str:
-    return line_translation_engine.clean_single_ocr_line(text)
-
-
-
-def translate_common_instruction_line(s: str, index: Dict[str, int], df: pd.DataFrame, output_mode: str) -> Optional[str]:
-    return line_translation_engine.translate_common_instruction_line(s, index, df, output_mode)
-
-def translate_ocr_line(original: str, index: Dict[str, int], df: pd.DataFrame, output_mode: str) -> str:
-    return line_translation_engine.translate_ocr_line(original, index, df, output_mode)
 
 
 
@@ -1690,9 +1467,9 @@ def build_ocr_line_translations(ocr_rows: pd.DataFrame, index: Dict[str, int], d
         if not original:
             continue
         profile_count("OCR lines processed")
-        cleaned = clean_single_ocr_line(original)
-        translated = translate_ocr_line(cleaned, index, df, output_mode)
-        changed = norm_text(cleaned) != norm_text(translated)
+        cleaned = line_translation_engine.clean_single_ocr_line(original)
+        translated = line_translation_engine.translate_ocr_line(cleaned, index, df, output_mode)
+        changed = terminology_engine.norm_text(cleaned) != terminology_engine.norm_text(translated)
         out.append({
             "Original": cleaned,
             "Translation": translated,
@@ -1704,12 +1481,6 @@ def build_ocr_line_translations(ocr_rows: pd.DataFrame, index: Dict[str, int], d
             "max_y": float(r.get("max_y", r.get("y", 0) + 20)),
         })
     return pd.DataFrame(out)
-
-
-def build_readable_line_translation(line_df: pd.DataFrame) -> str:
-    return line_translation_engine.build_readable_line_translation(line_df)
-
-
 
 # -----------------------------
 # Watermark / noise filtering
@@ -1794,13 +1565,13 @@ def filter_noise_and_watermarks(ocr_rows: pd.DataFrame) -> Tuple[pd.DataFrame, p
     rows["original_text_before_filter"] = rows["text"].astype(str)
     rows["text"] = rows["text"].astype(str).map(strip_watermark_substrings)
 
-    norm_counts = rows["text"].map(lambda x: norm_text(x)).value_counts().to_dict()
+    norm_counts = rows["text"].map(lambda x: terminology_engine.norm_text(x)).value_counts().to_dict()
     keep = []
     removed = []
     for _, r in rows.iterrows():
         txt = str(r.get("text", "")).strip()
         original_txt = str(r.get("original_text_before_filter", "")).strip()
-        nkey = norm_text(txt)
+        nkey = terminology_engine.norm_text(txt)
         repeated = int(norm_counts.get(nkey, 0)) if nkey else 0
         reason = ""
         if original_txt and txt != original_txt and not txt:
@@ -1900,7 +1671,7 @@ def extract_round_label_from_line(original: str) -> Optional[str]:
     m = re.match(rf"^(?:Rnd\s*)?R?\s*([lI]?[0-9gq]+(?:\s*{sep}\s*R?\s*[0-9gq]+)?)\s*:", s, flags=re.I)
     if not m:
         return None
-    label = "R" + repair_ocr_round_token(m.group(1)).replace(" ", "")
+    label = "R" + line_translation_engine.repair_ocr_round_token(m.group(1)).replace(" ", "")
     label = re.sub(r"^RR", "R", label, flags=re.I)
     # Normalise all range separators for display and downstream parsing.
     label = re.sub(sep, "-", label)
@@ -2347,7 +2118,7 @@ def build_section_readable_text(sections: List[Dict[str, object]]) -> str:
         for line in lines:
             original = str(line.get("Original", "")).strip()
             translated = str(line.get("Translation", "")).strip()
-            if norm_text(original) == norm_text(translated):
+            if terminology_engine.norm_text(original) == terminology_engine.norm_text(translated):
                 chunks.append(original)
             else:
                 chunks.append(f"{original}\n→ {translated}")
@@ -2393,7 +2164,7 @@ def build_pattern_export_text(interpretation_df: pd.DataFrame, clean_text: str =
         "Note: OCR and pattern interpretation may contain mistakes. Please check against the original pattern image.",
         "",
     ]
-    line_text = build_line_by_line_text(interpretation_df, output_mode) if interpretation_df is not None and not interpretation_df.empty else ""
+    line_text = line_translation_engine.build_line_by_line_text(interpretation_df, output_mode) if interpretation_df is not None and not interpretation_df.empty else ""
     if line_text:
         parts.append("=== Pattern interpretation ===")
         parts.append(line_text)
@@ -2573,7 +2344,7 @@ def make_line_translation_overlay(
             break
         original = str(row.get("Original", "")).strip()
         translated = str(row.get("Translation", "")).strip()
-        if not translated or norm_text(original) == norm_text(translated):
+        if not translated or terminology_engine.norm_text(original) == terminology_engine.norm_text(translated):
             continue
 
         min_x = float(row.get("min_x", 0)); max_x = float(row.get("max_x", min_x + 80))
@@ -2673,18 +2444,8 @@ def image_to_png_bytes(image: Image.Image) -> bytes:
     return buf.getvalue()
 
 
-def build_overlay_export_text(line_df: pd.DataFrame, legend_text: str='', clean_text: str='', raw_text: str='') -> str:
-    return line_translation_engine.build_overlay_export_text(line_df, legend_text, clean_text, raw_text)
-
-
 # Diagnostic Report Engine wrappers. Streamlit context stays in app.py; pure
 # report construction lives in pattern_translator.engine.diagnostic_report.
-format_runtime_profile = diagnostic_report_engine.format_runtime_profile
-build_rc11c_translation_diagnostics = diagnostic_report_engine.build_rc11c_translation_diagnostics
-build_rc11d_validation_diagnostics = diagnostic_report_engine.build_rc11d_validation_diagnostics
-build_rc11e_normalization_diagnostics = diagnostic_report_engine.build_rc11e_normalization_diagnostics
-
-
 def build_rc11f_cache_diagnostics(
     translation_profile: Optional[Dict[str, Dict[str, float]]],
     timings: Optional[Dict[str, object]],
@@ -4058,12 +3819,12 @@ if image_file is not None:
         st.warning(t("settings_changed_rerun"))
 
     full_df = load_database()
-    df = get_active_search_df(full_df)
+    df = terminology_engine.get_active_search_df(full_df)
     index = build_term_index(df, source_mode)
     all_term_index = build_all_term_index(df)
     df.attrs["all_term_index"] = all_term_index
     try:
-        df.attrs["normalized_lookup_index"] = build_normalized_lookup_index(index, all_term_index, source_mode)
+        df.attrs["normalized_lookup_index"] = terminology_engine.build_normalized_lookup_index(index, all_term_index, source_mode)
     except Exception as e:
         NORMALIZED_LOOKUP_INDEX_STATS["index_error"] = str(e)
         df.attrs["normalized_lookup_index"] = {}
@@ -4187,7 +3948,7 @@ if image_file is not None:
 
                     translation_start = time.perf_counter()
                     matches_df, unmatched = find_matches(clean_text, df, index)
-                    readable_translation = build_readable_line_translation(line_df) if line_df is not None and not line_df.empty else ""
+                    readable_translation = line_translation_engine.build_readable_line_translation(line_df) if line_df is not None and not line_df.empty else ""
                     translation_seconds += time.perf_counter() - translation_start
 
                     png_start = time.perf_counter()
@@ -4195,7 +3956,7 @@ if image_file is not None:
                     png_seconds = time.perf_counter() - png_start
 
                     txt_start = time.perf_counter()
-                    translation_txt = build_overlay_export_text(line_df)
+                    translation_txt = line_translation_engine.build_overlay_export_text(line_df)
                     txt_seconds = time.perf_counter() - txt_start
                 finally:
                     TRANSLATION_PROFILE = previous_translation_profile
@@ -4208,18 +3969,18 @@ if image_file is not None:
                 timings["PNG encoding"] = png_seconds
                 timings["Translation TXT generation"] = txt_seconds
                 timings["Total runtime"] = image_load_seconds + crop_extraction_seconds + (time.perf_counter() - total_start)
-                rc11c_translation_diagnostics = build_rc11c_translation_diagnostics(
+                rc11c_translation_diagnostics = diagnostic_report_engine.build_rc11c_translation_diagnostics(
                     translation_profile,
                     timings,
                     ocr_rows,
                     line_df,
                     overlay_legend_df,
                 )
-                rc11d_validation_diagnostics = build_rc11d_validation_diagnostics(
+                rc11d_validation_diagnostics = diagnostic_report_engine.build_rc11d_validation_diagnostics(
                     translation_profile,
                     rc11c_translation_diagnostics,
                 )
-                rc11e_normalization_diagnostics = build_rc11e_normalization_diagnostics(
+                rc11e_normalization_diagnostics = diagnostic_report_engine.build_rc11e_normalization_diagnostics(
                     translation_profile,
                     df,
                 )
@@ -4293,7 +4054,7 @@ if image_file is not None:
                     debug_report_txt.rstrip(),
                     "",
                     "=== Performance: Runtime Profile ===",
-                    format_runtime_profile(runtime_profile),
+                    diagnostic_report_engine.format_runtime_profile(runtime_profile),
                     "",
                 ])
                 st.session_state["rc3_ocr_result"] = {
