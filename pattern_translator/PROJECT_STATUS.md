@@ -18,7 +18,7 @@ pattern_translator/app.py
 
 Crochet Pattern OCR Translator is the current OCR-based pattern translation app. RC28 is the current production baseline. The first External UAT phase has concluded with positive results from real crochet users. Railway is now the primary production deployment platform.
 
-RC42 completed the first local Engine Extraction by moving the CSV terminology / lookup engine into `pattern_translator/engine/terminology.py`. RC43 completed the second local Engine Extraction by moving pure line-translation logic into `pattern_translator/engine/line_translation.py`. RC44 completed the third local Engine Extraction by moving Diagnostic Report construction and formatting into `pattern_translator/engine/diagnostic_report.py`. RC45 completed Boundary Cleanup by removing redundant pass-through wrappers between `app.py` and the engine modules while retaining Streamlit cache wrappers and genuine application adapters. Regression and Human UAT passed, and no user-visible behavior changed. Engine migration remains local only with no production deployment and no GitHub push.
+RC42 completed the first local Engine Extraction by moving the CSV terminology / lookup engine into `pattern_translator/engine/terminology.py`. RC43 completed the second local Engine Extraction by moving pure line-translation logic into `pattern_translator/engine/line_translation.py`. RC44 completed the third local Engine Extraction by moving Diagnostic Report construction and formatting into `pattern_translator/engine/diagnostic_report.py`. RC45 completed Boundary Cleanup by removing redundant pass-through wrappers between `app.py` and the engine modules while retaining Streamlit cache wrappers and genuine application adapters. RC46 completed the Overlay Rendering Engine extraction into `pattern_translator/engine/overlay.py`. Regression and Human UAT passed, and no user-visible behavior changed. Engine migration remains local only with no production deployment and no GitHub push.
 
 ## Current Database
 
@@ -53,7 +53,7 @@ Current focus:
 
 1. Preserve RC28 as the current Railway production baseline and rollback target.
 2. Begin migration locally only; no GitHub migration branch, deployment, or production change yet.
-3. Continue small, validated local migration RCs after RC45 before replacing the frontend.
+3. Continue small, validated local migration RCs after RC46 before replacing the frontend.
 4. Keep Streamlit Community Cloud as a backup platform during migration.
 
 - Continue occasional testing with trusted users and incremental fixes based on real production usage.
@@ -68,6 +68,18 @@ Current focus:
 - Minor overlay text box alignment refinement is deferred.
 
 ## Current Release Notes
+
+### RC46
+
+- Mission: local Overlay Rendering Engine extraction after RC45 Boundary Cleanup.
+- Scope: extract overlay rendering responsibilities into `pattern_translator/engine/overlay.py`.
+- Architecture: overlay rendering is now independent of Streamlit. The Streamlit UI calls the Overlay Engine directly, and no compatibility wrapper was retained because no Streamlit-specific behavior was required. Current engine modules are `engine/terminology.py`, `engine/line_translation.py`, `engine/diagnostic_report.py`, and `engine/overlay.py`.
+- App impact: `pattern_translator/app.py` reduced from approximately 4229 lines to approximately 3789 lines.
+- Validation: automated regression passed; Human UAT passed; overlay PNG byte comparison passed; overlay pixel comparison passed; overlay legend comparison passed; translation regression, TXT regression, Diagnostic Report regression, and `220 / 220` direct corpus outputs were identical.
+- Known validation limitation: OCR was intentionally not rerun during automated regression because RC46 only refactored overlay rendering.
+- Behavior: no user-visible behavior changes.
+- Release handling: local only. No production deployment and no GitHub push. RC28 remains the current production baseline. RC46 is another major milestone in the ongoing Engine Migration, but Engine Migration is not complete.
+- Remaining `app.py` responsibilities are increasingly concentrated around application orchestration, OCR, session management, localization, downloads, and Streamlit integration.
 
 ### RC45
 
