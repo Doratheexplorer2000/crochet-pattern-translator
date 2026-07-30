@@ -18,7 +18,7 @@ pattern_translator/app.py
 
 Crochet Pattern OCR Translator is the current OCR-based pattern translation app. RC28 is the current production baseline. The first External UAT phase has concluded with positive results from real crochet users. Railway is now the primary production deployment platform.
 
-RC42 completed the first local Engine Extraction by moving the CSV terminology / lookup engine into `pattern_translator/engine/terminology.py`. RC43 completed the second local Engine Extraction by moving pure line-translation logic into `pattern_translator/engine/line_translation.py`. RC44 completed the third local Engine Extraction by moving Diagnostic Report construction and formatting into `pattern_translator/engine/diagnostic_report.py`. RC45 completed Boundary Cleanup by removing redundant pass-through wrappers between `app.py` and the engine modules while retaining Streamlit cache wrappers and genuine application adapters. RC46 completed the Overlay Rendering Engine extraction into `pattern_translator/engine/overlay.py`. Regression and Human UAT passed, and no user-visible behavior changed. Engine migration remains local only with no production deployment and no GitHub push.
+RC42 completed the first local Engine Extraction by moving the CSV terminology / lookup engine into `pattern_translator/engine/terminology.py`. RC43 completed the second local Engine Extraction by moving pure line-translation logic into `pattern_translator/engine/line_translation.py`. RC44 completed the third local Engine Extraction by moving Diagnostic Report construction and formatting into `pattern_translator/engine/diagnostic_report.py`. RC45 completed Boundary Cleanup by removing redundant pass-through wrappers between `app.py` and the engine modules while retaining Streamlit cache wrappers and genuine application adapters. RC46 completed the Overlay Rendering Engine extraction into `pattern_translator/engine/overlay.py`. RC47 completed the Pattern Document Engine extraction into `pattern_translator/engine/pattern_document.py`. Regression and Human UAT passed, and no user-visible behavior changed. Engine migration remains local only with no production deployment and no GitHub push.
 
 ## Current Database
 
@@ -53,7 +53,7 @@ Current focus:
 
 1. Preserve RC28 as the current Railway production baseline and rollback target.
 2. Begin migration locally only; no GitHub migration branch, deployment, or production change yet.
-3. Continue small, validated local migration RCs after RC46 before replacing the frontend.
+3. Continue small, validated local migration RCs after RC47 before replacing the frontend.
 4. Keep Streamlit Community Cloud as a backup platform during migration.
 
 - Continue occasional testing with trusted users and incremental fixes based on real production usage.
@@ -66,8 +66,21 @@ Current focus:
 - Android overlay font may appear relatively small.
 - Version number is not currently shown in the UI.
 - Minor overlay text box alignment refinement is deferred.
+- JellyCat 元寶 overlay placement has a minor cosmetic placement difference. Translation correctness, anchor position, readability, and functionality are unaffected; this is future overlay placement tuning rather than an RC47 regression.
 
 ## Current Release Notes
+
+### RC47
+
+- Mission: local Pattern Document Engine extraction after RC46 Overlay Rendering Engine extraction.
+- Scope: extract pattern noise filtering, section detection, section grouping, readable section formatting, and pattern export construction into `pattern_translator/engine/pattern_document.py`.
+- Architecture: Pattern Document responsibilities are now independent of Streamlit and encapsulated in the engine layer. `app.py` delegates directly to the Pattern Document Engine without compatibility wrappers. Current engine modules are `engine/terminology.py`, `engine/line_translation.py`, `engine/diagnostic_report.py`, `engine/overlay.py`, and `engine/pattern_document.py`.
+- Validation: automated regression passed; Human UAT passed; translation, TXT export, section export, pattern export, Diagnostic Report, overlay PNG bytes, overlay pixels, overlay legend, and `220 / 220` direct corpus outputs were identical.
+- Known validation limitation: OCR was intentionally not rerun during automated regression because RC47 only extracted Pattern Document responsibilities.
+- Human UAT note: JellyCat 元寶 overlay placement shows a minor cosmetic placement difference. Translation correctness, anchor position, readability, and functionality are unaffected. This is recorded as future Overlay placement tuning rather than an RC47 regression.
+- Behavior: no user-visible behavior changes.
+- Release handling: local only. No production deployment and no GitHub push. RC28 remains the current production baseline.
+- Architecture status: Engine Migration is now in the late stage following RC47. A fresh post-RC47 architecture assessment will determine whether additional engine extraction is warranted or whether the project should transition to the next architectural phase.
 
 ### RC46
 

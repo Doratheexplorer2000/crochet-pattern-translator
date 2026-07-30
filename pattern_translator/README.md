@@ -65,6 +65,13 @@ Key validated behavior:
 - Overlay rendering is now independent of Streamlit, and the Streamlit UI calls the Overlay Engine directly without a compatibility wrapper.
 - RC46 reduced `pattern_translator/app.py` from approximately 4229 lines to approximately 3789 lines.
 - RC46 validation confirmed byte-identical overlay PNG output, identical overlay pixels, identical overlay legends, identical translation/TXT/Diagnostic Report regressions, and `220 / 220` direct corpus outputs; Human UAT passed, and no user-visible behavior changed.
+- RC47 completed local Pattern Document Engine extraction into `pattern_translator/engine/pattern_document.py`.
+- Pattern Document responsibilities now include pattern noise filtering, section detection, section grouping, readable section formatting, and pattern export construction.
+- `pattern_translator/app.py` delegates Pattern Document responsibilities directly to the engine without compatibility wrappers.
+- Current Pattern Translator engine modules are `terminology`, `line_translation`, `diagnostic_report`, `overlay`, and `pattern_document`.
+- RC47 validation confirmed identical translation, TXT export, section export, pattern export, Diagnostic Report, overlay PNG bytes, overlay pixels, overlay legends, and `220 / 220` direct corpus outputs; Human UAT passed.
+- RC47 Human UAT noted that JellyCat 元寶 overlay placement has a minor cosmetic placement difference. Translation correctness, anchor position, readability, and functionality are unaffected; this is future overlay placement tuning rather than an RC47 regression.
+- RC47 represents another major milestone in the ongoing Engine Migration. A fresh architecture assessment will determine whether further engine extraction is justified or whether the project should transition to the next architectural phase.
 - Engine extraction remains local only: no production deployment and no GitHub push. RC28 remains the current production baseline.
 - Regression evidence is stored under `regression/regression_test/Reports/`.
 
@@ -73,7 +80,7 @@ Key validated behavior:
 - Official production baseline: `RC28`
 - Current app version string: `Pattern OCR Translator (Beta RC26)`
 - Current phase: phased post-Streamlit migration preparation
-- Latest local migration step: `RC46` Overlay Rendering Engine extraction completed and Human UAT passed.
+- Latest local migration step: `RC47` Pattern Document Engine extraction completed and Human UAT passed.
 - Current production database: `knowledge_base/data/master_stitches.csv`
 - Current focus: preserve RC28 as the Railway production baseline, begin migration locally only, and separate business logic from Streamlit before replacing the frontend.
 - Future testing: continue with occasional trusted-user testing and incremental fixes based on production evidence. Plan for a Soft Launch after Landing Page completion instead of another formal External UAT cycle.
@@ -82,6 +89,7 @@ Known non-blocking polish items:
 
 - Version number is not currently shown in the UI.
 - Minor overlay text box alignment refinement is deferred.
+- JellyCat 元寶 overlay placement has a minor cosmetic placement difference; future overlay placement tuning may improve this.
 
 ## Run Locally
 

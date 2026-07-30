@@ -47,6 +47,12 @@ Current focus:
 - Overlay rendering is now independent of Streamlit, and the Streamlit UI calls the Overlay Engine directly without a compatibility wrapper.
 - RC46 reduced `pattern_translator/app.py` from approximately 4229 lines to approximately 3789 lines.
 - RC46 validation confirmed byte-identical overlay PNG output, identical overlay pixels, identical overlay legends, identical translation/TXT/Diagnostic Report regressions, and `220 / 220` direct corpus outputs; Human UAT passed, and no user-visible behavior changed.
+- RC47 completed local Pattern Document Engine extraction into `pattern_translator/engine/pattern_document.py`.
+- Pattern Document responsibilities now include pattern noise filtering, section detection, section grouping, readable section formatting, and pattern export construction.
+- `pattern_translator/app.py` delegates Pattern Document responsibilities directly to the engine without compatibility wrappers.
+- Current Pattern Translator engine modules are `terminology`, `line_translation`, `diagnostic_report`, `overlay`, and `pattern_document`.
+- RC47 validation confirmed identical translation, TXT export, section export, pattern export, Diagnostic Report, overlay PNG bytes, overlay pixels, overlay legends, and `220 / 220` direct corpus outputs; Human UAT passed.
+- RC47 represents another major milestone in the ongoing Engine Migration. A fresh architecture assessment will determine whether further engine extraction is justified or whether the project should transition to the next architectural phase.
 - Engine extraction remains local only: no production deployment and no GitHub push. RC28 remains the current production baseline.
 
 Next:
