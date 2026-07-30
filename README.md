@@ -36,6 +36,9 @@ Current focus:
 - RC43 completed the second local Engine Extraction by moving pure line-translation logic into `pattern_translator/engine/line_translation.py`.
 - RC43 regression confirmed `220 / 220` direct corpus cases identical, Human UAT passed, and no user-visible behavior changed.
 - RC43 reduced `pattern_translator/app.py` by approximately 759 lines.
+- RC44 completed the third local Engine Extraction by moving Diagnostic Report construction and formatting into `pattern_translator/engine/diagnostic_report.py`.
+- RC44 regression confirmed zero-byte representative Diagnostic Report diff, identical translation/TXT regressions, unchanged existing regression corpus, Human UAT passed, and no user-visible behavior changed.
+- RC44 reduced `pattern_translator/app.py` from approximately 5432 lines to approximately 4462 lines.
 - Engine extraction remains local only: no production deployment and no GitHub push. RC28 remains the current production baseline.
 
 Next:

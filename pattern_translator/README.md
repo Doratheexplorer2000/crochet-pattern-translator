@@ -53,6 +53,10 @@ Key validated behavior:
 - RC43 completed the second local Engine Extraction by moving pure line-translation logic into `pattern_translator/engine/line_translation.py`.
 - RC43 regression confirmed `220 / 220` direct corpus cases identical, Human UAT passed, and no user-visible behavior changed.
 - RC43 reduced `pattern_translator/app.py` by approximately 759 lines.
+- RC44 completed the third local Engine Extraction by moving Diagnostic Report construction and formatting into `pattern_translator/engine/diagnostic_report.py`.
+- RC44 reduced `pattern_translator/app.py` from approximately 5432 lines to approximately 4462 lines.
+- RC44 regression confirmed zero-byte representative Diagnostic Report diff, identical translation/TXT regressions, unchanged existing regression corpus, Human UAT passed, and no user-visible behavior changed.
+- RC44 Human UAT found a missing `_debug_cell` helper reference during OCR diagnostic metadata generation. A local hotfix restored the helper only where required in `app.py`, while the Diagnostic Report Engine retained its own private helper; repeated Human UAT passed.
 - Engine extraction remains local only: no production deployment and no GitHub push. RC28 remains the current production baseline.
 - Regression evidence is stored under `regression/regression_test/Reports/`.
 
@@ -61,7 +65,7 @@ Key validated behavior:
 - Official production baseline: `RC28`
 - Current app version string: `Pattern OCR Translator (Beta RC26)`
 - Current phase: phased post-Streamlit migration preparation
-- Latest local extraction: `RC43` line translation engine extraction completed and Human UAT passed.
+- Latest local extraction: `RC44` diagnostic report engine extraction completed and Human UAT passed.
 - Current production database: `knowledge_base/data/master_stitches.csv`
 - Current focus: preserve RC28 as the Railway production baseline, begin migration locally only, and separate business logic from Streamlit before replacing the frontend.
 - Future testing: continue with occasional trusted-user testing and incremental fixes based on production evidence. Plan for a Soft Launch after Landing Page completion instead of another formal External UAT cycle.

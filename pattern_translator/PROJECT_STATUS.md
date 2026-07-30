@@ -18,7 +18,7 @@ pattern_translator/app.py
 
 Crochet Pattern OCR Translator is the current OCR-based pattern translation app. RC28 is the current production baseline. The first External UAT phase has concluded with positive results from real crochet users. Railway is now the primary production deployment platform.
 
-RC42 completed the first local Engine Extraction by moving the CSV terminology / lookup engine into `pattern_translator/engine/terminology.py`. RC43 completed the second local Engine Extraction by moving pure line-translation logic into `pattern_translator/engine/line_translation.py`. Regression confirmed `220 / 220` direct corpus cases identical, Human UAT passed, and no user-visible behavior changed. Engine extraction remains local only with no production deployment and no GitHub push.
+RC42 completed the first local Engine Extraction by moving the CSV terminology / lookup engine into `pattern_translator/engine/terminology.py`. RC43 completed the second local Engine Extraction by moving pure line-translation logic into `pattern_translator/engine/line_translation.py`. RC44 completed the third local Engine Extraction by moving Diagnostic Report construction and formatting into `pattern_translator/engine/diagnostic_report.py`. Regression and Human UAT passed, and no user-visible behavior changed. Engine extraction remains local only with no production deployment and no GitHub push.
 
 ## Current Database
 
@@ -53,7 +53,7 @@ Current focus:
 
 1. Preserve RC28 as the current Railway production baseline and rollback target.
 2. Begin migration locally only; no GitHub migration branch, deployment, or production change yet.
-3. Continue small, validated Engine Extraction RCs after RC43 before replacing the frontend.
+3. Continue small, validated Engine Extraction RCs after RC44 before replacing the frontend.
 4. Keep Streamlit Community Cloud as a backup platform during migration.
 
 - Continue occasional testing with trusted users and incremental fixes based on real production usage.
@@ -68,6 +68,16 @@ Current focus:
 - Minor overlay text box alignment refinement is deferred.
 
 ## Current Release Notes
+
+### RC44
+
+- Mission: third Engine Extraction RC after RC43 line translation extraction.
+- Scope: extract Diagnostic Report construction and formatting into `pattern_translator/engine/diagnostic_report.py`.
+- App impact: `pattern_translator/app.py` reduced from approximately 5432 lines to approximately 4462 lines.
+- Validation: representative Diagnostic Report diff was zero bytes; translation regression and TXT regression were identical; the existing regression corpus was unchanged; Human UAT passed.
+- Human UAT finding: a missing `_debug_cell` helper reference caused a NameError during OCR diagnostic metadata generation. The hotfix restored `_debug_cell` only where required inside `app.py`, while the Diagnostic Report Engine retained its own private helper. Repeated Human UAT passed.
+- Behavior: no user-visible behavior changes.
+- Release handling: local only. No production deployment and no GitHub push. RC28 remains the current production baseline.
 
 ### RC43
 
@@ -166,6 +176,7 @@ Current focus:
 
 After platform direction is clearer:
 
+- Improve discoverability of editable line-by-line translation before TXT download. The feature already exists, but users may not realise the translation text can be edited before downloading. Consider clearer UI guidance in a future UX enhancement; implementation is not scheduled now.
 - Analytics v2 should keep raw logs while adding a cleaner summary/dashboard.
 - Review and refine the Analytics schema based on real user data.
 - Review the Google Feedback Form questions and workflow.
