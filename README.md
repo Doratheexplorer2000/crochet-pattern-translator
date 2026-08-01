@@ -31,7 +31,7 @@ Current focus:
 - Railway Hobby resource usage during the spike was suitable for low-volume production: peak RAM approximately 1.84 GB, normal RAM approximately 1.29 GB, and peak CPU approximately 1.39 vCPU.
 - Streamlit Community Cloud is retained as a backup platform.
 - Pattern Translator Feedback Form migration to `crochetintelligence@gmail.com` is complete.
-- Pattern Translator analytics is implemented and validated, but `app_open` duplicate passive entries are a known Streamlit Community Cloud lifecycle limitation. The analytics model will be revisited after migration to a new deployment platform.
+- Pattern Translator analytics is implemented and validated. Human-visit and `app_open` event-quality cleanup remains deferred until the Landing Page can provide browser analytics.
 - RC42 completed the first local Engine Extraction by moving the CSV terminology / lookup engine into `pattern_translator/engine/terminology.py`.
 - RC43 completed the second local Engine Extraction by moving pure line-translation logic into `pattern_translator/engine/line_translation.py`.
 - RC43 regression confirmed `220 / 220` direct corpus cases identical, Human UAT passed, and no user-visible behavior changed.
@@ -50,15 +50,30 @@ Current focus:
 - RC47 completed local Pattern Document Engine extraction into `pattern_translator/engine/pattern_document.py`.
 - Pattern Document responsibilities now include pattern noise filtering, section detection, section grouping, readable section formatting, and pattern export construction.
 - `pattern_translator/app.py` delegates Pattern Document responsibilities directly to the engine without compatibility wrappers.
-- Current Pattern Translator engine modules are `terminology`, `line_translation`, `diagnostic_report`, `overlay`, and `pattern_document`.
 - RC47 validation confirmed identical translation, TXT export, section export, pattern export, Diagnostic Report, overlay PNG bytes, overlay pixels, overlay legends, and `220 / 220` direct corpus outputs; Human UAT passed.
-- RC47 represents another major milestone in the ongoing Engine Migration. A fresh architecture assessment will determine whether further engine extraction is justified or whether the project should transition to the next architectural phase.
+- RC48 completed local OCR Line Assembly Engine extraction into `pattern_translator/engine/ocr_lines.py`.
+- OCR visual-line merging, cluster assembly, and translated line-record construction now belong to the OCR Line Assembly Engine.
+- RC48 reduced `pattern_translator/app.py` from 3,089 lines to 2,971 lines.
+- RC48 validation confirmed identical stored OCR-line fixtures and intermediate line records, with identical overlay, TXT, Pattern Export, and Diagnostic Report outputs; automated regression and Human UAT passed.
+- RC49 completed local OCR Cleanup Engine extraction into `pattern_translator/engine/ocr_cleanup.py`.
+- RC49 extracted `clean_ocr_text()` and `normalize_pattern_rounds()` and reduced `pattern_translator/app.py` from 2,971 lines to 2,868 lines.
+- RC49 validation confirmed identical OCR cleanup fixtures, round normalization, stored OCR fixtures, overlay, TXT, Pattern Export, and Diagnostic Report outputs; the `220 / 220` translation corpus and Human UAT passed.
+- Engine Migration is complete. The Streamlit-independent Pattern Translator engines are `terminology`, `line_translation`, `diagnostic_report`, `overlay`, `pattern_document`, `ocr_lines`, and `ocr_cleanup`.
+- Remaining `app.py` responsibilities are intentionally application, framework, and runtime concerns: Streamlit UI, application orchestration, OCR runtime/provider lifecycle, session state, downloads, analytics, localization, Cropper / Select Area, and runtime infrastructure.
+- Domain Layer extraction is complete. Application Layer separation is deferred until it provides clear product value.
 - Engine extraction remains local only: no production deployment and no GitHub push. RC28 remains the current production baseline.
+- RC50A proved the custom upload boundary, and RC50B completed the production custom uploader using Streamlit Components V1.
+- The upload path remains `custom uploader -> BytesIO -> image_upload_signature() -> Image.open()`, preserving OCR, translation, overlay, diagnostics, exports, and the analytics schema.
+- The uploader supports JPG, JPEG, PNG, and WebP; four interface languages; native mobile image selection; desktop drag-and-drop; Replace and Remove; and light and dark modes.
+- The 25 MB limit is intentional because Components V1 transports the image as base64. Physical iPhone Safari and Android Chrome Human UAT passed with no functional regression.
+- Unrelated-image handling was validated and the no-crochet-content message was improved. Streamlit still provides the runtime, session state, and component communication; RC50 replaced one native Streamlit UI widget.
+- Visual branding, the corporate colour palette, logo work, GIF/onboarding guidance, and upload-button restyling remain deferred until the separate visual identity decision.
 
 Next:
 
-- Begin the phased post-Streamlit migration locally only.
-- First migration objective: separate Pattern Translator business logic from Streamlit before replacing the frontend.
+- Move to the next confirmed UI/UX limitation after the separate visual identity decision.
+- Keep the completed Engine Migration local until a future integration decision is approved.
+- Focus future work on product features, runtime improvements, deployment, or Application Layer work when justified by clear product value.
 - Keep the existing RC28 Railway production path fully recoverable as the rollback target.
 - Add the reusable analytics implementation to Crochet Stitch Translator.
 - Address non-blocking polish items: expose the version number in the UI and refine minor overlay text box alignment.

@@ -8,3 +8,4 @@ pycache/
 .vscode/
 .idea/
 .env
+/pattern_translator/components/custom_upload/node_modules/

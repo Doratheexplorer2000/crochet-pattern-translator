@@ -319,3 +319,31 @@ For the approved post-Streamlit migration:
 - prefer Git tags and local branches over duplicating the repository.
 
 Migration commits should be small and organized by reversible engineering step, such as baseline capture, business-logic extraction, API introduction, frontend prototype, and deployment spike.
+
+---
+
+# 19. Goal-first Engineering Workflow
+
+Before starting any RC, feature, refactor, migration, architectural change, or engineering task larger than a small bug fix, define and agree on:
+
+Goal
+
+- What product or business problem is being solved?
+
+Success Criteria
+
+- What observable outcome determines success?
+
+Out of Scope
+
+- What this work is explicitly not intended to solve.
+
+Do not begin implementation until these three items are agreed.
+
+At the start of every new RC or major engineering discussion, ChatGPT or Codex should restate the Goal, Success Criteria, and Out of Scope before proposing implementation.
+
+If evidence discovered during implementation shows that the agreed Goal cannot realistically be achieved, stop and reassess before continuing.
+
+Do not continue an architectural refactor solely because it improves code quality when it no longer serves the agreed Goal.
+
+Architectural improvements are valuable, but they must not be presented as achieving the original Goal unless the agreed Success Criteria are actually met.

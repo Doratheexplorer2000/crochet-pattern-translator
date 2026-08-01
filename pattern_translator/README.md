@@ -41,7 +41,7 @@ Key validated behavior:
 - Desktop Human UAT passed on Railway production.
 - Railway Hobby usage during the spike remained suitable for low-volume production: peak RAM approximately 1.84 GB, normal RAM approximately 1.29 GB, and peak CPU approximately 1.39 vCPU.
 - Railway is now the primary production deployment platform. Streamlit Community Cloud remains a backup platform.
-- `app_open` analytics behavior remains unchanged. Duplicate passive `app_open` rows are a known Streamlit Community Cloud lifecycle limitation and will be revisited after migration to a new deployment platform.
+- Human-visit and `app_open` event-quality cleanup remains deferred until the Landing Page can provide browser analytics.
 - `knowledge_base/data/master_stitches.csv` is the current production database.
 - `stitches_1_8e.csv` is archived as the accepted source snapshot.
 - Chinese foundation-chain and turning-chain semantics are separated.
@@ -68,11 +68,25 @@ Key validated behavior:
 - RC47 completed local Pattern Document Engine extraction into `pattern_translator/engine/pattern_document.py`.
 - Pattern Document responsibilities now include pattern noise filtering, section detection, section grouping, readable section formatting, and pattern export construction.
 - `pattern_translator/app.py` delegates Pattern Document responsibilities directly to the engine without compatibility wrappers.
-- Current Pattern Translator engine modules are `terminology`, `line_translation`, `diagnostic_report`, `overlay`, and `pattern_document`.
 - RC47 validation confirmed identical translation, TXT export, section export, pattern export, Diagnostic Report, overlay PNG bytes, overlay pixels, overlay legends, and `220 / 220` direct corpus outputs; Human UAT passed.
 - RC47 Human UAT noted that JellyCat 元寶 overlay placement has a minor cosmetic placement difference. Translation correctness, anchor position, readability, and functionality are unaffected; this is future overlay placement tuning rather than an RC47 regression.
-- RC47 represents another major milestone in the ongoing Engine Migration. A fresh architecture assessment will determine whether further engine extraction is justified or whether the project should transition to the next architectural phase.
+- RC48 completed local OCR Line Assembly Engine extraction into `pattern_translator/engine/ocr_lines.py`.
+- Extracted responsibilities are `merge_ocr_boxes_into_visual_lines()`, `_merge_ocr_cluster()`, and `build_ocr_line_translations()`.
+- RC48 reduced `pattern_translator/app.py` from 3,089 lines to 2,971 lines.
+- RC48 validation confirmed identical stored OCR fixtures and intermediate OCR-line records. Overlay, TXT, Pattern Export, and Diagnostic Report outputs remained identical; automated regression and Human UAT passed.
+- RC49 completed local OCR Cleanup Engine extraction into `pattern_translator/engine/ocr_cleanup.py`.
+- RC49 extracted `clean_ocr_text()` and `normalize_pattern_rounds()` and reduced `pattern_translator/app.py` from 2,971 lines to 2,868 lines.
+- RC49 validation confirmed identical OCR cleanup fixtures, round normalization, stored OCR fixtures, overlay, TXT, Pattern Export, and Diagnostic Report outputs; the `220 / 220` translation corpus and Human UAT passed.
+- Engine Migration is complete. The Streamlit-independent Pattern Translator engines are `terminology`, `line_translation`, `diagnostic_report`, `overlay`, `pattern_document`, `ocr_lines`, and `ocr_cleanup`.
+- Remaining `app.py` responsibilities are intentionally application, framework, and runtime concerns: Streamlit UI, application orchestration, OCR runtime/provider lifecycle, session state, downloads, analytics, localization, Cropper / Select Area, and runtime infrastructure.
+- Domain Layer extraction is complete. Application Layer separation is deferred until it provides clear product value.
 - Engine extraction remains local only: no production deployment and no GitHub push. RC28 remains the current production baseline.
+- RC50A completed the custom uploader technical spike, and RC50B completed the production Streamlit Components V1 custom uploader.
+- The native Streamlit file uploader was replaced while preserving the boundary `custom uploader -> BytesIO -> image_upload_signature() -> Image.open()` and all downstream OCR, translation, overlay, diagnostics, exports, and analytics-schema behavior.
+- Supported formats are JPG, JPEG, PNG, and WebP. The uploader supports all four interface languages, native mobile image selection, desktop drag-and-drop, Replace and Remove, and light and dark modes.
+- The intentional upload limit is 25 MB because Components V1 uses base64 transport. Physical iPhone Safari and Android Chrome Human UAT passed with no functional regression.
+- Unrelated-image/no-crochet-content handling was validated and its message improved.
+- Streamlit remains the runtime and continues to provide session state and component communication. Visual branding, corporate colours, logo work, GIF/onboarding guidance, and upload-button restyling are deferred pending the separate visual identity decision.
 - Regression evidence is stored under `regression/regression_test/Reports/`.
 
 ## Current Project Status
@@ -80,9 +94,9 @@ Key validated behavior:
 - Official production baseline: `RC28`
 - Current app version string: `Pattern OCR Translator (Beta RC26)`
 - Current phase: phased post-Streamlit migration preparation
-- Latest local migration step: `RC47` Pattern Document Engine extraction completed and Human UAT passed.
+- Latest local product step: `RC50` production custom uploader completed and physical-device Human UAT passed; Engine Migration remains complete.
 - Current production database: `knowledge_base/data/master_stitches.csv`
-- Current focus: preserve RC28 as the Railway production baseline, begin migration locally only, and separate business logic from Streamlit before replacing the frontend.
+- Current focus: preserve RC28 as the Railway production baseline and move to the next UI/UX limitation after the separate visual identity decision. Future Application Layer separation remains deferred until clear product value justifies it.
 - Future testing: continue with occasional trusted-user testing and incremental fixes based on production evidence. Plan for a Soft Launch after Landing Page completion instead of another formal External UAT cycle.
 
 Known non-blocking polish items:

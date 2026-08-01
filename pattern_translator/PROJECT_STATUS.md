@@ -1,6 +1,6 @@
 # Crochet Pattern Translator Project Status
 
-Last updated: 2026-07-30
+Last updated: 2026-08-01
 
 ## Current Version
 
@@ -18,7 +18,9 @@ pattern_translator/app.py
 
 Crochet Pattern OCR Translator is the current OCR-based pattern translation app. RC28 is the current production baseline. The first External UAT phase has concluded with positive results from real crochet users. Railway is now the primary production deployment platform.
 
-RC42 completed the first local Engine Extraction by moving the CSV terminology / lookup engine into `pattern_translator/engine/terminology.py`. RC43 completed the second local Engine Extraction by moving pure line-translation logic into `pattern_translator/engine/line_translation.py`. RC44 completed the third local Engine Extraction by moving Diagnostic Report construction and formatting into `pattern_translator/engine/diagnostic_report.py`. RC45 completed Boundary Cleanup by removing redundant pass-through wrappers between `app.py` and the engine modules while retaining Streamlit cache wrappers and genuine application adapters. RC46 completed the Overlay Rendering Engine extraction into `pattern_translator/engine/overlay.py`. RC47 completed the Pattern Document Engine extraction into `pattern_translator/engine/pattern_document.py`. Regression and Human UAT passed, and no user-visible behavior changed. Engine migration remains local only with no production deployment and no GitHub push.
+RC42 completed the first local Engine Extraction by moving the CSV terminology / lookup engine into `pattern_translator/engine/terminology.py`. RC43 extracted pure line-translation logic into `pattern_translator/engine/line_translation.py`. RC44 extracted Diagnostic Report construction and formatting into `pattern_translator/engine/diagnostic_report.py`. RC45 completed Boundary Cleanup. RC46 extracted overlay rendering into `pattern_translator/engine/overlay.py`. RC47 extracted Pattern Document responsibilities into `pattern_translator/engine/pattern_document.py`. RC48 extracted OCR line assembly into `pattern_translator/engine/ocr_lines.py`. RC49 extracted deterministic OCR cleanup into `pattern_translator/engine/ocr_cleanup.py`, completing Engine Migration and Domain Layer extraction. Regression and Human UAT passed with no user-visible behavior changes. Engine migration remains local only with no production deployment and no GitHub push.
+
+RC50A completed the custom uploader technical spike. RC50B replaced the native Streamlit file uploader with a production Streamlit Components V1 uploader while preserving the existing Python and domain-engine boundary. Physical iPhone Safari and Android Chrome Human UAT passed with no functional regression. RC50 remains local only; RC28 remains the production baseline.
 
 ## Current Database
 
@@ -43,23 +45,42 @@ stitches_1_8e.csv
 - Overlay PNG export.
 - Translation TXT export.
 - Diagnostic Report export and feedback workflow.
+- Streamlit Components V1 custom image uploader with native mobile selection, desktop drag-and-drop, Replace and Remove, multilingual text, and light/dark theme support.
 - Regression framework with real-world pattern evidence.
 
 ## Current Priorities
 
-Current Phase: phased post-Streamlit migration preparation.
+Current Phase: Phase 2 – Streamlit Constraint Audit & Future UI Strategy.
 
-Current focus:
+Purpose:
 
-1. Preserve RC28 as the current Railway production baseline and rollback target.
-2. Begin migration locally only; no GitHub migration branch, deployment, or production change yet.
-3. Continue small, validated local migration RCs after RC47 before replacing the frontend.
-4. Keep Streamlit Community Cloud as a backup platform during migration.
+- Identify every UI/UX limitation caused by Streamlit.
+- Determine which limitations can be solved within Streamlit.
+- Determine which limitations require a different frontend.
+- Produce future frontend requirements before selecting any new framework.
 
+Roadmap decisions:
+
+- Preserve RC28 as the current Railway production baseline and rollback target.
+- Keep the completed Engine Migration and Domain Layer extraction local until further approval.
+- Analytics cleanup is intentionally deferred.
+- Do not pursue `app_open` cleanup before the Landing Page.
+- Address human-visit analytics after the Landing Page exists, using browser analytics.
+- Frontend technology remains intentionally undecided until Phase 2 is complete; React has not been selected.
 - Continue occasional testing with trusted users and incremental fixes based on real production usage.
-- Plan for a Soft Launch after Landing Page completion instead of another formal External UAT cycle.
 - Keep OCR, parser, overlay, and database changes small and evidence-based.
 - Preserve the shared database strategy with Crochet Stitch Translator.
+
+## Landing Page Strategy
+
+The Landing Page is a separate product from Pattern Translator.
+
+The default assumption is that the Landing Page will not be built with Streamlit. It is expected to provide:
+
+- marketing;
+- human visitor analytics;
+- a CTA funnel;
+- browser analytics, currently planned with Plausible.
 
 ## Known Issues
 
@@ -69,6 +90,40 @@ Current focus:
 - JellyCat 元寶 overlay placement has a minor cosmetic placement difference. Translation correctness, anchor position, readability, and functionality are unaffected; this is future overlay placement tuning rather than an RC47 regression.
 
 ## Current Release Notes
+
+### RC50
+
+- RC50A validated the technical upload boundary; RC50B completed the production custom uploader.
+- Architecture: `custom uploader -> BytesIO -> image_upload_signature() -> Image.open()`. OCR, translation, overlay, diagnostics, exports, and the analytics schema were preserved.
+- Formats and interaction: JPG, JPEG, PNG, and WebP; four interface languages; native mobile picker; desktop drag-and-drop; Replace and Remove; light and dark modes.
+- Limit: 25 MB is intentional because Streamlit Components V1 uses base64 transport.
+- Validation: physical iPhone Safari and Android Chrome Human UAT passed; real image upload and downstream workflows passed; unrelated-image/no-crochet-content handling was validated and its message improved; no functional regression was observed.
+- Boundary: one native Streamlit UI widget has been replaced. Streamlit still owns runtime, session state, and component communication.
+- Deferred: visual branding, corporate colour palette, logo work, GIF/onboarding guidance, and upload-button restyling await the separate visual identity decision.
+- Status: RC50 complete locally. The project is ready to move to the next UI/UX limitation after that visual identity decision. No production deployment or GitHub push; RC28 remains the production baseline.
+
+### RC49
+
+- Mission: final local Engine Extraction for deterministic OCR cleanup.
+- Scope: extract `clean_ocr_text()` and `normalize_pattern_rounds()` into `pattern_translator/engine/ocr_cleanup.py`.
+- App impact: `pattern_translator/app.py` reduced from 2,971 lines to 2,868 lines.
+- Validation: automated regression passed; Human UAT passed; OCR cleanup fixtures, round normalization, and stored OCR fixtures were identical; overlay, TXT, Pattern Export, and Diagnostic Report outputs remained identical; `220 / 220` translation corpus cases were identical.
+- Architecture: Engine Migration and Domain Layer extraction are complete. The seven Streamlit-independent engines are `engine/terminology.py`, `engine/line_translation.py`, `engine/diagnostic_report.py`, `engine/overlay.py`, `engine/pattern_document.py`, `engine/ocr_lines.py`, and `engine/ocr_cleanup.py`.
+- Intentional boundary: Streamlit UI, application orchestration, OCR runtime/provider lifecycle, session state, downloads, analytics, localization, Cropper / Select Area, and runtime infrastructure remain in `app.py` because they are application, framework, or runtime responsibilities rather than domain-engine responsibilities.
+- Future direction: product features, runtime improvements, deployment, or Application Layer work may proceed when justified. Application Layer separation is deferred until it provides clear product value.
+- Behavior: no user-visible behavior changes.
+- Release handling: local only. No production deployment and no GitHub push. RC28 remains the current production baseline.
+
+### RC48
+
+- Mission: local OCR Line Assembly Engine extraction after RC47 Pattern Document Engine extraction.
+- Scope: extract `merge_ocr_boxes_into_visual_lines()`, `_merge_ocr_cluster()`, and `build_ocr_line_translations()` into `pattern_translator/engine/ocr_lines.py`.
+- Architecture: OCR visual-line grouping and translated line-record construction are now independent of Streamlit. The six Streamlit-independent engines are `engine/terminology.py`, `engine/line_translation.py`, `engine/ocr_lines.py`, `engine/pattern_document.py`, `engine/overlay.py`, and `engine/diagnostic_report.py`.
+- App impact: `pattern_translator/app.py` reduced from 3,089 lines to 2,971 lines.
+- Validation: automated regression passed; Human UAT passed; stored OCR fixtures and intermediate OCR-line records were identical; overlay, TXT, Pattern Export, and Diagnostic Report outputs remained identical.
+- Behavior: no user-visible behavior changes.
+- Release handling: local only. No production deployment and no GitHub push. RC28 remains the current production baseline.
+- Architecture status at RC48: Engine Migration entered its final stage, completed subsequently by RC49.
 
 ### RC47
 
@@ -166,7 +221,7 @@ Current focus:
 - Status: completed locally.
 - Validation: passed local developer validation and Human UAT.
 - Release handling: intentionally local only. No commit, no push, and no Streamlit Community Cloud deployment for RC26.
-- Analytics decision: restored the original `app_open` semantics. Repeated passive `app_open` rows are treated as a Streamlit Community Cloud lifecycle limitation rather than an analytics implementation bug. Analytics will be revisited after a future platform migration.
+- Analytics decision at RC26: restored the original `app_open` semantics. The current Phase 2 decision supersedes the earlier platform-migration timing assumption: `app_open` cleanup is deferred until the Landing Page can provide browser analytics.
 
 ### RC27
 
@@ -209,13 +264,19 @@ Current focus:
 
 ## Future Work
 
-After platform direction is clearer:
+After Phase 2:
+
+1. Build the Landing Page.
+2. Migrate Stitch Translator to Railway.
+3. Introduce shared infrastructure improvements when appropriate.
+4. Evaluate future frontend frameworks only if Phase 2 demonstrates that Streamlit is the limiting factor.
+
+Additional deferred work:
 
 - Improve discoverability of editable line-by-line translation before TXT download. The feature already exists, but users may not realise the translation text can be edited before downloading. Consider clearer UI guidance in a future UX enhancement; implementation is not scheduled now.
-- Analytics v2 should keep raw logs while adding a cleaner summary/dashboard.
-- Review and refine the Analytics schema based on real user data.
+- Revisit human-visit and `app_open` analytics after the Landing Page browser-analytics foundation exists.
 - Review the Google Feedback Form questions and workflow.
-- Reuse the improved analytics/feedback design when implementing Stitch Translator analytics.
+- Reuse the improved analytics and feedback design when implementing Stitch Translator analytics.
 
 ### RC23b Hotfix 1
 

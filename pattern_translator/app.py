@@ -32,11 +32,14 @@ from crochet_intelligence.analytics import (
     increment_session_translation_no,
     track_event as analytics_track_event,
 )
+from pattern_translator.components.custom_upload import custom_image_uploader
 from pattern_translator.engine import terminology as terminology_engine
 from pattern_translator.engine import line_translation as line_translation_engine
 from pattern_translator.engine import diagnostic_report as diagnostic_report_engine
 from pattern_translator.engine import overlay as overlay_engine
 from pattern_translator.engine import pattern_document as pattern_document_engine
+from pattern_translator.engine import ocr_lines as ocr_lines_engine
+from pattern_translator.engine import ocr_cleanup as ocr_cleanup_engine
 
 APP_VERSION = "Pattern OCR Translator (Beta RC26)"
 APP_DIR = Path(__file__).resolve().parent
@@ -95,6 +98,11 @@ line_translation_engine.configure_profile_context(
     profile_add_time,
 )
 overlay_engine.configure_profile_context(
+    lambda: TRANSLATION_PROFILE,
+    profile_count,
+    profile_add_time,
+)
+ocr_lines_engine.configure_profile_context(
     lambda: TRANSLATION_PROFILE,
     profile_count,
     profile_add_time,
@@ -841,110 +849,6 @@ def run_ocr(image: Image.Image, lang_mode: str, layout_mode: str) -> Tuple[str, 
     return "\n".join(lines), rows, None
 
 # -----------------------------
-# OCR cleanup
-# -----------------------------
-def normalize_pattern_rounds(text: str) -> str:
-    """Repair common OCR mistakes around amigurumi round labels.
-
-    Examples:
-    - 9; (2SC, 1DEC)x6 [18]  -> R9: (2SC, 1DEC)x6 [18]
-    - 10: (1SC, 1DEC)x6 [12] -> R10: (1SC, 1DEC)x6 [12]
-    - Rs-R8:                  -> R5-R8:
-    - RI1 / Rl1 / R1o         -> R11 / R11 / R10
-    """
-    # Character-level / short-token repairs often caused by OCR.
-    repairs = {
-        "R1o": "R10", "R1O": "R10", "R10;": "R10:",
-        "RI1": "R11", "Rl1": "R11", "Rll": "R11", "R11;": "R11:",
-        "Rs-R8": "R5-R8", "RS-R8": "R5-R8", "R$-R8": "R5-R8",
-        "Rs - R8": "R5-R8", "RS - R8": "R5-R8",
-    }
-    for bad, good in repairs.items():
-        text = text.replace(bad, good)
-
-    # Normalise R 1 / R1; / R1. to R1:
-    text = re.sub(r"\bR\s*(\d+)", r"R\1", text, flags=re.IGNORECASE)
-    text = re.sub(r"\bR(\d+)\s*[;.]", r"R\1:", text, flags=re.IGNORECASE)
-
-    # If OCR drops the R at the start of a line, restore it when the line looks like a round row.
-    # Example: 9; (2SC, 1DEC)x6 [18] / 10: (1SC, 1DEC)x6 [12]
-    fixed_lines = []
-    for line in text.splitlines():
-        stripped = line.strip()
-        if re.match(r"^\d{1,2}\s*[:;]\s*", stripped) and re.search(
-            r"\b(SC|INC|DEC|HDC|DC|TR|SLST|MR)\b|\[[0-9]+\]",
-            stripped,
-            flags=re.IGNORECASE,
-        ):
-            stripped = re.sub(r"^(\d{1,2})\s*[:;]\s*", r"R\1: ", stripped)
-            fixed_lines.append(stripped)
-        else:
-            fixed_lines.append(line)
-
-    text = "\n".join(fixed_lines)
-
-    # Sometimes OCR reads R5-R8 as R5 R8 or R5-RB. Handle the obvious safe cases only.
-    text = re.sub(r"\bR5\s*[-–]\s*R?8\s*[:;]", "R5-R8:", text, flags=re.IGNORECASE)
-    return text
-
-
-def clean_ocr_text(raw: str) -> str:
-    text = unicodedata.normalize("NFKC", raw)
-    text = line_translation_engine.normalize_decimal_mm(text)
-    # Common OCR repairs in amigurumi patterns.
-    replacements = {
-        "；": ":",
-        "：": ":",
-        "IINC": "1INC",
-        "IInc": "1INC",
-        "lINC": "1INC",
-        "InC": "INC",
-        "INc": "INC",
-        "DEc": "DEC",
-        "IDEC": "1DEC",
-        "ISc": "1SC",
-        "IS C": "1SC",
-        "S LST": "SLST",
-        "SL ST": "SLST",
-        "S L ST": "SLST",
-    }
-    for bad, good in replacements.items():
-        text = text.replace(bad, good)
-
-    text = normalize_pattern_rounds(text)
-
-    # V27: English patterns often use Rnd 1 / Rnd 3-4 instead of R1 / R3-4.
-    # Normalise only the crochet round abbreviation, not the ordinary word "round".
-    text = re.sub(r"\bRnd\s*(\d+)", r"R\1", text, flags=re.IGNORECASE)
-
-    # More Chinese-pattern OCR normalization. Many mainland screenshots mix R labels,
-    # digits, Chinese characters, and X/V/A shorthand.
-    text = re.sub(r"\br\s*(\d+)", r"R\1", text, flags=re.IGNORECASE)
-    text = re.sub(r"\bR(\d+)\s*[;.]", r"R\1:", text, flags=re.IGNORECASE)
-    text = re.sub(r"\bR[gq]\s*[:：]", "R9:", text, flags=re.IGNORECASE)
-    text = re.sub(r"\bR[lI]\s*[:：]", "R1:", text, flags=re.IGNORECASE)
-    text = re.sub(r"\bR114\s*[:：]", "R14:", text, flags=re.IGNORECASE)
-    text = re.sub(r"\bR[lI]0\s*[:：]", "R10:", text, flags=re.IGNORECASE)
-    text = re.sub(r"\bR[lI]{2}\s*[:：]", "R11:", text, flags=re.IGNORECASE)
-    text = text.replace("。", ".").replace("，", ",").replace("、", ",")
-    text = line_translation_engine.normalize_decimal_mm(text)
-    text = re.sub(r"([xvaftesl])\s*[.]\s*([xvaftesl])", r"\1,\2", text, flags=re.I)
-    text = re.sub(r"([XVAFTESL])\s*[.]\s*([XVAFTESL])", r"\1,\2", text)
-
-    text = re.sub(r"\b(\d+)\s*(SC|INC|DEC|HDC|DC|TR|SLST|SL\s*ST|MR|CH|BLO|FLO|FO|STS?|STITCHES?)\b", r"\1\2", text, flags=re.IGNORECASE)
-    text = re.sub(r"\b(SLST|SC|INC|DEC|HDC|DC|TR|MR)\b", lambda m: m.group(1).upper(), text, flags=re.IGNORECASE)
-
-    # Mainland Chinese crochet shorthand often uses X/V/A/T/F/E.
-    # Uppercase them when they appear as stitch symbols, without touching ordinary words.
-    text = re.sub(r"(?<=\d)\s*([xvatfe])\b", lambda m: m.group(1).upper(), text, flags=re.I)
-    text = re.sub(r"(?<=[(,，、.。\s])([xvatfe])(?=[),，、.。\s])", lambda m: m.group(1).upper(), text, flags=re.I)
-    text = re.sub(r"(?<=[不加減交叉])([xvatfe])\b", lambda m: m.group(1).upper(), text, flags=re.I)
-    text = line_translation_engine.normalize_decimal_mm(text)
-    text = re.sub(r"[ \t]+", " ", text)
-    text = re.sub(r"\n{3,}", "\n\n", text)
-    return text.strip()
-
-# -----------------------------
 # Matching
 # -----------------------------
 def make_candidates(ocr_text: str) -> List[str]:
@@ -1092,7 +996,7 @@ def extract_rounds(clean_text: str) -> List[Dict[str, object]]:
     """Extract R1/R2/R5-R8 rows from both line-based and run-on OCR text."""
     text = unicodedata.normalize("NFKC", clean_text)
     text = normalize_chinese_pattern_text(text)
-    text = normalize_pattern_rounds(text)
+    text = ocr_cleanup_engine.normalize_pattern_rounds(text)
     text = re.sub(r"\br\s*(\d+)", r"R\1", text, flags=re.I)
     text = re.sub(r"\bR(\d+)\s*[;.]", r"R\1:", text, flags=re.I)
     text = re.sub(r"\s+", " ", text.replace("\n", " ")).strip()
@@ -1179,130 +1083,6 @@ def build_interpretation(clean_text: str, index: Dict[str, int], df: pd.DataFram
 
 
 
-
-def merge_ocr_boxes_into_visual_lines(ocr_rows: pd.DataFrame) -> pd.DataFrame:
-    """Merge PaddleOCR text boxes that sit on the same visual line.
-
-    PaddleOCR often returns English pattern rows as separate boxes:
-        "Rnd 2:"   "6 inc around"   "(12)"
-    If we translate box-by-box, the order becomes messy and the round label is
-    detached from the instruction. This function groups boxes by vertical
-    position, then merges nearby boxes left-to-right while avoiding large column
-    gaps.
-    """
-    if ocr_rows is None or ocr_rows.empty:
-        return pd.DataFrame()
-
-    rows = ocr_rows.copy()
-    for col in ["min_x", "max_x", "min_y", "max_y", "x", "y", "global_x", "confidence"]:
-        if col in rows.columns:
-            rows[col] = pd.to_numeric(rows[col], errors="coerce")
-
-    if "min_y" not in rows.columns or "max_y" not in rows.columns:
-        rows = rows.sort_values(["y", "global_x" if "global_x" in rows.columns else "x"]).reset_index(drop=True)
-        return rows
-
-    rows["_cy"] = (rows["min_y"].fillna(rows.get("y", 0)) + rows["max_y"].fillna(rows.get("y", 0))) / 2
-    rows["_h"] = (rows["max_y"].fillna(rows.get("y", 0) + 20) - rows["min_y"].fillna(rows.get("y", 0))).abs()
-    median_h = float(rows["_h"].replace(0, pd.NA).dropna().median() or 20)
-    y_threshold = max(10.0, median_h * 0.65)
-
-    rows = rows.sort_values(["_cy", "min_x"]).reset_index(drop=True)
-    line_groups = []
-    cur = []
-    cur_cy = None
-    for idx, row in rows.iterrows():
-        cy = float(row.get("_cy", 0) or 0)
-        if cur_cy is None or abs(cy - cur_cy) <= y_threshold:
-            cur.append(idx)
-            cur_cy = cy if cur_cy is None else (cur_cy * (len(cur) - 1) + cy) / len(cur)
-        else:
-            line_groups.append(cur)
-            cur = [idx]
-            cur_cy = cy
-    if cur:
-        line_groups.append(cur)
-
-    canvas_width = float(max(rows["max_x"].max() if "max_x" in rows.columns else 0, 1.0))
-    gap_threshold = max(180.0, canvas_width * 0.20)
-    merged_records = []
-
-    for group in line_groups:
-        line = rows.loc[group].copy().sort_values("min_x")
-        cluster = []
-        last_max_x = None
-        for _, r in line.iterrows():
-            min_x = float(r.get("min_x", r.get("x", 0)) or 0)
-            if cluster and last_max_x is not None and min_x - last_max_x > gap_threshold:
-                merged_records.append(_merge_ocr_cluster(cluster))
-                cluster = []
-            cluster.append(r)
-            last_max_x = float(r.get("max_x", r.get("x", min_x) + 80) or (min_x + 80))
-        if cluster:
-            merged_records.append(_merge_ocr_cluster(cluster))
-
-    out = pd.DataFrame(merged_records)
-    if out.empty:
-        return rows.drop(columns=[c for c in ["_cy", "_h"] if c in rows.columns], errors="ignore")
-    return out.sort_values(["min_y", "min_x"]).reset_index(drop=True)
-
-
-def _merge_ocr_cluster(cluster: list) -> Dict[str, object]:
-    texts = [str(r.get("text", "")).strip() for r in cluster if str(r.get("text", "")).strip()]
-    # Tighten punctuation spacing after joining left-to-right OCR boxes.
-    text = " ".join(texts)
-    text = re.sub(r"\s+([:：,，;；)])", r"\1", text)
-    text = re.sub(r"([(（])\s+", r"\1", text)
-    text = re.sub(r"\b(Rnd|R)\s+(\d)", r"\1 \2", text, flags=re.I)
-    confs = [float(r.get("confidence", 0) or 0) for r in cluster]
-    min_x = min(float(r.get("min_x", r.get("x", 0)) or 0) for r in cluster)
-    max_x = max(float(r.get("max_x", r.get("x", 0) + 80) or 80) for r in cluster)
-    min_y = min(float(r.get("min_y", r.get("y", 0)) or 0) for r in cluster)
-    max_y = max(float(r.get("max_y", r.get("y", 0) + 20) or 20) for r in cluster)
-    return {
-        "text": text,
-        "confidence": sum(confs) / len(confs) if confs else 0,
-        "x": (min_x + max_x) / 2,
-        "global_x": (min_x + max_x) / 2,
-        "y": (min_y + max_y) / 2,
-        "min_x": min_x,
-        "max_x": max_x,
-        "min_y": min_y,
-        "max_y": max_y,
-        "source": "visual line merge",
-    }
-
-@profile_function("line-by-line translation: build_ocr_line_translations", "build_ocr_line_translations calls")
-def build_ocr_line_translations(ocr_rows: pd.DataFrame, index: Dict[str, int], df: pd.DataFrame, output_mode: str) -> pd.DataFrame:
-    if ocr_rows is None or ocr_rows.empty:
-        return pd.DataFrame()
-    # V28: merge visually aligned OCR boxes before translation.
-    # This keeps rows like "Rnd 2:   6 inc around   (12)" together.
-    rows = merge_ocr_boxes_into_visual_lines(ocr_rows)
-    rows["confidence"] = pd.to_numeric(rows.get("confidence", 0), errors="coerce").fillna(0)
-    # For line-translation mode, do NOT discard aggressively. Keep low-confidence rows visible.
-    rows = rows.sort_values(["min_y", "min_x"]).reset_index(drop=True)
-    profile_count("merged OCR lines", len(rows))
-    out = []
-    for _, r in rows.iterrows():
-        original = str(r.get("text", "")).strip()
-        if not original:
-            continue
-        profile_count("OCR lines processed")
-        cleaned = line_translation_engine.clean_single_ocr_line(original)
-        translated = line_translation_engine.translate_ocr_line(cleaned, index, df, output_mode)
-        changed = terminology_engine.norm_text(cleaned) != terminology_engine.norm_text(translated)
-        out.append({
-            "Original": cleaned,
-            "Translation": translated,
-            "Confidence": round(float(r.get("confidence", 0)), 3),
-            "Changed": "✓" if changed else "",
-            "min_x": float(r.get("min_x", r.get("x", 0))),
-            "max_x": float(r.get("max_x", r.get("x", 0) + 80)),
-            "min_y": float(r.get("min_y", r.get("y", 0))),
-            "max_y": float(r.get("max_y", r.get("y", 0) + 20)),
-        })
-    return pd.DataFrame(out)
 
 # Diagnostic Report Engine wrappers. Streamlit context stays in app.py; pure
 # report construction lives in pattern_translator.engine.diagnostic_report.
@@ -1583,6 +1363,19 @@ INTERFACE_LANGUAGES = {
         "output_hint_uk": "💡 Choose UK terminology only if you specifically need UK stitch names.",
         "default_mode_info": "Default mode is **Overlay Translation**. Select a smaller area for faster and more accurate results.",
         "upload_prompt": "Upload pattern image",
+        "upload_instruction": "Choose a pattern image",
+        "upload_choose": "Choose image",
+        "upload_drop_hint": "Or drag and drop an image here",
+        "upload_drop_active": "Drop the image here",
+        "upload_reading": "Reading image…",
+        "upload_selected": "Selected image",
+        "upload_replace": "Replace",
+        "upload_remove": "Remove",
+        "upload_error_unsupported": "This file cannot be used. Please choose a JPG, JPEG, PNG or WebP image from your Camera, Photos or Files.",
+        "upload_error_empty": "This file is empty. Please choose another image.",
+        "upload_error_too_large": "This image is too large. Please choose an image smaller than 25 MB.",
+        "upload_error_unreadable": "This file could not be read. Please choose another image.",
+        "upload_error_invalid": "This file is not a valid image. Please choose a JPG, JPEG, PNG or WebP image.",
         "original_image": "Original image",
         "translation_area": "Translation area",
         "translation_area_tip": "💡 Select Area is optional and experimental. Use it when you need to translate only part of an image.",
@@ -1633,7 +1426,8 @@ INTERFACE_LANGUAGES = {
         "overlay_translation": "Overlay translation",
         "overlay_caption": "Smart overlay: short translations are shown directly; long/colliding translations use numbered markers.",
         "download_overlay": "Download Overlay Image PNG",
-        "no_overlay": "No translated overlay labels were generated. The OCR may have found text, but no CSV-backed crochet translation changed the lines.",
+        "no_crochet_pattern_title": "No crochet pattern was detected.",
+        "no_crochet_pattern_body": "The text in this image was recognised successfully, but no crochet terms were found. Please upload a crochet pattern instead of a general photo or document.",
         "line_translation": "Line-by-line Translation",
         "translated_lines": "Translated OCR lines",
         "download_translation": "Download Translation TXT",
@@ -1675,6 +1469,19 @@ INTERFACE_LANGUAGES = {
         "output_hint_uk": "💡 只有在你特別需要英式針法名稱時，才建議選擇英式術語。",
         "default_mode_info": "預設會在圖片上顯示翻譯。選取較小範圍通常更快、更準確。",
         "upload_prompt": "上載圖樣圖片",
+        "upload_instruction": "選擇要翻譯的圖樣圖片",
+        "upload_choose": "選擇圖片",
+        "upload_drop_hint": "或將圖片拖放到這裡",
+        "upload_drop_active": "將圖片放到這裡",
+        "upload_reading": "正在讀取圖片……",
+        "upload_selected": "已選圖片",
+        "upload_replace": "更換",
+        "upload_remove": "移除",
+        "upload_error_unsupported": "這個檔案無法使用。請從相機、相片或檔案選擇 JPG、JPEG、PNG 或 WebP 圖片。",
+        "upload_error_empty": "這個檔案沒有內容。請選擇另一張圖片。",
+        "upload_error_too_large": "圖片太大。請選擇小於 25 MB 的圖片。",
+        "upload_error_unreadable": "無法讀取這個檔案。請選擇另一張圖片。",
+        "upload_error_invalid": "這個檔案不是有效的圖片。請選擇 JPG、JPEG、PNG 或 WebP 圖片。",
         "original_image": "原始圖片",
         "translation_area": "翻譯範圍",
         "translation_area_tip": "💡 選取範圍是選用的實驗功能。需要只翻譯圖片的一部分時可以使用。",
@@ -1725,7 +1532,8 @@ INTERFACE_LANGUAGES = {
         "overlay_translation": "圖片翻譯結果",
         "overlay_caption": "短翻譯會直接顯示在圖片上；較長或重疊的翻譯會用編號標記。",
         "download_overlay": "下載翻譯圖片 PNG",
-        "no_overlay": "未產生圖片標示翻譯。文字辨識可能找到文字，但沒有產生可用字典翻譯。",
+        "no_crochet_pattern_title": "未找到可翻譯的鈎織術語。",
+        "no_crochet_pattern_body": "圖片中的文字已成功辨識，但沒有找到可翻譯的鈎織圖樣內容。請確認你上傳的是鈎織圖樣，而不是一般圖片或其他文件。",
         "line_translation": "逐行翻譯",
         "translated_lines": "已翻譯的文字辨識行",
         "download_translation": "下載文字翻譯 TXT",
@@ -1767,6 +1575,19 @@ INTERFACE_LANGUAGES = {
         "output_hint_uk": "💡 只有在你特别需要英式针法名称时，才建议选择英式术语。",
         "default_mode_info": "默认会在图片上显示翻译。选取较小范围通常更快、更准确。",
         "upload_prompt": "上传图样图片",
+        "upload_instruction": "选择要翻译的图样图片",
+        "upload_choose": "选择图片",
+        "upload_drop_hint": "或将图片拖放到这里",
+        "upload_drop_active": "将图片放到这里",
+        "upload_reading": "正在读取图片……",
+        "upload_selected": "已选图片",
+        "upload_replace": "更换",
+        "upload_remove": "移除",
+        "upload_error_unsupported": "这个文件无法使用。请从相机、照片或文件选择 JPG、JPEG、PNG 或 WebP 图片。",
+        "upload_error_empty": "这个文件没有内容。请选择另一张图片。",
+        "upload_error_too_large": "图片太大。请选择小于 25 MB 的图片。",
+        "upload_error_unreadable": "无法读取这个文件。请选择另一张图片。",
+        "upload_error_invalid": "这个文件不是有效的图片。请选择 JPG、JPEG、PNG 或 WebP 图片。",
         "original_image": "原始图片",
         "translation_area": "翻译范围",
         "translation_area_tip": "💡 选取范围是选用的实验功能。需要只翻译图片的一部分时可以使用。",
@@ -1817,7 +1638,8 @@ INTERFACE_LANGUAGES = {
         "overlay_translation": "图片翻译结果",
         "overlay_caption": "短翻译会直接显示在图片上；较长或重叠的翻译会用编号标记。",
         "download_overlay": "下载翻译图片 PNG",
-        "no_overlay": "未生成图片标示翻译。文字识别可能找到文字，但没有生成可用字典翻译。",
+        "no_crochet_pattern_title": "未找到可翻译的钩织术语。",
+        "no_crochet_pattern_body": "图片中的文字已成功识别，但没有找到可翻译的钩织图样内容。请确认你上传的是钩织图样，而不是一般图片或其他文件。",
         "line_translation": "逐行翻译",
         "translated_lines": "已翻译的文字识别行",
         "download_translation": "下载文字翻译 TXT",
@@ -1859,6 +1681,19 @@ INTERFACE_LANGUAGES = {
         "output_hint_uk": "💡 英国式の針目名が特に必要な場合だけ、英国式用語を選んでください。",
         "default_mode_info": "初期設定では画像上に翻訳を表示します。範囲を小さくすると、より速く正確になりやすいです。",
         "upload_prompt": "パターン画像をアップロード",
+        "upload_instruction": "翻訳するパターン画像を選んでください",
+        "upload_choose": "画像を選択",
+        "upload_drop_hint": "または画像をここにドラッグ＆ドロップ",
+        "upload_drop_active": "画像をここにドロップ",
+        "upload_reading": "画像を読み込んでいます……",
+        "upload_selected": "選択した画像",
+        "upload_replace": "変更",
+        "upload_remove": "削除",
+        "upload_error_unsupported": "このファイルは使用できません。カメラ、写真、またはファイルから JPG、JPEG、PNG、WebP の画像を選んでください。",
+        "upload_error_empty": "このファイルは空です。別の画像を選んでください。",
+        "upload_error_too_large": "画像が大きすぎます。25 MB 未満の画像を選んでください。",
+        "upload_error_unreadable": "このファイルを読み込めませんでした。別の画像を選んでください。",
+        "upload_error_invalid": "このファイルは有効な画像ではありません。JPG、JPEG、PNG、WebP の画像を選んでください。",
         "original_image": "元の画像",
         "translation_area": "翻訳する範囲",
         "translation_area_tip": "💡 範囲選択は任意の実験的な機能です。画像の一部だけを翻訳したい場合に使用してください。",
@@ -1909,7 +1744,8 @@ INTERFACE_LANGUAGES = {
         "overlay_translation": "画像上の翻訳",
         "overlay_caption": "短い翻訳は画像上に直接表示されます。長い翻訳や重なる翻訳は番号で表示されます。",
         "download_overlay": "翻訳画像PNGをダウンロード",
-        "no_overlay": "画像上の翻訳ラベルは生成されませんでした。OCRで文字は検出されましたが、辞書に基づく翻訳が生成されなかった可能性があります。",
+        "no_crochet_pattern_title": "翻訳できるかぎ針編み用語が見つかりませんでした。",
+        "no_crochet_pattern_body": "画像内の文字は認識されましたが、翻訳可能なかぎ針編みパターンの内容は見つかりませんでした。一般的な写真やその他の文書ではなく、かぎ針編みパターンをアップロードしていることをご確認ください。",
         "line_translation": "行ごとの翻訳",
         "translated_lines": "翻訳されたOCR行",
         "download_translation": "翻訳テキストをダウンロード",
@@ -2355,11 +2191,46 @@ st.caption(t("app_subtitle"))
 
 LANGUAGE_OPTIONS = ["English — US", "English — UK", "Traditional Chinese", "Simplified Chinese", "Japanese"]
 
-image_file = st.file_uploader(
-    t("upload_prompt"),
-    type=["png", "jpg", "jpeg", "webp"],
-    label_visibility="collapsed",
+upload_strings = {
+    "instruction": t("upload_instruction"),
+    "choose": t("upload_choose"),
+    "drop_hint": t("upload_drop_hint"),
+    "drop_active": t("upload_drop_active"),
+    "reading": t("upload_reading"),
+    "selected": t("upload_selected"),
+    "replace": t("upload_replace"),
+    "remove": t("upload_remove"),
+    "error_unsupported": t("upload_error_unsupported"),
+    "error_empty": t("upload_error_empty"),
+    "error_too_large": t("upload_error_too_large"),
+    "error_unreadable": t("upload_error_unreadable"),
+    "error_invalid": t("upload_error_invalid"),
+}
+
+image_file, upload_error, upload_removed = custom_image_uploader(
+    upload_strings,
+    key="pattern_image_uploader",
 )
+if upload_error:
+    st.error(upload_error)
+
+def reset_uploaded_image_derived_state(image_signature: Optional[str]) -> None:
+    st.session_state["rc3_ocr_result"] = None
+    st.session_state["rc3_ocr_result_signature"] = None
+    st.session_state["pending_ocr_run"] = False
+    st.session_state["latest_crop_box"] = None
+    st.session_state["select_area_confirmed_crop_box"] = None
+    st.session_state["select_area_editing"] = False
+    st.session_state["select_area_draft_crop_box"] = None
+    st.session_state["select_area_display_proxy_diagnostics"] = {}
+    st.session_state["rc10b_last_cropper_box"] = None
+    st.session_state["debug_report_ready"] = False
+    st.session_state["last_successful_download_key"] = None
+    st.session_state["rc3_image_signature"] = image_signature
+
+
+if upload_removed and st.session_state.get("rc3_image_signature") is not None:
+    reset_uploaded_image_derived_state(None)
 
 if image_file is None:
     rc10b_note_image_absent()
@@ -2373,18 +2244,7 @@ if image_file is not None:
     current_signature = image_upload_signature(image_file)
     rc10b_note_image_present(current_signature)
     if st.session_state.get("rc3_image_signature") != current_signature:
-        st.session_state["rc3_ocr_result"] = None
-        st.session_state["rc3_ocr_result_signature"] = None
-        st.session_state["pending_ocr_run"] = False
-        st.session_state["latest_crop_box"] = None
-        st.session_state["select_area_confirmed_crop_box"] = None
-        st.session_state["select_area_editing"] = False
-        st.session_state["select_area_draft_crop_box"] = None
-        st.session_state["select_area_display_proxy_diagnostics"] = {}
-        st.session_state["rc10b_last_cropper_box"] = None
-        st.session_state["debug_report_ready"] = False
-        st.session_state["last_successful_download_key"] = None
-        st.session_state["rc3_image_signature"] = current_signature
+        reset_uploaded_image_derived_state(current_signature)
         track_analytics_event("image_uploaded")
 
     image_load_start = time.perf_counter()
@@ -2789,7 +2649,7 @@ if image_file is not None:
                 detected_ocr_rows = ocr_rows.copy() if ocr_rows is not None else pd.DataFrame()
                 ocr_rows, removed_noise_df = pattern_document_engine.filter_noise_and_watermarks(ocr_rows)
                 raw_ocr_text = "\n".join(ocr_rows["text"].astype(str).tolist()) if ocr_rows is not None and not ocr_rows.empty else ""
-                clean_text = clean_ocr_text(raw_ocr_text)
+                clean_text = ocr_cleanup_engine.clean_ocr_text(raw_ocr_text)
                 cleanup_seconds = time.perf_counter() - cleanup_start
                 runtime_profile["ocr_cleanup"] = cleanup_seconds
                 timings["OCR cleanup"] = cleanup_seconds
@@ -2799,7 +2659,7 @@ if image_file is not None:
                 TRANSLATION_PROFILE = translation_profile
                 try:
                     translation_start = time.perf_counter()
-                    line_df = build_ocr_line_translations(ocr_rows, index, df, output_mode)
+                    line_df = ocr_lines_engine.build_ocr_line_translations(ocr_rows, index, df, output_mode)
                     translation_seconds = time.perf_counter() - translation_start
 
                     overlay_start = time.perf_counter()
@@ -3019,8 +2879,8 @@ if image_file is not None:
                 key="download_overlay_png",
                 analytics_event_type="download_png",
             )
-        else:
-            st.info(t("no_overlay"))
+        elif raw_ocr_text.strip():
+            st.info(f"**{t('no_crochet_pattern_title')}**\n\n{t('no_crochet_pattern_body')}")
 
         st.subheader(t("line_translation"))
         if line_df is not None and not line_df.empty:
