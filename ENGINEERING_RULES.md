@@ -347,3 +347,41 @@ If evidence discovered during implementation shows that the agreed Goal cannot r
 Do not continue an architectural refactor solely because it improves code quality when it no longer serves the agreed Goal.
 
 Architectural improvements are valuable, but they must not be presented as achieving the original Goal unless the agreed Success Criteria are actually met.
+
+---
+
+# 20. UI / Brand Development Workflow
+
+Engineering quality remains the first priority. After engineering implementation is complete, UI decisions follow a Product-driven review process.
+
+Use this workflow for new UI components and substantial visual changes:
+
+Art Director
+↓
+UI_SPEC.md (Approved Design Specification)
+↓
+Codex Implementation
+↓
+Human Visual UAT
+↓
+Product Owner Review
+↓
+Approval
+↓
+Update UI_SPEC.md (if required)
+↓
+Commit
+
+`Brand identity & UI/UI_SPEC.md` is a Living Design Specification, but it represents approved design decisions. Implementation alone does not constitute approval.
+
+Do not update `UI_SPEC.md` immediately after implementation. Update it only when:
+
+- Human Visual UAT has been completed;
+- the Product Owner has explicitly approved the visual result; and
+- the approved implementation differs from the current specification.
+
+`UI_SPEC.md` defines the colour system, typography, spacing, component styling, layout principles, and visual hierarchy.
+
+Product content remains under Product Owner control. This includes helper text, instructional text, upload hints, warnings, button wording, and marketing copy. Product decisions may override earlier `UI_SPEC.md` recommendations after Human Visual UAT.
+
+Light Mode and Dark Mode are equally supported. Mobile UI evidence must come from physical mobile devices or equivalent mobile behaviour. Desktop browsers resized to mobile widths may be used only for responsive layout verification and must not be presented as Human Mobile UAT evidence.

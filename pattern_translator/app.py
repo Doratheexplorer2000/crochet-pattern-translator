@@ -113,83 +113,307 @@ st.set_page_config(page_title="Crochet Translator", page_icon="🧶", layout="ce
 st.markdown(
     """
 <style>
-h1, h2, h3 { color: #5f73a8 !important; }
-.block-container { padding-top: 1.5rem; }
-h1 { margin-bottom: 0.15rem !important; line-height: 1.12 !important; }
+:root {
+    --ci-teal-700: #0F766E;
+    --ci-teal-600: #13867D;
+    --ci-teal-100: #DDEDEA;
+    --ci-teal-050: #EAF4F2;
+    --ci-terracotta-700: #C2613F;
+    --ci-terracotta-500: #D97A5A;
+    --ci-terracotta-100: #F6E8E3;
+    --ci-bg: #FAF9F7;
+    --ci-surface: #FFFFFF;
+    --ci-surface-subtle: #F2EEE9;
+    --ci-border: #E7E3DE;
+    --ci-text-primary: #1E1E20;
+    --ci-text-secondary: #55565A;
+    --ci-text-muted: #8A8D91;
+    --ci-text-on-primary: #FFFFFF;
+    --ci-primary: #0F766E;
+    --ci-primary-hover: #13867D;
+    --ci-primary-soft: #DDEDEA;
+    --ci-success: #2E7D5B;
+    --ci-warning: #D99A24;
+    --ci-error: #D64545;
+    --ci-info: #3A7BD5;
+    --ci-focus-ring: rgba(15, 118, 110, 0.28);
+    --ci-font: "Noto Sans TC", "Noto Sans SC", "Noto Sans JP", "Noto Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --ci-radius-sm: 8px;
+    --ci-radius-md: 12px;
+    --ci-radius-lg: 16px;
+    --ci-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+html, body, .stApp {
+    font-family: var(--ci-font);
+    letter-spacing: 0;
+}
+
+body, .stApp, [data-testid="stAppViewContainer"] {
+    background: var(--ci-bg);
+    color: var(--ci-text-primary);
+}
+
+.block-container {
+    width: 100%;
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 24px 20px 32px;
+}
+
+h1, h2, h3 { color: var(--ci-text-primary) !important; }
+h1 {
+    color: var(--ci-teal-700) !important;
+    font-size: 30px !important;
+    line-height: 36px !important;
+    font-weight: 700 !important;
+    margin: 0 !important;
+    padding: 20px 0 4px !important;
+}
+h2 {
+    font-size: 22px !important;
+    line-height: 28px !important;
+    font-weight: 600 !important;
+}
+h3 {
+    font-size: 18px !important;
+    line-height: 26px !important;
+    font-weight: 600 !important;
+}
 h1 a[href^="#"], h1 .anchor-link { display: none !important; }
-h1 + div[data-testid="stCaptionContainer"] { margin-top: -0.25rem; }
-div[data-testid="stCaptionContainer"] { margin-bottom: 0.35rem; }
-.small-note { font-size: 0.9rem; opacity: 0.82; margin: 0.15rem 0 0.35rem; line-height: 1.35; }
+h1 + div[data-testid="stCaptionContainer"] { margin-top: 0; }
+div[data-testid="stCaptionContainer"] {
+    color: var(--ci-text-secondary);
+    font-size: 14px;
+    line-height: 20px;
+    margin-bottom: 8px;
+}
+p, label, li { line-height: 24px; }
+.small-note {
+    color: var(--ci-text-secondary);
+    font-size: 14px;
+    line-height: 20px;
+    margin: 4px 0 8px;
+}
 .warning-box {
-    border: 1px solid rgba(180, 130, 60, 0.35);
-    border-radius: 0.6rem;
-    padding: 0.55rem 0.65rem;
-    background: rgba(180, 130, 60, 0.08);
-    font-size: 0.9rem;
-    line-height: 1.35;
+    border: 1px solid rgba(217, 154, 36, 0.42);
+    border-radius: var(--ci-radius-md);
+    padding: 12px 16px;
+    background: rgba(217, 154, 36, 0.09);
+    color: var(--ci-text-primary);
+    font-size: 14px;
+    line-height: 21px;
+}
+.privacy-box {
+    color: var(--ci-text-secondary);
+    font-size: 14px;
+    line-height: 21px;
 }
 .good-box {
-    border: 1px solid rgba(80, 150, 100, 0.35);
-    border-radius: 0.6rem;
-    padding: 0.75rem;
-    background: rgba(80, 150, 100, 0.08);
+    border: 1px solid rgba(46, 125, 91, 0.34);
+    border-radius: var(--ci-radius-md);
+    padding: 12px 16px;
+    background: rgba(46, 125, 91, 0.08);
 }
-div[data-testid="stExpander"] { margin-bottom: 0.45rem; }
-div[data-testid="stExpander"] details { border-radius: 0.5rem; }
-div[data-testid="stExpander"] summary { min-height: 2rem; }
-div[data-testid="stExpander"] div[data-testid="stMarkdownContainer"] p { margin-bottom: 0.25rem; }
-div[data-testid="stVerticalBlock"] > div { gap: 0.45rem; }
-div[data-testid="stSelectbox"], div[data-testid="stRadio"], div[data-testid="stFileUploader"] { margin-bottom: 0.15rem; }
+div[data-testid="stExpander"] { margin-bottom: 8px; }
+div[data-testid="stExpander"] details {
+    border: 1px solid var(--ci-border);
+    border-radius: var(--ci-radius-md);
+    background: var(--ci-surface);
+    box-shadow: var(--ci-shadow-sm);
+    overflow: hidden;
+}
+div[data-testid="stExpander"] summary {
+    min-height: 56px;
+    padding: 0 16px;
+    color: var(--ci-text-primary);
+    font-size: 16px;
+    font-weight: 500;
+}
+div[data-testid="stExpander"] div[data-testid="stMarkdownContainer"] p { margin-bottom: 8px; }
+div[data-testid="stExpander"] div[data-testid="stMarkdownContainer"] { margin-bottom: 0 !important; }
+div[data-testid="stVerticalBlock"] > div { gap: 8px; }
+div[data-testid="stSelectbox"], div[data-testid="stRadio"] { margin-bottom: 4px; }
 div[data-testid="stHorizontalBlock"] div[data-testid="stSelectbox"] { margin-bottom: 0; }
 div[data-testid="stHorizontalBlock"] div[data-testid="stSelectbox"] label { min-height: 0; }
-div[data-testid="stFileUploader"] section {
-    border-color: rgba(95, 115, 168, 0.28);
-    background: rgba(95, 115, 168, 0.045);
-    border-radius: 0.55rem;
+
+div[data-baseweb="select"] > div,
+div[role="radiogroup"] label,
+div[data-testid="stTextArea"] textarea,
+div[data-testid="stTextInput"] input {
+    border-color: var(--ci-border);
+    border-radius: var(--ci-radius-md);
+    background: var(--ci-surface);
+    color: var(--ci-text-primary);
 }
-div[data-testid="stFileUploader"] section:hover {
-    border-color: rgba(95, 115, 168, 0.48);
-    background: rgba(95, 115, 168, 0.07);
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+summary:focus-visible,
+[role="radio"]:focus-visible {
+    outline: 3px solid var(--ci-focus-ring) !important;
+    outline-offset: 2px !important;
+}
+
+div[data-testid="stButton"] > button,
+div[data-testid="stDownloadButton"] > button,
+div[data-testid="stLinkButton"] > a {
+    min-height: 52px;
+    padding: 0 20px;
+    border: 1px solid var(--ci-primary);
+    border-radius: var(--ci-radius-md);
+    background: transparent;
+    color: var(--ci-primary);
+    font-size: 16px;
+    line-height: 24px;
+    font-weight: 600;
+    box-shadow: none;
+}
+
+div[data-testid="stButton"] > button[kind="primary"] {
+    min-height: 56px;
+    padding: 0 24px;
+    border-color: var(--ci-primary);
+    background: var(--ci-primary);
+    color: var(--ci-text-on-primary);
+    font-size: 17px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+    div[data-testid="stButton"] > button:hover,
+    div[data-testid="stDownloadButton"] > button:hover,
+    div[data-testid="stLinkButton"] > a:hover {
+        border-color: var(--ci-primary-hover);
+        background: var(--ci-primary-soft);
+        color: var(--ci-primary-hover);
+    }
+    div[data-testid="stButton"] > button[kind="primary"]:hover {
+        border-color: var(--ci-primary-hover);
+        background: var(--ci-primary-hover);
+        color: var(--ci-text-on-primary);
+    }
+}
+
+div[data-testid="stButton"] > button:active,
+div[data-testid="stDownloadButton"] > button:active,
+div[data-testid="stLinkButton"] > a:active {
+    transform: translateY(1px);
+}
+
+div[data-testid="stAlert"] {
+    border-radius: var(--ci-radius-md);
+}
+
+div[data-testid="stImage"] img {
+    border-radius: var(--ci-radius-sm);
 }
 .report-action {
-    font-size: 1rem;
-    font-weight: 650;
-    margin: 0.85rem 0 0.15rem;
+    color: var(--ci-text-primary);
+    font-size: 16px;
+    line-height: 24px;
+    font-weight: 600;
+    margin: 16px 0 4px;
 }
 .report-helper {
-    color: rgba(120, 120, 120, 0.95);
-    font-size: 0.9rem;
-    line-height: 1.35;
-    margin: 0 0 0.45rem 1.35rem;
+    color: var(--ci-text-muted);
+    font-size: 14px;
+    line-height: 20px;
+    margin: 0 0 8px 20px;
 }
 .feedback-link {
     display: inline-block;
-    min-height: 2.4rem;
-    line-height: 2.4rem;
-    padding: 0 1rem;
-    border: 1px solid rgba(120, 120, 120, 0.55);
-    border-radius: 0.5rem;
-    color: inherit !important;
+    min-height: 52px;
+    line-height: 50px;
+    padding: 0 20px;
+    border: 1px solid var(--ci-primary);
+    border-radius: var(--ci-radius-md);
+    color: var(--ci-primary) !important;
     text-decoration: none !important;
-    font-weight: 500;
-    margin-top: 0.15rem;
+    font-weight: 600;
+    margin-top: 4px;
 }
 .feedback-link:hover {
-    border-color: rgba(120, 120, 120, 0.85);
+    border-color: var(--ci-primary-hover);
+    background: var(--ci-primary-soft);
+    color: var(--ci-primary-hover) !important;
     text-decoration: none !important;
 }
+
 @media (max-width: 640px) {
-    .block-container { padding-top: 0.75rem; padding-left: 1rem; padding-right: 1rem; }
-    h1 { font-size: 1.85rem !important; margin-top: 0 !important; }
-    .small-note { font-size: 0.86rem; margin-bottom: 0.25rem; }
-    div[data-testid="stExpander"] { margin-bottom: 0.25rem; }
-    div[data-testid="stHorizontalBlock"] { gap: 0.25rem; }
-    div[data-testid="stFileUploader"] section { padding: 0.75rem; }
+    .block-container { padding: 24px 20px 32px; }
+    div[data-testid="stHorizontalBlock"] { gap: 8px; }
+}
+
+@media (max-width: 359px) {
+    .block-container { padding-left: 16px; padding-right: 16px; }
+}
+
+@media (min-width: 768px) {
+    .block-container { padding-left: 32px; padding-right: 32px; }
+}
+
+@media (prefers-color-scheme: dark) {
+    :root {
+        --ci-bg: #17191A;
+        --ci-surface: #202426;
+        --ci-surface-subtle: #292D2F;
+        --ci-border: #434A4D;
+        --ci-text-primary: #F4F3F1;
+        --ci-text-secondary: #C9C7C3;
+        --ci-text-muted: #999C9D;
+        --ci-text-on-primary: #FFFFFF;
+        --ci-primary: #2F928A;
+        --ci-primary-hover: #3AA49B;
+        --ci-primary-soft: #213B39;
+        --ci-focus-ring: rgba(47, 146, 138, 0.34);
+        --ci-shadow-sm: none;
+    }
+    h1 { color: var(--ci-primary) !important; }
+    .warning-box { background: rgba(217, 154, 36, 0.12); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        scroll-behavior: auto !important;
+        transition-duration: 0.01ms !important;
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+    }
 }
 </style>
 """,
     unsafe_allow_html=True,
 )
+
+active_theme_type = getattr(st.context.theme, "type", "light")
+configured_theme_base = st.get_option("theme.base")
+if active_theme_type == "dark" or configured_theme_base == "dark":
+    st.markdown(
+        """
+<style>
+:root {
+    --ci-bg: #17191A;
+    --ci-surface: #202426;
+    --ci-surface-subtle: #292D2F;
+    --ci-border: #434A4D;
+    --ci-text-primary: #F4F3F1;
+    --ci-text-secondary: #C9C7C3;
+    --ci-text-muted: #999C9D;
+    --ci-text-on-primary: #FFFFFF;
+    --ci-primary: #2F928A;
+    --ci-primary-hover: #3AA49B;
+    --ci-primary-soft: #213B39;
+    --ci-focus-ring: rgba(47, 146, 138, 0.34);
+    --ci-shadow-sm: none;
+}
+h1 { color: var(--ci-primary) !important; }
+.warning-box { background: rgba(217, 154, 36, 0.12); }
+</style>
+""",
+        unsafe_allow_html=True,
+    )
 
 # -----------------------------
 # Load data and build index
@@ -1348,7 +1572,7 @@ def make_area_preview(image: Image.Image, box: Tuple[int, int, int, int]) -> Ima
 # -----------------------------
 INTERFACE_LANGUAGES = {
     "English": {
-        "app_title": "🧶 Crochet Translator",
+        "app_title": "Crochet Translator",
         "app_subtitle": "Pattern OCR Translator (Beta)",
         "privacy_expander": "Privacy / storage note",
         "privacy": "Please only upload images you have permission to use, or images used for personal study/reference. This beta does not intentionally store uploaded images or OCR results; files are processed only for the current session. Anonymous usage statistics (such as country, app usage and performance) are collected to help improve the app. No personal information, IP addresses or uploaded images are stored.",
@@ -1457,7 +1681,7 @@ INTERFACE_LANGUAGES = {
         "privacy": "請只上載你有權使用的圖片，或只作個人學習／參考用途的圖片。本測試版不會刻意儲存上載圖片或文字辨識結果；檔案只在本次使用期間中處理。系統會收集匿名使用統計資料（例如國家／地區、應用程式使用情況和效能），以協助改善應用程式。不會儲存個人資料、IP 位址或上載圖片。",
         "privacy_expander": "私隱／儲存說明",
         "intro": "上載鈎織圖樣圖片，取得圖片標示翻譯及逐行翻譯。",
-        "app_title": "🧶 鈎織翻譯器",
+        "app_title": "鈎織翻譯器",
         "app_subtitle": "圖樣文字辨識翻譯器（測試版）",
         "source_label": "圖樣語言／術語",
         "source_help": "如果英文圖樣沒有標明美式或英式，請先選「英文－美式」。大部分網上 amigurumi 圖樣使用美式術語。",
@@ -1563,7 +1787,7 @@ INTERFACE_LANGUAGES = {
         "privacy": "请只上传你有权使用的图片，或只作个人学习／参考用途的图片。本测试版不会刻意储存上传图片或文字识别结果；文件只在本次使用期间中处理。系统会收集匿名使用统计资料（例如国家／地区、应用程序使用情况和性能），以帮助改善应用程序。不会储存个人资料、IP 地址或上传图片。",
         "privacy_expander": "隐私／存储说明",
         "intro": "上传钩织图样图片，获得图片标示翻译和逐行翻译。",
-        "app_title": "🧶 钩织翻译器",
+        "app_title": "钩织翻译器",
         "app_subtitle": "图样文字识别翻译器（测试版）",
         "source_label": "图样语言／术语",
         "source_help": "如果英文图样没有标明美式或英式，请先选“英文－美式”。大部分网上 amigurumi 图样使用美式术语。",
@@ -1669,7 +1893,7 @@ INTERFACE_LANGUAGES = {
         "privacy": "使用許可のある画像、または個人学習・参考用の画像のみアップロードしてください。このベータ版はアップロード画像やOCR結果を意図的に保存しません。ファイルは現在の利用中のみ処理されます。アプリ改善のため、国、アプリ利用状況、パフォーマンスなどの匿名使用統計を収集します。個人情報、IPアドレス、アップロード画像は保存されません。",
         "privacy_expander": "プライバシー／保存について",
         "intro": "かぎ針編みパターン画像をアップロードして、画像上の翻訳と行ごとの翻訳を確認できます。",
-        "app_title": "🧶 かぎ針編み翻訳",
+        "app_title": "かぎ針編み翻訳",
         "app_subtitle": "パターンOCR翻訳（ベータ版）",
         "source_label": "パターンの言語／用語",
         "source_help": "英語パターンに米式／英式の記載がない場合は、まず「英語 — 米国式」を選んでください。オンラインの amigurumi パターンは米式が多いです。",
@@ -2192,6 +2416,12 @@ st.caption(t("app_subtitle"))
 LANGUAGE_OPTIONS = ["English — US", "English — UK", "Traditional Chinese", "Simplified Chinese", "Japanese"]
 
 upload_strings = {
+    "html_lang": {
+        "English": "en",
+        "Traditional Chinese": "zh-Hant",
+        "Simplified Chinese": "zh-Hans",
+        "Japanese": "ja",
+    }.get(interface_language, "en"),
     "instruction": t("upload_instruction"),
     "choose": t("upload_choose"),
     "drop_hint": t("upload_drop_hint"),
@@ -2236,7 +2466,7 @@ if image_file is None:
     rc10b_note_image_absent()
     with st.expander(t("privacy_expander"), expanded=False):
         st.markdown(
-            f"<div class='warning-box'>{ui_text['privacy']}</div>",
+            f"<div class='privacy-box'>{ui_text['privacy']}</div>",
             unsafe_allow_html=True,
         )
 

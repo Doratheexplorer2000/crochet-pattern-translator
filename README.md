@@ -67,11 +67,16 @@ Current focus:
 - The uploader supports JPG, JPEG, PNG, and WebP; four interface languages; native mobile image selection; desktop drag-and-drop; Replace and Remove; and light and dark modes.
 - The 25 MB limit is intentional because Components V1 transports the image as base64. Physical iPhone Safari and Android Chrome Human UAT passed with no functional regression.
 - Unrelated-image handling was validated and the no-crochet-content message was improved. Streamlit still provides the runtime, session state, and component communication; RC50 replaced one native Streamlit UI widget.
-- Visual branding, the corporate colour palette, logo work, GIF/onboarding guidance, and upload-button restyling remain deferred until the separate visual identity decision.
+- Phase A Brand Identity Foundation is complete. `Brand identity & UI/UI_SPEC.md` is the authoritative Living Design Specification for shared Crochet Intelligence UI work.
+- RC51 completed the first Phase B implementation. Physical-iPhone Human Visual UAT approved the Home Screen, custom uploader, privacy card, and equal secondary treatment for Replace and Remove as the current baseline. Product workflows and domain behavior remain unchanged.
+- The selected Streamlit radio state uses the supported `theme.primaryColor` setting with Primary Teal; the top-right menu uses supported minimal-toolbar configuration.
+- Future UI work follows the Product-driven approval workflow in `ENGINEERING_RULES.md`, with `UI_SPEC.md` updated only after Human Visual UAT and explicit Product Owner approval.
+- Logo work and GIF/onboarding guidance remain deferred.
 
 Next:
 
-- Move to the next confirmed UI/UX limitation after the separate visual identity decision.
+- Plan the next major Streamlit-constraint investigation, beginning with the Select Area / Cropper architecture. RC52 implementation has not started.
+- Defer broader UI standardisation until the pre-Landing Page integration stage.
 - Keep the completed Engine Migration local until a future integration decision is approved.
 - Focus future work on product features, runtime improvements, deployment, or Application Layer work when justified by clear product value.
 - Keep the existing RC28 Railway production path fully recoverable as the rollback target.

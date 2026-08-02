@@ -27,54 +27,13 @@ function text(key) {
   return String(strings[key] || "");
 }
 
-function contrastText(hexColor) {
-  const match = String(hexColor || "").match(/^#([0-9a-f]{6})$/i);
-  if (!match) {
-    return "#ffffff";
-  }
-  const value = Number.parseInt(match[1], 16);
-  const channels = [
-    (value >> 16) & 255,
-    (value >> 8) & 255,
-    value & 255,
-  ].map((channel) => {
-    const normalized = channel / 255;
-    return normalized <= 0.03928
-      ? normalized / 12.92
-      : ((normalized + 0.055) / 1.055) ** 2.4;
-  });
-  const luminance = 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2];
-  const whiteContrast = 1.05 / (luminance + 0.05);
-  const darkContrast = (luminance + 0.05) / 0.05;
-  return darkContrast > whiteContrast ? "#101010" : "#ffffff";
-}
-
-function colorWithAlpha(hexColor, alpha) {
-  const match = String(hexColor || "").match(/^#([0-9a-f]{6})$/i);
-  if (!match) {
-    return String(hexColor || "currentColor");
-  }
-  const value = Number.parseInt(match[1], 16);
-  const red = (value >> 16) & 255;
-  const green = (value >> 8) & 255;
-  const blue = value & 255;
-  return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
-}
-
 function applyTheme(theme) {
-  if (!theme) {
-    return;
-  }
-  const style = document.documentElement.style;
-  style.setProperty("--upload-background", theme.backgroundColor);
-  style.setProperty("--upload-secondary", theme.secondaryBackgroundColor);
-  style.setProperty("--upload-text", theme.textColor);
-  style.setProperty("--upload-muted", colorWithAlpha(theme.textColor, 0.72));
-  style.setProperty("--upload-primary", theme.primaryColor);
-  style.setProperty("--upload-border", colorWithAlpha(theme.textColor, 0.28));
-  style.setProperty("--upload-focus", theme.primaryColor);
-  style.setProperty("--upload-error", theme.base === "dark" ? "#ff8a8a" : "#b42318");
-  style.setProperty("--upload-primary-text", contrastText(theme.primaryColor));
+  const systemTheme = window.matchMedia("(prefers-color-scheme: dark)").matches
+    ? "dark"
+    : "light";
+  document.documentElement.dataset.theme = theme && theme.base
+    ? theme.base
+    : systemTheme;
 }
 
 function setState(state) {
@@ -88,6 +47,7 @@ function setState(state) {
 }
 
 function renderStrings() {
+  document.documentElement.lang = text("html_lang") || "en";
   instruction.textContent = text("instruction");
   chooseButton.textContent = text("choose");
   dropHint.textContent = emptyState.classList.contains("drag-over")

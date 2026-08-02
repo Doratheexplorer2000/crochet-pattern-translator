@@ -1,6 +1,6 @@
 # Crochet Pattern Translator Project Status
 
-Last updated: 2026-08-01
+Last updated: 2026-08-02
 
 ## Current Version
 
@@ -21,6 +21,8 @@ Crochet Pattern OCR Translator is the current OCR-based pattern translation app.
 RC42 completed the first local Engine Extraction by moving the CSV terminology / lookup engine into `pattern_translator/engine/terminology.py`. RC43 extracted pure line-translation logic into `pattern_translator/engine/line_translation.py`. RC44 extracted Diagnostic Report construction and formatting into `pattern_translator/engine/diagnostic_report.py`. RC45 completed Boundary Cleanup. RC46 extracted overlay rendering into `pattern_translator/engine/overlay.py`. RC47 extracted Pattern Document responsibilities into `pattern_translator/engine/pattern_document.py`. RC48 extracted OCR line assembly into `pattern_translator/engine/ocr_lines.py`. RC49 extracted deterministic OCR cleanup into `pattern_translator/engine/ocr_cleanup.py`, completing Engine Migration and Domain Layer extraction. Regression and Human UAT passed with no user-visible behavior changes. Engine migration remains local only with no production deployment and no GitHub push.
 
 RC50A completed the custom uploader technical spike. RC50B replaced the native Streamlit file uploader with a production Streamlit Components V1 uploader while preserving the existing Python and domain-engine boundary. Physical iPhone Safari and Android Chrome Human UAT passed with no functional regression. RC50 remains local only; RC28 remains the production baseline.
+
+Phase A Brand Identity Foundation is complete. RC51 completed the first Phase B implementation. Physical-iPhone Human Visual UAT approved the Home Screen as the current baseline, including the custom uploader, privacy card, and equal secondary treatment for Replace and Remove. `Brand identity & UI/UI_SPEC.md` remains the authoritative Living Design Specification; this approval is not a final UI freeze. No product workflow or domain behavior was changed.
 
 ## Current Database
 
@@ -50,14 +52,14 @@ stitches_1_8e.csv
 
 ## Current Priorities
 
-Current Phase: Phase 2 – Streamlit Constraint Audit & Future UI Strategy.
+Current Phase: Streamlit Constraint Removal Planning.
 
 Purpose:
 
-- Identify every UI/UX limitation caused by Streamlit.
-- Determine which limitations can be solved within Streamlit.
-- Determine which limitations require a different frontend.
-- Produce future frontend requirements before selecting any new framework.
+- Preserve the approved RC51 Home Screen baseline and existing product behavior.
+- Identify the next major Streamlit limitation before selecting an implementation.
+- Begin RC52 planning with investigation of the Select Area / Cropper architecture; no RC52 implementation has started.
+- Defer broader UI standardisation until the pre-Landing Page integration stage.
 
 Roadmap decisions:
 
@@ -91,6 +93,19 @@ The default assumption is that the Landing Page will not be built with Streamlit
 
 ## Current Release Notes
 
+### RC51 (completed locally)
+
+- Mission: first Phase B implementation after the Phase A Brand Identity Foundation.
+- Local implementation: Warm Modern colours, typography, spacing, controls, cards, disclosure styling, and the RC50 custom uploader now follow the Living Design Specification.
+- Theme support: Light Mode and Dark Mode remain equally supported through the device colour-scheme preference.
+- Streamlit menu: the top-right overflow menu is suppressed with supported `client.toolbarMode = "minimal"` configuration rather than private-DOM CSS.
+- Radio control: the selected state uses supported Streamlit `theme.primaryColor = "#0F766E"`, avoiding private-DOM CSS and preserving native accessibility behavior.
+- Product approval: physical-iPhone Human Visual UAT passed. The Home Screen, custom uploader, privacy card, and identical secondary Replace / Remove controls are approved as the current baseline.
+- UI governance: the Product-driven workflow in `ENGINEERING_RULES.md` is now standard; implementation alone does not constitute visual approval.
+- Deferred: broader UI standardisation will be revisited before Landing Page integration. This baseline is not a final UI freeze.
+- Boundary: no OCR, translation, overlay, diagnostics, analytics, export, engine, or workflow behavior was changed.
+- Status: RC51 complete locally. No deployment or GitHub push; RC28 remains the production baseline.
+
 ### RC50
 
 - RC50A validated the technical upload boundary; RC50B completed the production custom uploader.
@@ -99,8 +114,8 @@ The default assumption is that the Landing Page will not be built with Streamlit
 - Limit: 25 MB is intentional because Streamlit Components V1 uses base64 transport.
 - Validation: physical iPhone Safari and Android Chrome Human UAT passed; real image upload and downstream workflows passed; unrelated-image/no-crochet-content handling was validated and its message improved; no functional regression was observed.
 - Boundary: one native Streamlit UI widget has been replaced. Streamlit still owns runtime, session state, and component communication.
-- Deferred: visual branding, corporate colour palette, logo work, GIF/onboarding guidance, and upload-button restyling await the separate visual identity decision.
-- Status: RC50 complete locally. The project is ready to move to the next UI/UX limitation after that visual identity decision. No production deployment or GitHub push; RC28 remains the production baseline.
+- Follow-on: Phase A subsequently established the brand direction and Living Design Specification. Logo work and GIF/onboarding guidance remain deferred.
+- Status: RC50 complete locally. Its custom uploader is now the approved reference implementation following RC51. No production deployment or GitHub push; RC28 remains the production baseline.
 
 ### RC49
 

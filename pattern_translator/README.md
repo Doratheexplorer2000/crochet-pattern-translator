@@ -86,17 +86,21 @@ Key validated behavior:
 - Supported formats are JPG, JPEG, PNG, and WebP. The uploader supports all four interface languages, native mobile image selection, desktop drag-and-drop, Replace and Remove, and light and dark modes.
 - The intentional upload limit is 25 MB because Components V1 uses base64 transport. Physical iPhone Safari and Android Chrome Human UAT passed with no functional regression.
 - Unrelated-image/no-crochet-content handling was validated and its message improved.
-- Streamlit remains the runtime and continues to provide session state and component communication. Visual branding, corporate colours, logo work, GIF/onboarding guidance, and upload-button restyling are deferred pending the separate visual identity decision.
+- Streamlit remains the runtime and continues to provide session state and component communication.
+- Phase A Brand Identity Foundation is complete. `Brand identity & UI/UI_SPEC.md` is the authoritative Living Design Specification.
+- RC51 completed the first local Brand Identity implementation. Physical-iPhone Human Visual UAT approved the Home Screen, custom uploader, privacy card, and equal secondary treatment for Replace and Remove as the current baseline. OCR, translation, overlay, diagnostics, analytics, exports, engines, and workflows are unchanged.
+- The selected radio state uses Streamlit's supported Primary Teal theme setting, and the top-right menu uses supported minimal-toolbar configuration.
+- UI development now follows the Product-driven approval workflow in `ENGINEERING_RULES.md`. `UI_SPEC.md` is updated only after Human Visual UAT and explicit Product Owner approval. Logo work and GIF/onboarding guidance remain deferred.
 - Regression evidence is stored under `regression/regression_test/Reports/`.
 
 ## Current Project Status
 
 - Official production baseline: `RC28`
 - Current app version string: `Pattern OCR Translator (Beta RC26)`
-- Current phase: phased post-Streamlit migration preparation
-- Latest local product step: `RC50` production custom uploader completed and physical-device Human UAT passed; Engine Migration remains complete.
+- Current phase: Streamlit constraint removal planning
+- Latest local product step: `RC51` completed locally; the Home Screen baseline passed physical-iPhone Human Visual UAT, and Engine Migration remains complete.
 - Current production database: `knowledge_base/data/master_stitches.csv`
-- Current focus: preserve RC28 as the Railway production baseline and move to the next UI/UX limitation after the separate visual identity decision. Future Application Layer separation remains deferred until clear product value justifies it.
+- Current focus: plan the next major Streamlit-constraint investigation, beginning with Select Area / Cropper architecture. Broader UI standardisation is deferred until pre-Landing Page integration; RC52 implementation has not started.
 - Future testing: continue with occasional trusted-user testing and incremental fixes based on production evidence. Plan for a Soft Launch after Landing Page completion instead of another formal External UAT cycle.
 
 Known non-blocking polish items:
