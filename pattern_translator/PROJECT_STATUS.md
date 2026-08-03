@@ -1,6 +1,6 @@
 # Crochet Pattern Translator Project Status
 
-Last updated: 2026-08-02
+Last updated: 2026-08-03
 
 ## Current Version
 
@@ -23,6 +23,8 @@ RC42 completed the first local Engine Extraction by moving the CSV terminology /
 RC50A completed the custom uploader technical spike. RC50B replaced the native Streamlit file uploader with a production Streamlit Components V1 uploader while preserving the existing Python and domain-engine boundary. Physical iPhone Safari and Android Chrome Human UAT passed with no functional regression. RC50 remains local only; RC28 remains the production baseline.
 
 Phase A Brand Identity Foundation is complete. RC51 completed the first Phase B implementation. Physical-iPhone Human Visual UAT approved the Home Screen as the current baseline, including the custom uploader, privacy card, and equal secondary treatment for Replace and Remove. `Brand identity & UI/UI_SPEC.md` remains the authoritative Living Design Specification; this approval is not a final UI freeze. No product workflow or domain behavior was changed.
+
+RC52 completed the custom Select Area component and finalized the upload-to-crop workflow. Human UAT passed on iPhone Safari, Android Chrome, and Desktop Chrome with no remaining functional issues. RC52 is production-ready and frozen locally; RC28 remains the deployed production baseline until a separate deployment decision.
 
 ## Current Database
 
@@ -48,17 +50,18 @@ stitches_1_8e.csv
 - Translation TXT export.
 - Diagnostic Report export and feedback workflow.
 - Streamlit Components V1 custom image uploader with native mobile selection, desktop drag-and-drop, Replace and Remove, multilingual text, and light/dark theme support.
+- Streamlit Components V1 custom Select Area cropper with immediate entry, browser-local editing, a Precision Arrow Pad, and finalized Reset / Start Over behavior.
 - Regression framework with real-world pattern evidence.
 
 ## Current Priorities
 
-Current Phase: Streamlit Constraint Removal Planning.
+Current Phase: RC52 complete; RC53 planning pending.
 
 Purpose:
 
-- Preserve the approved RC51 Home Screen baseline and existing product behavior.
-- Identify the next major Streamlit limitation before selecting an implementation.
-- Begin RC52 planning with investigation of the Select Area / Cropper architecture; no RC52 implementation has started.
+- Preserve the approved RC51 Home Screen and RC52 custom-component baselines.
+- Keep RC52 frozen; defer cropper aesthetics, indicators, and animation work until after RC53 unless a functional regression is discovered.
+- Select the next Streamlit limitation only through a separately approved RC53 plan.
 - Defer broader UI standardisation until the pre-Landing Page integration stage.
 
 Roadmap decisions:
@@ -92,6 +95,16 @@ The default assumption is that the Landing Page will not be built with Streamlit
 - JellyCat 元寶 overlay placement has a minor cosmetic placement difference. Translation correctness, anchor position, readability, and functionality are unaffected; this is future overlay placement tuning rather than an RC47 regression.
 
 ## Current Release Notes
+
+### RC52 (completed locally)
+
+- Workflow: the custom uploader fully replaces the previous upload workflow, and selecting Select Area opens the cropper immediately without a duplicate image preview or extra launch button.
+- Component: the custom Streamlit Components V1 cropper preserves browser-local editing and the existing Python/Pillow crop boundary. The Precision Arrow Pad, four-edge selection, Safari long-press/callout handling, and cross-platform light/dark themes are complete.
+- State handling: Reset restores the initial crop locally; Start Over returns to the Whole Pattern default and starts a fresh Select Area session when reselected.
+- OCR feedback: the existing running status is positioned above the disabled running-labelled action so feedback remains visible immediately on mobile.
+- Validation: Human UAT passed on physical iPhone Safari, Android Chrome, and Desktop Chrome with no remaining functional issues.
+- Architecture: the custom uploader and cropper replace targeted Streamlit UI limitations through supported component boundaries rather than framework workarounds. OCR, parser, translation, overlay, diagnostics, analytics, exports, coordinate conversion, and downstream engines remain unchanged.
+- Status: production-ready and frozen locally. Further visual polish is deferred until after RC53 unless a functional regression is found. No deployment was performed; RC28 remains the deployed production baseline.
 
 ### RC51 (completed locally)
 

@@ -130,6 +130,8 @@ If testing cannot be performed, clearly state:
 
 "Human verification required."
 
+For custom frontend components and related UI/UX changes, approval requires Human UAT on physical iPhone, physical Android, and Desktop. Desktop browser validation alone is insufficient.
+
 ---
 
 # 7. RC Scope

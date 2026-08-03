@@ -33,6 +33,7 @@ from crochet_intelligence.analytics import (
     track_event as analytics_track_event,
 )
 from pattern_translator.components.custom_upload import custom_image_uploader
+from pattern_translator.components.custom_cropper import custom_select_area
 from pattern_translator.engine import terminology as terminology_engine
 from pattern_translator.engine import line_translation as line_translation_engine
 from pattern_translator.engine import diagnostic_report as diagnostic_report_engine
@@ -50,7 +51,6 @@ FALLBACK_CSV = KNOWLEDGE_BASE_DIR / "releases" / "database" / "stitches_1_8e.csv
 DEBUG_MODE = os.getenv("CROCHET_DEBUG", "").strip().lower() in {"1", "true", "yes", "on"}
 FEEDBACK_FORM_URL = "https://docs.google.com/forms/d/e/1FAIpQLScoDrN0xsyOg800O8Pw7aXAa5GREQIU-RmxlmXIlBOE7y_Q_w/viewform"
 SELECT_AREA_PREVIEW_WIDTH = 360
-SELECT_AREA_CROPPER_STROKE_WIDTH = 4
 
 TRANSLATION_PROFILE: Optional[Dict[str, Dict[str, float]]] = None
 
@@ -183,10 +183,11 @@ h3 {
 h1 a[href^="#"], h1 .anchor-link { display: none !important; }
 h1 + div[data-testid="stCaptionContainer"] { margin-top: 0; }
 div[data-testid="stCaptionContainer"] {
-    color: var(--ci-text-secondary);
+    color: var(--ci-text-muted);
     font-size: 14px;
     line-height: 20px;
     margin-bottom: 8px;
+    opacity: 1;
 }
 p, label, li { line-height: 24px; }
 .small-note {
@@ -247,12 +248,40 @@ div[data-testid="stTextInput"] input {
     color: var(--ci-text-primary);
 }
 
+label[data-testid="stWidgetLabel"],
+label[data-testid="stWidgetLabel"] p,
+div[role="radiogroup"] label,
+div[role="radiogroup"] label p,
+div[data-testid="stCheckbox"] label,
+div[data-testid="stCheckbox"] label p,
+div[data-baseweb="select"] [value] {
+    color: var(--ci-text-primary) !important;
+}
+
+[role="listbox"] {
+    border-color: var(--ci-border) !important;
+    background: var(--ci-surface) !important;
+}
+
+[role="listbox"] [role="option"] {
+    color: var(--ci-text-primary) !important;
+}
+
+[role="listbox"] [role="option"][aria-selected="true"] {
+    background: var(--ci-surface-subtle) !important;
+}
+
 button:focus-visible,
 a:focus-visible,
-input:focus-visible,
 textarea:focus-visible,
 summary:focus-visible,
-[role="radio"]:focus-visible {
+[role="radio"]:focus-visible,
+div[data-testid="stTextInput"] input:focus-visible {
+    outline: 3px solid var(--ci-focus-ring) !important;
+    outline-offset: 2px !important;
+}
+
+div[data-baseweb="select"]:focus-within > div {
     outline: 3px solid var(--ci-focus-ring) !important;
     outline-offset: 2px !important;
 }
@@ -1609,7 +1638,7 @@ INTERFACE_LANGUAGES = {
         "area_right": "Right Column",
         "area_whole": "Whole Pattern",
         "cropper_missing": "Direct drag selection needs the optional package `streamlit-cropper`. Until installed, this version falls back to presets or sliders.",
-        "cropper_drag": "Drag the rectangle around the text you want translated.",
+        "cropper_drag": "Drag the rectangle around the text you want translated.\n\nUse the Precision Pad to fine-tune the highlighted border.",
         "cropper_failed": "Drag cropper could not load. Falling back to boundary sliders.",
         "boundary_instruction": "Move the boundary lines. No percentages needed — just keep the red box around the text you want translated.",
         "left_boundary": "Left boundary",
@@ -1623,6 +1652,26 @@ INTERFACE_LANGUAGES = {
         "select_area_edit": "Edit Selection",
         "select_area_use": "Use This Area",
         "select_area_cancel": "Start Over",
+        "select_area_reset": "Reset",
+        "select_area_image_alt": "Crochet pattern image for area selection",
+        "select_area_selection_label": "Selected translation area",
+        "select_area_move_controller": "Move precision controls",
+        "select_area_move_up": "Adjust top edge upward",
+        "select_area_move_down": "Adjust bottom edge downward",
+        "select_area_move_left": "Adjust left edge outward",
+        "select_area_move_right": "Adjust right edge outward",
+        "select_area_adjust_top_up": "Move top edge upward",
+        "select_area_adjust_top_down": "Move top edge downward",
+        "select_area_adjust_bottom_up": "Move bottom edge upward",
+        "select_area_adjust_bottom_down": "Move bottom edge downward",
+        "select_area_adjust_left_left": "Move left edge left",
+        "select_area_adjust_left_right": "Move left edge right",
+        "select_area_adjust_right_left": "Move right edge left",
+        "select_area_adjust_right_right": "Move right edge right",
+        "select_area_resize_top": "Resize top edge",
+        "select_area_resize_bottom": "Resize bottom edge",
+        "select_area_resize_left": "Resize left edge",
+        "select_area_resize_right": "Resize right edge",
         "select_area_scroll_hint": "Preview is scrollable. Tap Select Area when you are ready to adjust the crop.",
         "select_area_confirmed_hint": "This selected area will be used for OCR. Tap Edit Selection to change it.",
         "select_area_required": "Please select an area before running OCR, or switch back to Whole Pattern.",
@@ -1715,7 +1764,7 @@ INTERFACE_LANGUAGES = {
         "area_right": "右欄",
         "area_whole": "整個圖樣",
         "cropper_missing": "拖拉選取範圍需要額外套件 `streamlit-cropper`。未安裝時，會改用預設範圍或滑桿。",
-        "cropper_drag": "請拖拉方框，框住要翻譯的文字。",
+        "cropper_drag": "請拖拉方框，框住要翻譯的文字。\n\n使用精細調整控制器微調反白顯示的邊界。",
         "cropper_failed": "拖拉裁剪工具未能載入，將改用邊界滑桿。",
         "boundary_instruction": "移動邊界線即可。不需要輸入百分比，只要讓紅框包住要翻譯的文字。",
         "left_boundary": "左邊界",
@@ -1729,6 +1778,26 @@ INTERFACE_LANGUAGES = {
         "select_area_edit": "編輯範圍",
         "select_area_use": "使用此範圍",
         "select_area_cancel": "重新選取",
+        "select_area_reset": "重設",
+        "select_area_image_alt": "用於選取範圍的鈎織圖樣圖片",
+        "select_area_selection_label": "已選翻譯範圍",
+        "select_area_move_controller": "移動精細調整控制器",
+        "select_area_move_up": "向上微調上邊界",
+        "select_area_move_down": "向下微調下邊界",
+        "select_area_move_left": "向外微調左邊界",
+        "select_area_move_right": "向外微調右邊界",
+        "select_area_adjust_top_up": "向上移動上邊界",
+        "select_area_adjust_top_down": "向下移動上邊界",
+        "select_area_adjust_bottom_up": "向上移動下邊界",
+        "select_area_adjust_bottom_down": "向下移動下邊界",
+        "select_area_adjust_left_left": "向左移動左邊界",
+        "select_area_adjust_left_right": "向右移動左邊界",
+        "select_area_adjust_right_left": "向左移動右邊界",
+        "select_area_adjust_right_right": "向右移動右邊界",
+        "select_area_resize_top": "調整上邊界",
+        "select_area_resize_bottom": "調整下邊界",
+        "select_area_resize_left": "調整左邊界",
+        "select_area_resize_right": "調整右邊界",
         "select_area_scroll_hint": "預覽可以正常捲動。準備調整裁剪範圍時，請點選「選取範圍」。",
         "select_area_confirmed_hint": "文字辨識會使用這個已選範圍。如需修改，請點選「編輯範圍」。",
         "select_area_required": "請先選取要翻譯的範圍，或切換回整個圖樣。",
@@ -1821,7 +1890,7 @@ INTERFACE_LANGUAGES = {
         "area_right": "右栏",
         "area_whole": "整个图样",
         "cropper_missing": "拖拉选取范围需要额外套件 `streamlit-cropper`。未安装时，会改用默认范围或滑杆。",
-        "cropper_drag": "请拖拉方框，框住要翻译的文字。",
+        "cropper_drag": "请拖拉方框，框住要翻译的文字。\n\n使用精细调整控制器微调高亮显示的边界。",
         "cropper_failed": "拖拉裁剪工具未能加载，将改用边界滑杆。",
         "boundary_instruction": "移动边界线即可。不需要输入百分比，只要让红框包住要翻译的文字。",
         "left_boundary": "左边界",
@@ -1835,6 +1904,26 @@ INTERFACE_LANGUAGES = {
         "select_area_edit": "编辑范围",
         "select_area_use": "使用此范围",
         "select_area_cancel": "重新选择",
+        "select_area_reset": "重置",
+        "select_area_image_alt": "用于选取范围的钩织图样图片",
+        "select_area_selection_label": "已选翻译范围",
+        "select_area_move_controller": "移动精细调整控制器",
+        "select_area_move_up": "向上微调上边界",
+        "select_area_move_down": "向下微调下边界",
+        "select_area_move_left": "向外微调左边界",
+        "select_area_move_right": "向外微调右边界",
+        "select_area_adjust_top_up": "向上移动上边界",
+        "select_area_adjust_top_down": "向下移动上边界",
+        "select_area_adjust_bottom_up": "向上移动下边界",
+        "select_area_adjust_bottom_down": "向下移动下边界",
+        "select_area_adjust_left_left": "向左移动左边界",
+        "select_area_adjust_left_right": "向右移动左边界",
+        "select_area_adjust_right_left": "向左移动右边界",
+        "select_area_adjust_right_right": "向右移动右边界",
+        "select_area_resize_top": "调整上边界",
+        "select_area_resize_bottom": "调整下边界",
+        "select_area_resize_left": "调整左边界",
+        "select_area_resize_right": "调整右边界",
         "select_area_scroll_hint": "预览可以正常滚动。准备调整裁剪范围时，请点选“选取范围”。",
         "select_area_confirmed_hint": "文字识别会使用这个已选范围。如需修改，请点选“编辑范围”。",
         "select_area_required": "请先选取要翻译的范围，或切换回整个图样。",
@@ -1927,7 +2016,7 @@ INTERFACE_LANGUAGES = {
         "area_right": "右の列",
         "area_whole": "パターン全体",
         "cropper_missing": "ドラッグ選択には追加パッケージ `streamlit-cropper` が必要です。未導入の場合は、プリセットまたはスライダーを使用します。",
-        "cropper_drag": "翻訳したい文字を囲むように四角をドラッグしてください。",
+        "cropper_drag": "翻訳したい文字を囲むように四角をドラッグしてください。\n\n微調整コントローラーを使って、強調表示された境界線を細かく調整してください。",
         "cropper_failed": "ドラッグ選択を読み込めませんでした。境界スライダーに切り替えます。",
         "boundary_instruction": "境界線を動かしてください。パーセント指定は不要です。赤い枠で翻訳したい文字を囲んでください。",
         "left_boundary": "左の境界",
@@ -1941,6 +2030,26 @@ INTERFACE_LANGUAGES = {
         "select_area_edit": "選択範囲を編集",
         "select_area_use": "この範囲を使う",
         "select_area_cancel": "選び直す",
+        "select_area_reset": "リセット",
+        "select_area_image_alt": "範囲選択用のかぎ針編みパターン画像",
+        "select_area_selection_label": "選択した翻訳範囲",
+        "select_area_move_controller": "微調整コントローラーを移動",
+        "select_area_move_up": "上端を上へ微調整",
+        "select_area_move_down": "下端を下へ微調整",
+        "select_area_move_left": "左端を外側へ微調整",
+        "select_area_move_right": "右端を外側へ微調整",
+        "select_area_adjust_top_up": "上端を上へ移動",
+        "select_area_adjust_top_down": "上端を下へ移動",
+        "select_area_adjust_bottom_up": "下端を上へ移動",
+        "select_area_adjust_bottom_down": "下端を下へ移動",
+        "select_area_adjust_left_left": "左端を左へ移動",
+        "select_area_adjust_left_right": "左端を右へ移動",
+        "select_area_adjust_right_left": "右端を左へ移動",
+        "select_area_adjust_right_right": "右端を右へ移動",
+        "select_area_resize_top": "上端を調整",
+        "select_area_resize_bottom": "下端を調整",
+        "select_area_resize_left": "左端を調整",
+        "select_area_resize_right": "右端を調整",
         "select_area_scroll_hint": "プレビューは通常どおりスクロールできます。範囲を調整する場合は「範囲を選択」をタップしてください。",
         "select_area_confirmed_hint": "この選択範囲が文字認識に使われます。変更する場合は「選択範囲を編集」をタップしてください。",
         "select_area_required": "OCRを実行する前に範囲を選択するか、パターン全体に戻してください。",
@@ -2100,6 +2209,10 @@ def init_rc3_state():
     st.session_state.setdefault("select_area_editing", False)
     st.session_state.setdefault("select_area_draft_crop_box", None)
     st.session_state.setdefault("select_area_display_proxy_diagnostics", {})
+    st.session_state.setdefault("select_area_last_component_action_id", None)
+    st.session_state.setdefault("select_area_edit_session_no", 0)
+    st.session_state.setdefault("select_area_last_area_mode", None)
+    st.session_state.setdefault("select_area_start_over_pending", False)
     st.session_state.setdefault("ocr_running", False)
     st.session_state.setdefault("ocr_started_at", None)
     st.session_state.setdefault("ocr_finished_at", None)
@@ -2119,7 +2232,7 @@ def init_rc3_state():
 
 
 def request_ocr_run():
-    if st.session_state.get("ocr_running"):
+    if st.session_state.get("pending_ocr_run") or st.session_state.get("ocr_running"):
         st.session_state["duplicate_ocr_run_ignored_count"] = st.session_state.get("duplicate_ocr_run_ignored_count", 0) + 1
         rc10b_log_event(
             "Run OCR request ignored because OCR already running",
@@ -2448,11 +2561,19 @@ def reset_uploaded_image_derived_state(image_signature: Optional[str]) -> None:
     st.session_state["rc3_ocr_result"] = None
     st.session_state["rc3_ocr_result_signature"] = None
     st.session_state["pending_ocr_run"] = False
+    st.session_state["ocr_running"] = False
+    st.session_state["ocr_started_at"] = None
+    st.session_state["ocr_finished_at"] = None
+    st.session_state["ocr_duration_seconds"] = None
     st.session_state["latest_crop_box"] = None
     st.session_state["select_area_confirmed_crop_box"] = None
     st.session_state["select_area_editing"] = False
     st.session_state["select_area_draft_crop_box"] = None
     st.session_state["select_area_display_proxy_diagnostics"] = {}
+    st.session_state["select_area_last_component_action_id"] = None
+    st.session_state["select_area_edit_session_no"] = 0
+    st.session_state["select_area_last_area_mode"] = None
+    st.session_state["select_area_start_over_pending"] = False
     st.session_state["rc10b_last_cropper_box"] = None
     st.session_state["debug_report_ready"] = False
     st.session_state["last_successful_download_key"] = None
@@ -2510,6 +2631,9 @@ if image_file is not None:
     st.subheader(t("translation_area"))
 
     area_options = ["Whole Pattern", "Select Area"]
+    if st.session_state.pop("select_area_start_over_pending", False):
+        st.session_state["translation_area_mode_radio"] = "Whole Pattern"
+        st.session_state["select_area_last_area_mode"] = "Whole Pattern"
     if st.session_state.get("translation_area_mode_radio") not in area_options:
         st.session_state["translation_area_mode_radio"] = "Whole Pattern"
     area_mode = st.radio(
@@ -2520,6 +2644,9 @@ if image_file is not None:
         index=area_options.index(st.session_state["translation_area_mode_radio"]),
         format_func=lambda value: t(AREA_LABEL_KEYS.get(value, value)),
     )
+    previous_area_mode = st.session_state.get("select_area_last_area_mode")
+    entered_select_area = area_mode == "Select Area" and previous_area_mode != "Select Area"
+    st.session_state["select_area_last_area_mode"] = area_mode
     if area_mode == "Select Area":
         st.caption(t("translation_area_tip"))
 
@@ -2533,6 +2660,22 @@ if image_file is not None:
     area_mode_for_box = area_map.get(area_mode, "Whole image")
     preset_box = get_preset_crop_box(image, area_mode_for_box)
 
+    def start_over_select_area() -> None:
+        st.session_state["select_area_start_over_pending"] = True
+        st.session_state["select_area_confirmed_crop_box"] = None
+        st.session_state["select_area_editing"] = False
+        st.session_state["select_area_draft_crop_box"] = None
+        st.session_state["select_area_display_proxy_diagnostics"] = {}
+        st.session_state["select_area_last_component_action_id"] = None
+        st.session_state["latest_crop_box"] = get_preset_crop_box(image, "Whole image")
+        st.session_state["rc3_ocr_result"] = None
+        st.session_state["rc3_ocr_result_signature"] = None
+        st.session_state["pending_ocr_run"] = False
+        st.session_state["ocr_running"] = False
+        st.session_state["ocr_started_at"] = None
+        st.session_state["ocr_finished_at"] = None
+        st.session_state["ocr_duration_seconds"] = None
+
     if area_mode == "Whole Pattern":
         crop_box = preset_box
         st.session_state["latest_crop_box"] = crop_box
@@ -2540,15 +2683,22 @@ if image_file is not None:
         st.session_state["select_area_draft_crop_box"] = None
         st.session_state["select_area_display_proxy_diagnostics"] = {}
     else:
-        cropper_ok = streamlit_cropper_available()
         confirmed_crop_box = st.session_state.get("select_area_confirmed_crop_box")
         is_editing_area = bool(st.session_state.get("select_area_editing"))
+        if confirmed_crop_box is None and not is_editing_area and entered_select_area:
+            track_analytics_event("select_area_started", workflow_mode=area_mode)
+            st.session_state["select_area_editing"] = True
+            st.session_state["select_area_draft_crop_box"] = get_default_select_area_crop_box(image)
+            st.session_state["select_area_edit_session_no"] = int(
+                st.session_state.get("select_area_edit_session_no", 0)
+            ) + 1
+            is_editing_area = True
         crop_box = clamp_crop_box(confirmed_crop_box, image) if confirmed_crop_box is not None else (0, 0, image.size[0], image.size[1])
 
         if is_editing_area:
             draft_crop_box = st.session_state.get("select_area_draft_crop_box") or confirmed_crop_box or get_default_select_area_crop_box(image)
             draft_crop_box = clamp_crop_box(draft_crop_box, image)
-            adjust_mode = "Drag rectangle on image" if cropper_ok else "Use boundary sliders"
+            adjust_mode = "Custom crop workspace"
 
             def confirm_select_area_crop(button_key: str) -> None:
                 if st.button(t("select_area_use"), key=button_key, type="primary"):
@@ -2572,83 +2722,117 @@ if image_file is not None:
 
             def cancel_select_area_crop(button_key: str) -> None:
                 if st.button(t("select_area_cancel"), key=button_key):
-                    st.session_state["select_area_editing"] = False
-                    st.session_state["select_area_draft_crop_box"] = None
+                    start_over_select_area()
                     try:
                         st.rerun()
                     except Exception:
                         pass
 
-            if not cropper_ok:
-                st.caption(t("cropper_missing"))
-
-            if cropper_ok:
-                st.caption(t("cropper_drag"))
-                col_cancel, col_use = st.columns(2)
-                with col_cancel:
-                    cancel_select_area_crop("select_area_cancel_button")
-                with col_use:
-                    confirm_select_area_crop("select_area_use_button")
-                try:
-                    from streamlit_cropper import st_cropper
-                    safe_area_mode = re.sub(r"\W+", "_", area_mode_for_box.lower())
-                    image_key_fragment = current_signature[:12]
-                    cropper_key = f"cropper_{image_key_fragment}_{safe_area_mode}_{image.size[0]}x{image.size[1]}"
-                    display_image, display_scale_x, display_scale_y, display_diag = prepare_cropper_display_image(image)
-                    st.session_state["select_area_display_proxy_diagnostics"] = display_diag
-                    display_crop_box = crop_box_original_to_display(
-                        draft_crop_box,
-                        display_scale_x,
-                        display_scale_y,
-                        display_image,
-                    )
-                    left0, top0, right0, bottom0 = display_crop_box
-                    rc10b_log_event(
-                        "cropper widget created",
-                        cropper_key=cropper_key,
-                        image_signature=current_signature,
-                        area_mode=area_mode,
-                        display_proxy=display_diag,
-                    )
-
-                    cropper_result = st_cropper(
-                        display_image,
-                        realtime_update=True,
-                        default_coords=(left0, right0, top0, bottom0),
-                        box_color="#ff4b4b",
-                        aspect_ratio=None,
-                        return_type="box",
-                        should_resize_image=False,
-                        stroke_width=SELECT_AREA_CROPPER_STROKE_WIDTH,
-                        key=cropper_key,
-                    )
-                    display_cropper_box = crop_box_from_cropper_result(cropper_result, display_image)
-                    if display_cropper_box is not None:
+            st.caption(t("cropper_drag"))
+            rerun_after_component_action = False
+            try:
+                safe_area_mode = re.sub(r"\W+", "_", area_mode_for_box.lower())
+                image_key_fragment = current_signature[:12]
+                edit_session_no = int(st.session_state.get("select_area_edit_session_no", 0))
+                cropper_key = (
+                    f"custom_cropper_{image_key_fragment}_{safe_area_mode}_"
+                    f"{image.size[0]}x{image.size[1]}_{edit_session_no}"
+                )
+                display_image, display_scale_x, display_scale_y, display_diag = prepare_cropper_display_image(image)
+                st.session_state["select_area_display_proxy_diagnostics"] = display_diag
+                display_crop_box = crop_box_original_to_display(
+                    draft_crop_box,
+                    display_scale_x,
+                    display_scale_y,
+                    display_image,
+                )
+                cropper_strings = {
+                    "html_lang": {
+                        "Traditional Chinese": "zh-Hant",
+                        "Simplified Chinese": "zh-Hans",
+                        "Japanese": "ja",
+                    }.get(interface_language, "en"),
+                    "image_alt": t("select_area_image_alt"),
+                    "selection_label": t("select_area_selection_label"),
+                    "confirm": t("select_area_use"),
+                    "reset": t("select_area_reset"),
+                    "cancel": t("select_area_cancel"),
+                    "move_controller": t("select_area_move_controller"),
+                    "move_up": t("select_area_move_up"),
+                    "move_down": t("select_area_move_down"),
+                    "move_left": t("select_area_move_left"),
+                    "move_right": t("select_area_move_right"),
+                    "adjust_top_up": t("select_area_adjust_top_up"),
+                    "adjust_top_down": t("select_area_adjust_top_down"),
+                    "adjust_bottom_up": t("select_area_adjust_bottom_up"),
+                    "adjust_bottom_down": t("select_area_adjust_bottom_down"),
+                    "adjust_left_left": t("select_area_adjust_left_left"),
+                    "adjust_left_right": t("select_area_adjust_left_right"),
+                    "adjust_right_left": t("select_area_adjust_right_left"),
+                    "adjust_right_right": t("select_area_adjust_right_right"),
+                    "resize_top": t("select_area_resize_top"),
+                    "resize_bottom": t("select_area_resize_bottom"),
+                    "resize_left": t("select_area_resize_left"),
+                    "resize_right": t("select_area_resize_right"),
+                }
+                rc10b_log_event(
+                    "custom cropper workspace created",
+                    cropper_key=cropper_key,
+                    image_signature=current_signature,
+                    area_mode=area_mode,
+                    display_proxy=display_diag,
+                )
+                cropper_result = custom_select_area(
+                    display_image,
+                    display_crop_box,
+                    cropper_strings,
+                    image_signature=current_signature,
+                    key=cropper_key,
+                )
+                action_id = str((cropper_result or {}).get("action_id") or "")
+                is_new_action = bool(
+                    action_id
+                    and action_id != st.session_state.get("select_area_last_component_action_id")
+                )
+                if is_new_action:
+                    st.session_state["select_area_last_component_action_id"] = action_id
+                    if cropper_result.get("action") == "confirm":
+                        display_cropper_box = crop_box_from_cropper_result(
+                            cropper_result.get("box"),
+                            display_image,
+                        )
+                        if display_cropper_box is None:
+                            raise ValueError("Custom cropper returned an invalid crop box")
                         cropper_box = crop_box_display_to_original(
                             display_cropper_box,
                             display_scale_x,
                             display_scale_y,
                             image,
                         )
-                        previous_cropper_box = st.session_state.get("rc10b_last_cropper_box")
-                        if previous_cropper_box != cropper_box:
-                            rc10b_log_event(
-                                "cropper box updated",
-                                previous_cropper_box=previous_cropper_box,
-                                cropper_box=cropper_box,
-                                display_cropper_box=display_cropper_box,
-                                image_signature=current_signature,
-                                area_mode=area_mode,
-                            )
-                            st.session_state["rc10b_last_cropper_box"] = cropper_box
-                        draft_crop_box = cropper_box
-                        st.session_state["select_area_draft_crop_box"] = cropper_box
-                except Exception as e:
-                    st.warning(t("cropper_failed"))
-                    st.caption(str(e))
-                    adjust_mode = "Use boundary sliders"
+                        st.session_state["select_area_confirmed_crop_box"] = cropper_box
+                        st.session_state["latest_crop_box"] = cropper_box
+                        st.session_state["rc10b_last_cropper_box"] = cropper_box
+                        st.session_state["select_area_editing"] = False
+                        st.session_state["select_area_draft_crop_box"] = None
+                        rc10b_log_event(
+                            "custom cropper box confirmed",
+                            crop_box=cropper_box,
+                            display_cropper_box=display_cropper_box,
+                            image_signature=current_signature,
+                            area_mode=area_mode,
+                        )
+                        track_analytics_event("select_area_confirmed", workflow_mode=area_mode)
+                    elif cropper_result.get("action") == "cancel":
+                        start_over_select_area()
+                    rerun_after_component_action = True
+            except Exception as e:
+                st.warning(t("cropper_failed"))
+                st.caption(str(e))
+                adjust_mode = "Use boundary sliders"
+            if rerun_after_component_action:
+                st.rerun()
 
-            if adjust_mode != "Drag rectangle on image":
+            if adjust_mode == "Use boundary sliders":
                 w, h = image.size
                 left0, top0, right0, bottom0 = draft_crop_box
                 st.caption(t("boundary_instruction"))
@@ -2664,7 +2848,7 @@ if image_file is not None:
                 draft_crop_box = clamp_crop_box((left, top, right, bottom), image)
                 st.session_state["select_area_draft_crop_box"] = draft_crop_box
 
-            if adjust_mode != "Drag rectangle on image":
+            if adjust_mode == "Use boundary sliders":
                 col_cancel, col_use = st.columns(2)
                 with col_cancel:
                     cancel_select_area_crop("select_area_cancel_fallback_button")
@@ -2679,21 +2863,15 @@ if image_file is not None:
                     track_analytics_event("select_area_started", workflow_mode=area_mode)
                     st.session_state["select_area_editing"] = True
                     st.session_state["select_area_draft_crop_box"] = crop_box
+                    st.session_state["select_area_edit_session_no"] = int(
+                        st.session_state.get("select_area_edit_session_no", 0)
+                    ) + 1
                     try:
                         st.rerun()
                     except Exception:
                         pass
             else:
-                st.image(image, caption=t("original_image"), use_container_width=True)
-                st.caption(t("select_area_scroll_hint"))
-                if st.button(t("select_area_start"), key="select_area_start_button", type="primary"):
-                    track_analytics_event("select_area_started", workflow_mode=area_mode)
-                    st.session_state["select_area_editing"] = True
-                    st.session_state["select_area_draft_crop_box"] = get_default_select_area_crop_box(image)
-                    try:
-                        st.rerun()
-                    except Exception:
-                        pass
+                crop_box = (0, 0, image.size[0], image.size[1])
 
         if st.session_state.get("select_area_editing"):
             st.stop()
@@ -2780,15 +2958,16 @@ if image_file is not None:
         df.attrs["normalized_lookup_index"] = {}
 
     ocr_running = bool(st.session_state.get("ocr_running"))
-    run_button_label = "⏳ OCR Running..." if ocr_running else t("run_ocr")
+    ocr_busy = bool(st.session_state.get("pending_ocr_run")) or ocr_running
+    run_button_label = "⏳ OCR Running..." if ocr_busy else t("run_ocr")
+    ocr_status_placeholder = st.empty()
     st.button(
         run_button_label,
         key="run_ocr_overlay_translation_button",
         type="primary",
-        disabled=ocr_running or select_area_needs_confirmation or (bool(quality_errors) and not force_run),
+        disabled=ocr_busy or select_area_needs_confirmation or (bool(quality_errors) and not force_run),
         on_click=request_ocr_run,
     )
-    ocr_status_placeholder = st.empty()
 
     if st.session_state.get("pending_ocr_run"):
         last_click_rerun = st.session_state.get("rc10b_last_button_click_rerun")
@@ -3050,6 +3229,8 @@ if image_file is not None:
                     session_translation_no=translation_no,
                 )
                 increment_session_translation_no(st.session_state)
+                # Redraw the button from the cleared busy state after storing the result.
+                st.rerun()
             except Exception as e:
                 st.session_state["ocr_finished_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
                 st.session_state["ocr_duration_seconds"] = round(time.perf_counter() - ocr_execution_start, 3) if "ocr_execution_start" in locals() else None

@@ -70,12 +70,15 @@ Current focus:
 - Phase A Brand Identity Foundation is complete. `Brand identity & UI/UI_SPEC.md` is the authoritative Living Design Specification for shared Crochet Intelligence UI work.
 - RC51 completed the first Phase B implementation. Physical-iPhone Human Visual UAT approved the Home Screen, custom uploader, privacy card, and equal secondary treatment for Replace and Remove as the current baseline. Product workflows and domain behavior remain unchanged.
 - The selected Streamlit radio state uses the supported `theme.primaryColor` setting with Primary Teal; the top-right menu uses supported minimal-toolbar configuration.
+- RC52 completed the custom Select Area boundary using Streamlit Components V1. Selecting Select Area now opens the cropper immediately, without the duplicate preview or extra launch step.
+- The custom cropper provides browser-local editing, four edge handles, a Precision Arrow Pad, distinct Reset and Start Over flows, immediate OCR-running feedback, and light/dark theme support.
+- RC52 Human UAT passed on physical iPhone Safari, Android Chrome, and Desktop Chrome. The custom uploader and cropper demonstrate that targeted Streamlit UI limitations can be overcome with supported custom components while preserving the existing Python processing pipeline.
 - Future UI work follows the Product-driven approval workflow in `ENGINEERING_RULES.md`, with `UI_SPEC.md` updated only after Human Visual UAT and explicit Product Owner approval.
 - Logo work and GIF/onboarding guidance remain deferred.
 
 Next:
 
-- Plan the next major Streamlit-constraint investigation, beginning with the Select Area / Cropper architecture. RC52 implementation has not started.
+- RC52 is frozen as a production-ready local release. Do not add further cropper polish unless a functional regression is found; RC53 will be planned separately.
 - Defer broader UI standardisation until the pre-Landing Page integration stage.
 - Keep the completed Engine Migration local until a future integration decision is approved.
 - Focus future work on product features, runtime improvements, deployment, or Application Layer work when justified by clear product value.
