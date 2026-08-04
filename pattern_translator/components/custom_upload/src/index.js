@@ -136,6 +136,7 @@ function processFile(file) {
       type: file.type,
       size: file.size,
       data_base64: result.slice(commaIndex + 1),
+      action_id: createActionId(),
     };
     Streamlit.setComponentValue(selectedPayload);
     finishReading();
@@ -160,6 +161,13 @@ function clearDragState() {
 function extensionFor(name) {
   const parts = name.toLowerCase().split(".");
   return parts.length > 1 ? parts.pop() : "";
+}
+
+function createActionId() {
+  if (window.crypto && typeof window.crypto.randomUUID === "function") {
+    return window.crypto.randomUUID();
+  }
+  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
 function onRender(event) {

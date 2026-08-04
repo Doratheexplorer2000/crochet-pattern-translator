@@ -34,6 +34,7 @@ from crochet_intelligence.analytics import (
 )
 from pattern_translator.components.custom_upload import custom_image_uploader
 from pattern_translator.components.custom_cropper import custom_select_area
+from pattern_translator.components.plausible_event import emit_plausible_event
 from pattern_translator.engine import terminology as terminology_engine
 from pattern_translator.engine import line_translation as line_translation_engine
 from pattern_translator.engine import diagnostic_report as diagnostic_report_engine
@@ -2597,6 +2598,11 @@ if image_file is not None:
     if st.session_state.get("rc3_image_signature") != current_signature:
         reset_uploaded_image_derived_state(current_signature)
         track_analytics_event("image_uploaded")
+        emit_plausible_event(
+            "pattern_image_uploaded",
+            str(getattr(image_file, "action_id", "")),
+            key="pattern_image_uploaded_transport",
+        )
 
     image_load_start = time.perf_counter()
     image = Image.open(image_file).convert("RGB")

@@ -1,0 +1,92 @@
+---
+import { translations } from "../i18n/translations";
+import "../styles/global.css";
+
+type Props = {
+  title: string;
+};
+
+const { title } = Astro.props;
+const plausibleScriptUrl = import.meta.env.PUBLIC_PLAUSIBLE_SCRIPT_URL?.trim() || "";
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width" />
+    <meta name="description" content="Crochet Intelligence platform portal" />
+    <title data-i18n="meta.title">{title}</title>
+    {plausibleScriptUrl && <script is:inline async src={plausibleScriptUrl}></script>}
+    {plausibleScriptUrl && (
+      <script is:inline>
+        window.plausible = window.plausible || ((...args) => {
+          (window.plausible.q = window.plausible.q || []).push(args);
+        });
+        window.plausible.init = window.plausible.init || ((options) => {
+          window.plausible.o = options || {};
+        });
+        window.plausible.init();
+      </script>
+    )}
+  </head>
+  <body>
+    <a class="skip-link" href="#main-content">Skip to main content</a>
+    <slot />
+    <script is:inline define:vars={{ translations }}>
+      const supportedLocales = ["en", "zh-Hant", "zh-Hans", "ja"];
+      const defaultLocale = "en";
+
+      function browserLocale() {
+        const language = navigator.language.toLowerCase();
+        if (language.startsWith("ja")) return "ja";
+        if (language.startsWith("zh-tw") || language.startsWith("zh-hk") || language.startsWith("zh-mo")) {
+          return "zh-Hant";
+        }
+        if (language.startsWith("zh")) return "zh-Hans";
+        return defaultLocale;
+      }
+
+      function storedLocale() {
+        try {
+          const value = window.localStorage.getItem("ci_portal_language");
+          return supportedLocales.includes(value) ? value : null;
+        } catch {
+          return null;
+        }
+      }
+
+      function applyLocale(locale) {
+        const selectedLocale = supportedLocales.includes(locale) ? locale : defaultLocale;
+        const messages = translations[selectedLocale];
+        document.documentElement.lang = selectedLocale;
+
+        document.querySelectorAll("[data-i18n]").forEach((element) => {
+          const key = element.getAttribute("data-i18n");
+          if (key && messages[key]) element.textContent = messages[key];
+        });
+
+        document.querySelectorAll("[data-i18n-aria-label]").forEach((element) => {
+          const key = element.getAttribute("data-i18n-aria-label");
+          if (key && messages[key]) element.setAttribute("aria-label", messages[key]);
+        });
+
+        const selector = document.querySelector("#language-selector");
+        if (selector) selector.value = selectedLocale;
+
+        try {
+          window.localStorage.setItem("ci_portal_language", selectedLocale);
+        } catch {
+          // The selected language still applies for this page when storage is unavailable.
+        }
+      }
+
+      const languageSelector = document.querySelector("#language-selector");
+      languageSelector?.addEventListener("change", (event) => {
+        applyLocale(event.target.value);
+      });
+
+      applyLocale(storedLocale() || browserLocale());
+    </script>
+  </body>
+</html>

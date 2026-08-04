@@ -1,6 +1,6 @@
 # Crochet Pattern Translator Project Status
 
-Last updated: 2026-08-03
+Last updated: 2026-08-04
 
 ## Current Version
 
@@ -22,9 +22,11 @@ RC42 completed the first local Engine Extraction by moving the CSV terminology /
 
 RC50A completed the custom uploader technical spike. RC50B replaced the native Streamlit file uploader with a production Streamlit Components V1 uploader while preserving the existing Python and domain-engine boundary. Physical iPhone Safari and Android Chrome Human UAT passed with no functional regression. RC50 remains local only; RC28 remains the production baseline.
 
-Phase A Brand Identity Foundation is complete. RC51 completed the first Phase B implementation. Physical-iPhone Human Visual UAT approved the Home Screen as the current baseline, including the custom uploader, privacy card, and equal secondary treatment for Replace and Remove. `Brand identity & UI/UI_SPEC.md` remains the authoritative Living Design Specification; this approval is not a final UI freeze. No product workflow or domain behavior was changed.
+Phase A Brand Identity Foundation is complete. RC51 completed the first Phase B implementation. Physical-iPhone Human Visual UAT approved the Pattern Translator Home Screen as the current baseline, including the custom uploader, privacy card, and equal secondary treatment for Replace and Remove. `Brand identity & UI/UI_SPEC.md` remains the authoritative Living Design Specification; this approval is not a final UI freeze. No product workflow or domain behavior was changed.
 
 RC52 completed the custom Select Area component and finalized the upload-to-crop workflow. Human UAT passed on iPhone Safari, Android Chrome, and Desktop Chrome with no remaining functional issues. RC52 is production-ready and frozen locally; RC28 remains the deployed production baseline until a separate deployment decision.
+
+The independent Astro Portal Skeleton is now the Crochet Intelligence platform entry point. Its architecture and Information Architecture are frozen after Human UAT. The Portal has been deployed independently to Railway and is now the primary platform entry point at `https://crochet-intelligence-portal-production.up.railway.app`. Pattern Translator and Stitch Translator are presented as equal tools. Platform Analytics is the current priority; Portal visual refinement and branding follow after it.
 
 ## Current Database
 
@@ -55,37 +57,40 @@ stitches_1_8e.csv
 
 ## Current Priorities
 
-Current Phase: RC52 complete; RC53 planning pending.
+Current Phase: Platform Analytics
 
 Purpose:
 
-- Preserve the approved RC51 Home Screen and RC52 custom-component baselines.
-- Keep RC52 frozen; defer cropper aesthetics, indicators, and animation work until after RC53 unless a functional regression is discovered.
-- Select the next Streamlit limitation only through a separately approved RC53 plan.
-- Defer broader UI standardisation until the pre-Landing Page integration stage.
+- Preserve the approved RC51 Pattern Translator Home Screen and frozen RC52 custom-component baseline.
+- Complete RC54 Phase 2 by implementing the remaining approved analytics events for Pattern Translator and Stitch Translator.
+- Reuse the browser-side analytics transport validated during RC54 Phase 1.
+- Keep Google Sheets Product Facts as a later RC54 milestone.
+- Defer Portal visual refinement until after analytics.
 
 Roadmap decisions:
 
 - Preserve RC28 as the current Railway production baseline and rollback target.
 - Keep the completed Engine Migration and Domain Layer extraction local until further approval.
-- Analytics cleanup is intentionally deferred.
-- Do not pursue `app_open` cleanup before the Landing Page.
-- Address human-visit analytics after the Landing Page exists, using browser analytics.
-- Frontend technology remains intentionally undecided until Phase 2 is complete; React has not been selected.
+- The existing Pattern Translator analytics remains unchanged while the separate platform analytics model is implemented.
+- Do not use the unreliable `app_open` event as the basis of platform visitor analytics.
+- Plausible Starter is integrated into the Portal. Human UAT confirmed Portal pageview tracking and the `portal_pattern_selected` custom event.
+- Browser-side analytics transport has been validated and will be reused by the translators.
+- Google Sheets Product Facts are intentionally not implemented yet.
 - Continue occasional testing with trusted users and incremental fixes based on real production usage.
 - Keep OCR, parser, overlay, and database changes small and evidence-based.
 - Preserve the shared database strategy with Crochet Stitch Translator.
 
-## Landing Page Strategy
+## Portal Status
 
-The Landing Page is a separate product from Pattern Translator.
+The Portal Skeleton is functionally complete and frozen. It is an independent Astro application, so Streamlit is no longer required for the platform entry page.
 
-The default assumption is that the Landing Page will not be built with Streamlit. It is expected to provide:
-
-- marketing;
-- human visitor analytics;
-- a CTA funnel;
-- browser analytics, currently planned with Plausible.
+- Information Architecture finalized after Human UAT.
+- Multilingual interface, configurable tool routing, inline Privacy & Terms, and contact email are functional.
+- Pattern Translator and Stitch Translator are presented equally.
+- Future Tool architecture is retained through configuration but hidden from the current UI.
+- The Portal is deployed independently to Railway and is now the primary platform entry point: `https://crochet-intelligence-portal-production.up.railway.app`.
+- RC54 Phase 1 integrated Plausible Starter into the Portal. Human UAT confirmed Portal pageview tracking and the `portal_pattern_selected` custom event.
+- Visual design and branding refinement are intentionally deferred until after platform analytics.
 
 ## Known Issues
 
@@ -104,7 +109,7 @@ The default assumption is that the Landing Page will not be built with Streamlit
 - OCR feedback: the existing running status is positioned above the disabled running-labelled action so feedback remains visible immediately on mobile.
 - Validation: Human UAT passed on physical iPhone Safari, Android Chrome, and Desktop Chrome with no remaining functional issues.
 - Architecture: the custom uploader and cropper replace targeted Streamlit UI limitations through supported component boundaries rather than framework workarounds. OCR, parser, translation, overlay, diagnostics, analytics, exports, coordinate conversion, and downstream engines remain unchanged.
-- Status: production-ready and frozen locally. Further visual polish is deferred until after RC53 unless a functional regression is found. No deployment was performed; RC28 remains the deployed production baseline.
+- Status: production-ready and frozen locally. Further cropper visual polish is deferred until after Platform Analytics unless a functional regression is found. No deployment was performed; RC28 remains the deployed production baseline.
 
 ### RC51 (completed locally)
 
@@ -113,9 +118,9 @@ The default assumption is that the Landing Page will not be built with Streamlit
 - Theme support: Light Mode and Dark Mode remain equally supported through the device colour-scheme preference.
 - Streamlit menu: the top-right overflow menu is suppressed with supported `client.toolbarMode = "minimal"` configuration rather than private-DOM CSS.
 - Radio control: the selected state uses supported Streamlit `theme.primaryColor = "#0F766E"`, avoiding private-DOM CSS and preserving native accessibility behavior.
-- Product approval: physical-iPhone Human Visual UAT passed. The Home Screen, custom uploader, privacy card, and identical secondary Replace / Remove controls are approved as the current baseline.
+- Product approval: physical-iPhone Human Visual UAT passed. The Pattern Translator Home Screen, custom uploader, privacy card, and identical secondary Replace / Remove controls are approved as the current baseline.
 - UI governance: the Product-driven workflow in `ENGINEERING_RULES.md` is now standard; implementation alone does not constitute visual approval.
-- Deferred: broader UI standardisation will be revisited before Landing Page integration. This baseline is not a final UI freeze.
+- Deferred: broader Pattern Translator UI standardisation will be revisited after Platform Analytics. This baseline is not a final UI freeze.
 - Boundary: no OCR, translation, overlay, diagnostics, analytics, export, engine, or workflow behavior was changed.
 - Status: RC51 complete locally. No deployment or GitHub push; RC28 remains the production baseline.
 
@@ -249,7 +254,7 @@ The default assumption is that the Landing Page will not be built with Streamlit
 - Status: completed locally.
 - Validation: passed local developer validation and Human UAT.
 - Release handling: intentionally local only. No commit, no push, and no Streamlit Community Cloud deployment for RC26.
-- Analytics decision at RC26: restored the original `app_open` semantics. The current Phase 2 decision supersedes the earlier platform-migration timing assumption: `app_open` cleanup is deferred until the Landing Page can provide browser analytics.
+- Analytics decision at RC26: restored the original `app_open` semantics. The earlier deferral has now ended: Platform Analytics is the current priority, and the unreliable `app_open` event will not be used as its visitor model.
 
 ### RC27
 
@@ -292,17 +297,18 @@ The default assumption is that the Landing Page will not be built with Streamlit
 
 ## Future Work
 
-After Phase 2:
+Current platform sequence:
 
-1. Build the Landing Page.
-2. Migrate Stitch Translator to Railway.
-3. Introduce shared infrastructure improvements when appropriate.
-4. Evaluate future frontend frameworks only if Phase 2 demonstrates that Streamlit is the limiting factor.
+1. Implement RC54 Phase 2 translator analytics events using the validated browser-side transport.
+2. Add Google Sheets Product Facts in a later RC54 milestone.
+3. Refine Portal visual design and branding.
+4. Migrate Stitch Translator to Railway when separately approved.
+5. Introduce shared infrastructure improvements when appropriate.
 
 Additional deferred work:
 
 - Improve discoverability of editable line-by-line translation before TXT download. The feature already exists, but users may not realise the translation text can be edited before downloading. Consider clearer UI guidance in a future UX enhancement; implementation is not scheduled now.
-- Revisit human-visit and `app_open` analytics after the Landing Page browser-analytics foundation exists.
+- Replace reliance on `app_open` with the approved platform visitor and activity analytics model.
 - Review the Google Feedback Form questions and workflow.
 - Reuse the improved analytics and feedback design when implementing Stitch Translator analytics.
 

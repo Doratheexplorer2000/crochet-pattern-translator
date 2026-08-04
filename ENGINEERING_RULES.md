@@ -387,3 +387,11 @@ Do not update `UI_SPEC.md` immediately after implementation. Update it only when
 Product content remains under Product Owner control. This includes helper text, instructional text, upload hints, warnings, button wording, and marketing copy. Product decisions may override earlier `UI_SPEC.md` recommendations after Human Visual UAT.
 
 Light Mode and Dark Mode are equally supported. Mobile UI evidence must come from physical mobile devices or equivalent mobile behaviour. Desktop browsers resized to mobile widths may be used only for responsive layout verification and must not be presented as Human Mobile UAT evidence.
+
+### Portal Skeleton Baseline
+
+The Crochet Intelligence Portal Skeleton architecture and Information Architecture are frozen after Human UAT. Preserve this baseline unless a new Goal, Success Criteria, and Out of Scope explicitly justify a structural change.
+
+- Follow the approved sequence: Platform Analytics first, then Portal visual refinement and branding.
+- Add future tools through the Portal's tool configuration rather than redesigning its Information Architecture.
+- Describe analytics capabilities only after validation is complete. RC54 Phase 1 validated Portal Plausible pageviews and the `portal_pattern_selected` event; remaining translator events and Google Sheets Product Facts must remain documented as planned until separately implemented and validated.

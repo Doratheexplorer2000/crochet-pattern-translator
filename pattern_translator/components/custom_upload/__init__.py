@@ -24,11 +24,12 @@ _MAX_UPLOAD_BYTES = 25 * 1024 * 1024
 class UploadedImageBytes(BytesIO):
     """BytesIO upload adapter with public file metadata."""
 
-    def __init__(self, data: bytes, name: str, mime_type: str) -> None:
+    def __init__(self, data: bytes, name: str, mime_type: str, action_id: str = "") -> None:
         super().__init__(data)
         self.name = name
         self.type = mime_type
         self.size = len(data)
+        self.action_id = action_id
 
 
 def _decode_upload_payload(
@@ -78,7 +79,12 @@ def _decode_upload_payload(
     except (UnidentifiedImageError, OSError, ValueError):
         return None, message("error_invalid"), False
 
-    return UploadedImageBytes(data, name, mime_type), None, False
+    return UploadedImageBytes(
+        data,
+        name,
+        mime_type,
+        action_id=str(payload.get("action_id") or ""),
+    ), None, False
 
 
 def custom_image_uploader(
