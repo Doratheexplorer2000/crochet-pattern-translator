@@ -36,6 +36,13 @@ const plausibleScriptUrl = import.meta.env.PUBLIC_PLAUSIBLE_SCRIPT_URL?.trim() |
     <script is:inline define:vars={{ translations }}>
       const supportedLocales = ["en", "zh-Hant", "zh-Hans", "ja"];
       const defaultLocale = "en";
+      const languageEvents = {
+        en: "language_en",
+        "zh-Hant": "language_zh_hant",
+        "zh-Hans": "language_zh_hans",
+        ja: "language_ja",
+      };
+      let lastTrackedLanguageChange = "";
 
       function browserLocale() {
         const language = navigator.language.toLowerCase();
@@ -81,9 +88,25 @@ const plausibleScriptUrl = import.meta.env.PUBLIC_PLAUSIBLE_SCRIPT_URL?.trim() |
         }
       }
 
+      function trackLanguageChange(locale) {
+        const eventName = languageEvents[locale];
+        if (!eventName || eventName === lastTrackedLanguageChange) return;
+        lastTrackedLanguageChange = eventName;
+
+        try {
+          if (typeof window.plausible === "function") {
+            window.plausible(eventName);
+          }
+        } catch {
+          // Analytics must never affect rendering, language selection, or navigation.
+        }
+      }
+
       const languageSelector = document.querySelector("#language-selector");
       languageSelector?.addEventListener("change", (event) => {
-        applyLocale(event.target.value);
+        const selectedLocale = event.target.value;
+        applyLocale(selectedLocale);
+        trackLanguageChange(selectedLocale);
       });
 
       applyLocale(storedLocale() || browserLocale());

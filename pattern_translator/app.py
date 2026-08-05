@@ -34,7 +34,7 @@ from crochet_intelligence.analytics import (
 )
 from pattern_translator.components.custom_upload import custom_image_uploader
 from pattern_translator.components.custom_cropper import custom_select_area
-from pattern_translator.components.plausible_event import emit_plausible_event
+from pattern_translator.components.plausible_event import emit_plausible_event, plausible_link_button
 from pattern_translator.engine import terminology as terminology_engine
 from pattern_translator.engine import line_translation as line_translation_engine
 from pattern_translator.engine import diagnostic_report as diagnostic_report_engine
@@ -2161,6 +2161,7 @@ def download_button_rc3(
     key: str,
     success_message: Optional[str] = None,
     analytics_event_type: Optional[str] = None,
+    plausible_event_name: Optional[str] = None,
     prevent_rerun: bool = False,
 ):
     """Render a download button and show a shared public confirmation after click."""
@@ -2171,6 +2172,8 @@ def download_button_rc3(
                 track_analytics_event(analytics_event_type)
             except Exception as exc:
                 print(f"[analytics] download event failed: {exc}")
+        if plausible_event_name:
+            queue_plausible_event(plausible_event_name)
 
     try:
         clicked = st.download_button(
@@ -2221,6 +2224,8 @@ def init_rc3_state():
     st.session_state.setdefault("duplicate_ocr_run_ignored_count", 0)
     st.session_state.setdefault("debug_report_ready", False)
     st.session_state.setdefault("last_successful_download_key", None)
+    st.session_state.setdefault("pending_plausible_events", [])
+    st.session_state.setdefault("plausible_event_counter", 0)
     st.session_state.setdefault("rc10b_diagnostic_events", [])
     st.session_state.setdefault("rc10b_image_signature_history", [])
     st.session_state.setdefault("rc10b_last_image_present", False)
@@ -2503,9 +2508,40 @@ def track_analytics_event(event_type: str, **fields) -> None:
     )
 
 
+def next_plausible_event_id(event_name: str) -> str:
+    st.session_state["plausible_event_counter"] = st.session_state.get("plausible_event_counter", 0) + 1
+    counter = st.session_state["plausible_event_counter"]
+    return f"{event_name}:{counter}:{time.time_ns()}"
+
+
+def queue_plausible_event(event_name: str) -> None:
+    if not event_name:
+        return
+    pending_events = st.session_state.setdefault("pending_plausible_events", [])
+    pending_events.append({
+        "event_name": event_name,
+        "event_id": next_plausible_event_id(event_name),
+    })
+
+
+def emit_pending_plausible_events() -> None:
+    pending_events = list(st.session_state.get("pending_plausible_events") or [])
+    if not pending_events:
+        return
+    for index, event in enumerate(pending_events):
+        emit_plausible_event(
+            str(event.get("event_name") or ""),
+            str(event.get("event_id") or ""),
+            key=f"plausible_event_{index}",
+        )
+    st.session_state["pending_plausible_events"] = []
+
+
 if not st.session_state.get("analytics_app_open_logged"):
     track_analytics_event("app_open")
     st.session_state["analytics_app_open_logged"] = True
+
+emit_pending_plausible_events()
 
 
 LANGUAGE_OPTION_LABEL_KEYS = {
@@ -3234,6 +3270,7 @@ if image_file is not None:
                     translation_time_sec=round(float(translation_seconds), 3),
                     session_translation_no=translation_no,
                 )
+                queue_plausible_event("pattern_translation_completed")
                 increment_session_translation_no(st.session_state)
                 # Redraw the button from the cleared busy state after storing the result.
                 st.rerun()
@@ -3295,6 +3332,7 @@ if image_file is not None:
                 mime="image/png",
                 key="download_overlay_png",
                 analytics_event_type="download_png",
+                plausible_event_name="pattern_png_downloaded",
             )
         elif raw_ocr_text.strip():
             st.info(f"**{t('no_crochet_pattern_title')}**\n\n{t('no_crochet_pattern_body')}")
@@ -3309,6 +3347,7 @@ if image_file is not None:
                 mime="text/plain",
                 key="download_overlay_translation_txt",
                 analytics_event_type="download_txt",
+                plausible_event_name="pattern_txt_downloaded",
             )
         else:
             st.warning(t("no_ocr_lines"))
@@ -3328,7 +3367,14 @@ if image_file is not None:
         )
         st.markdown(f"<div class='report-action'>{html.escape(t('report_feedback_action'))}</div>", unsafe_allow_html=True)
         st.markdown(f"<div class='report-helper'>{html.escape(t('report_feedback_helper'))}</div>", unsafe_allow_html=True)
-        st.link_button(t("send_feedback"), FEEDBACK_FORM_URL)
+        feedback_link_rendered = plausible_link_button(
+            t("send_feedback"),
+            FEEDBACK_FORM_URL,
+            "pattern_feedback_clicked",
+            key="pattern_feedback_clicked_link",
+        )
+        if not feedback_link_rendered:
+            st.link_button(t("send_feedback"), FEEDBACK_FORM_URL)
 
         if DEBUG_MODE and timings:
             with st.expander("Debug timings", expanded=False):

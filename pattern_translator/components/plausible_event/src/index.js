@@ -80,9 +80,45 @@ async function emitEvent(args) {
   }
 }
 
+function linkEventId(baseEventId) {
+  return `${baseEventId}:${Date.now()}:${Math.random().toString(16).slice(2)}`;
+}
+
+function renderLink(args) {
+  const href = String(args.link_href || "");
+  const label = String(args.link_label || "");
+  if (!href || !label) {
+    document.body.innerHTML = "";
+    Streamlit.setFrameHeight(0);
+    return false;
+  }
+
+  document.body.innerHTML = "";
+  const link = document.createElement("a");
+  link.className = "ci-plausible-link-button";
+  link.href = href;
+  link.target = "_blank";
+  link.rel = "noopener noreferrer";
+  link.textContent = label;
+  link.addEventListener("click", () => {
+    void emitEvent({
+      ...args,
+      event_id: linkEventId(String(args.event_id || "link")),
+    });
+  });
+  document.body.appendChild(link);
+  Streamlit.setFrameHeight(48);
+  void loadTracker(String(args.script_url || ""));
+  return true;
+}
+
 function onRender(event) {
+  const args = event.detail.args || {};
+  if (renderLink(args)) {
+    return;
+  }
   Streamlit.setFrameHeight(0);
-  void emitEvent(event.detail.args || {});
+  void emitEvent(args);
 }
 
 Streamlit.events.addEventListener(Streamlit.RENDER_EVENT, onRender);

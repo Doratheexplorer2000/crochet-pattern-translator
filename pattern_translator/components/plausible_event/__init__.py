@@ -29,3 +29,24 @@ def emit_plausible_event(event_name: str, event_id: str, *, key: str) -> None:
     except Exception:
         # Analytics must never affect application behavior.
         return
+
+
+def plausible_link_button(label: str, url: str, event_name: str, *, key: str) -> bool:
+    """Render a browser-only tracked link button without triggering Streamlit reruns."""
+    script_url = os.getenv("PUBLIC_PLAUSIBLE_SCRIPT_URL", "").strip()
+    if not script_url or not label or not url or not event_name:
+        return False
+    try:
+        _plausible_event_component(
+            event_name=event_name,
+            event_id=key,
+            script_url=script_url,
+            link_label=label,
+            link_href=url,
+            key=key,
+            default=None,
+        )
+        return True
+    except Exception:
+        # Analytics must never affect application behavior.
+        return False
