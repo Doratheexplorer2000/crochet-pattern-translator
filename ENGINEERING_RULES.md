@@ -130,6 +130,8 @@ If testing cannot be performed, clearly state:
 
 "Human verification required."
 
+For custom frontend components and related UI/UX changes, approval requires Human UAT on physical iPhone, physical Android, and Desktop. Desktop browser validation alone is insufficient.
+
 ---
 
 # 7. RC Scope
@@ -301,3 +303,95 @@ Railway deployment
 Production validation
 
 Streamlit Community Cloud may remain as a temporary backup during migration, but should not be treated as the primary production platform unless explicitly reinstated.
+
+---
+
+# 18. Migration Safety
+
+Architecture migration work must preserve the current production baseline as a rollback target.
+
+For the approved post-Streamlit migration:
+
+- begin locally only;
+- do not push migration work to GitHub until the local baseline and first extraction step have been reviewed;
+- do not deploy migration builds to Railway until explicitly approved;
+- keep RC28 Railway production fully recoverable;
+- separate business logic from Streamlit before replacing the frontend;
+- do not rewrite business logic that has already passed Human UAT and regression simply because the presentation layer changes;
+- prefer Git tags and local branches over duplicating the repository.
+
+Migration commits should be small and organized by reversible engineering step, such as baseline capture, business-logic extraction, API introduction, frontend prototype, and deployment spike.
+
+---
+
+# 19. Goal-first Engineering Workflow
+
+Before starting any RC, feature, refactor, migration, architectural change, or engineering task larger than a small bug fix, define and agree on:
+
+Goal
+
+- What product or business problem is being solved?
+
+Success Criteria
+
+- What observable outcome determines success?
+
+Out of Scope
+
+- What this work is explicitly not intended to solve.
+
+Do not begin implementation until these three items are agreed.
+
+At the start of every new RC or major engineering discussion, ChatGPT or Codex should restate the Goal, Success Criteria, and Out of Scope before proposing implementation.
+
+If evidence discovered during implementation shows that the agreed Goal cannot realistically be achieved, stop and reassess before continuing.
+
+Do not continue an architectural refactor solely because it improves code quality when it no longer serves the agreed Goal.
+
+Architectural improvements are valuable, but they must not be presented as achieving the original Goal unless the agreed Success Criteria are actually met.
+
+---
+
+# 20. UI / Brand Development Workflow
+
+Engineering quality remains the first priority. After engineering implementation is complete, UI decisions follow a Product-driven review process.
+
+Use this workflow for new UI components and substantial visual changes:
+
+Art Director
+↓
+UI_SPEC.md (Approved Design Specification)
+↓
+Codex Implementation
+↓
+Human Visual UAT
+↓
+Product Owner Review
+↓
+Approval
+↓
+Update UI_SPEC.md (if required)
+↓
+Commit
+
+`Brand identity & UI/UI_SPEC.md` is a Living Design Specification, but it represents approved design decisions. Implementation alone does not constitute approval.
+
+Do not update `UI_SPEC.md` immediately after implementation. Update it only when:
+
+- Human Visual UAT has been completed;
+- the Product Owner has explicitly approved the visual result; and
+- the approved implementation differs from the current specification.
+
+`UI_SPEC.md` defines the colour system, typography, spacing, component styling, layout principles, and visual hierarchy.
+
+Product content remains under Product Owner control. This includes helper text, instructional text, upload hints, warnings, button wording, and marketing copy. Product decisions may override earlier `UI_SPEC.md` recommendations after Human Visual UAT.
+
+Light Mode and Dark Mode are equally supported. Mobile UI evidence must come from physical mobile devices or equivalent mobile behaviour. Desktop browsers resized to mobile widths may be used only for responsive layout verification and must not be presented as Human Mobile UAT evidence.
+
+### Portal Skeleton Baseline
+
+The Crochet Intelligence Portal Skeleton architecture and Information Architecture are frozen after Human UAT. Preserve this baseline unless a new Goal, Success Criteria, and Out of Scope explicitly justify a structural change.
+
+- Follow the approved sequence: Platform Analytics first, then Portal visual refinement and branding.
+- Add future tools through the Portal's tool configuration rather than redesigning its Information Architecture.
+- Describe analytics capabilities only after validation is complete. RC54 Phase 1 validated Portal Plausible pageviews and the `portal_pattern_selected` event; remaining translator events and Google Sheets Product Facts must remain documented as planned until separately implemented and validated.

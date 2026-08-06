@@ -1,0 +1,25 @@
+---
+import AdPlaceholder from "../components/AdPlaceholder.astro";
+import Footer from "../components/Footer.astro";
+import Header from "../components/Header.astro";
+import Hero from "../components/Hero.astro";
+import ToolGrid from "../components/ToolGrid.astro";
+import { getToolDefinitions } from "../data/tools";
+import PortalLayout from "../layouts/PortalLayout.astro";
+
+const patternTranslatorUrl = import.meta.env.PUBLIC_PATTERN_TRANSLATOR_URL || "http://localhost:8501";
+const stitchTranslatorUrl = import.meta.env.PUBLIC_STITCH_TRANSLATOR_URL || "http://localhost:8502";
+const showFutureTools = import.meta.env.PUBLIC_SHOW_FUTURE_TOOLS === "true";
+const showAdBar = import.meta.env.PUBLIC_SHOW_AD_BAR === "true";
+const tools = getToolDefinitions(patternTranslatorUrl, stitchTranslatorUrl, showFutureTools);
+---
+
+<PortalLayout title="Crochet Intelligence Portal">
+  <Header />
+  <main id="main-content">
+    <Hero />
+    {showAdBar && <AdPlaceholder />}
+    <ToolGrid tools={tools} />
+  </main>
+  <Footer />
+</PortalLayout>

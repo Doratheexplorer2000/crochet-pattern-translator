@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="stylesheet" href="./styles.css" />
+    <title>Image upload</title>
+  </head>
+  <body>
+    <main id="upload-root" class="upload-root">
+      <input
+        id="image-input"
+        type="file"
+        accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"
+        aria-describedby="upload-error"
+        hidden
+      />
+      <section id="empty-state" class="upload-panel empty-state">
+        <p id="upload-instruction" class="upload-instruction"></p>
+        <button
+          id="choose-button"
+          class="primary-action"
+          type="button"
+          aria-describedby="drop-hint upload-error"
+        ></button>
+        <p id="drop-hint" class="drop-hint"></p>
+      </section>
+      <section id="reading-state" class="upload-panel reading-state" hidden>
+        <p id="reading-text" class="status-text" role="status" aria-live="polite"></p>
+      </section>
+      <section id="selected-state" class="upload-panel selected-state" hidden>
+        <div class="selected-copy">
+          <p id="selected-label" class="selected-label"></p>
+          <p id="file-name" class="file-name" aria-live="polite"></p>
+        </div>
+        <div class="selected-actions">
+          <button id="replace-button" class="secondary-action" type="button"></button>
+          <button id="remove-button" class="secondary-action" type="button"></button>
+        </div>
+      </section>
+      <p id="upload-error" class="upload-error" role="alert" aria-live="assertive"></p>
+    </main>
+    <script src="./bundle.js"></script>
+  </body>
+</html>

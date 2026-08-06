@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+    <link rel="stylesheet" href="./styles.css" />
+    <title>Select area</title>
+  </head>
+  <body>
+    <main id="cropper-root" class="cropper-root">
+      <section id="workspace" class="workspace">
+        <img id="source-image" alt="" draggable="false" />
+        <div
+          id="selection"
+          class="selection"
+          role="group"
+          tabindex="0"
+        >
+          <span class="edge-line edge-line-top" aria-hidden="true"></span>
+          <span class="edge-line edge-line-right" aria-hidden="true"></span>
+          <span class="edge-line edge-line-bottom" aria-hidden="true"></span>
+          <span class="edge-line edge-line-left" aria-hidden="true"></span>
+          <button class="edge-handle edge-top" data-edge="top" type="button"></button>
+          <button class="edge-handle edge-right" data-edge="right" type="button"></button>
+          <button class="edge-handle edge-bottom" data-edge="bottom" type="button"></button>
+          <button class="edge-handle edge-left" data-edge="left" type="button"></button>
+        </div>
+
+        <div id="precision-pad" class="precision-pad" draggable="false">
+          <button id="move-up" class="arrow arrow-up" data-direction="up" type="button" draggable="false">&#8593;</button>
+          <button id="move-left" class="arrow arrow-left" data-direction="left" type="button" draggable="false">&#8592;</button>
+          <button id="move-pad" class="pad-centre" type="button" draggable="false"></button>
+          <button id="move-right" class="arrow arrow-right" data-direction="right" type="button" draggable="false">&#8594;</button>
+          <button id="move-down" class="arrow arrow-down" data-direction="down" type="button" draggable="false">&#8595;</button>
+        </div>
+      </section>
+
+      <div class="action-bar">
+        <button id="cancel-button" class="secondary-action" type="button"></button>
+        <button id="reset-button" class="secondary-action" type="button"></button>
+        <button id="confirm-button" class="primary-action" type="button"></button>
+      </div>
+    </main>
+    <script src="./bundle.js"></script>
+  </body>
+</html>

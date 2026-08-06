@@ -1,0 +1,14 @@
+{
+  "name": "crochet-custom-select-area",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "build": "esbuild src/index.js --bundle --minify --outfile=frontend/bundle.js"
+  },
+  "dependencies": {
+    "streamlit-component-lib": "2.0.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.8"
+  }
+}

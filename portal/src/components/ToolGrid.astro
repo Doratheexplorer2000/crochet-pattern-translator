@@ -1,0 +1,55 @@
+---
+import type { ToolDefinition } from "../data/tools";
+
+type Props = {
+  tools: ToolDefinition[];
+};
+
+const { tools } = Astro.props;
+
+const fallbackContent = {
+  pattern: {
+    name: "Pattern Translator",
+    description: "Translate written crochet patterns from an uploaded image.",
+    action: "Open Pattern Translator",
+  },
+  stitch: {
+    name: "Stitch Translator",
+    description: "Look up crochet stitch names, terminology, and tutorials.",
+    action: "Open Stitch Translator",
+  },
+  future: {
+    name: "Future Tool",
+    description: "Reserved for a future Crochet Intelligence tool.",
+    action: "Coming later",
+  },
+} as const;
+---
+
+<section class="page-shell section-block" data-i18n-aria-label="tools.ariaLabel" aria-label="Crochet tools">
+  <div class="tool-grid">
+    {tools.filter((tool) => tool.visible).map((tool) => (
+      <article class:list={["tool-card", { "tool-card--future": !tool.available }]} data-tool-id={tool.id}>
+        <div>
+          <h3 data-i18n={`tools.${tool.translationKey}.name`}>{fallbackContent[tool.translationKey].name}</h3>
+          <p data-i18n={`tools.${tool.translationKey}.description`}>
+            {fallbackContent[tool.translationKey].description}
+          </p>
+        </div>
+        {tool.available && tool.href ? (
+          <a
+            class:list={["button-link", tool.analyticsEvent && `plausible-event-name=${tool.analyticsEvent}`]}
+            href={tool.href}
+            data-i18n={`tools.${tool.translationKey}.action`}
+          >
+            {fallbackContent[tool.translationKey].action}
+          </a>
+        ) : (
+          <button type="button" disabled data-i18n={`tools.${tool.translationKey}.action`}>
+            {fallbackContent[tool.translationKey].action}
+          </button>
+        )}
+      </article>
+    ))}
+  </div>
+</section>

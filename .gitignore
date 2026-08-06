@@ -8,3 +8,6 @@ pycache/
 .vscode/
 .idea/
 .env
+/pattern_translator/components/custom_upload/node_modules/
+/pattern_translator/components/custom_cropper/node_modules/
+/pattern_translator/components/plausible_event/node_modules/

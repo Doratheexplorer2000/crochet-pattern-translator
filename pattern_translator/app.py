@@ -17,10 +17,9 @@ import hashlib
 import math
 import tempfile
 import time
-import sys
 import unicodedata
 from pathlib import Path
-from typing import Callable, Dict, List, Tuple, Optional
+from typing import Dict, List, Tuple, Optional
 
 import numpy as np
 import pandas as pd
@@ -33,6 +32,20 @@ from crochet_intelligence.analytics import (
     increment_session_translation_no,
     track_event as analytics_track_event,
 )
+from crochet_intelligence.plausible_bridge import (
+    mount_plausible_bridge,
+    stage_plausible_event,
+)
+from pattern_translator.components.custom_upload import custom_image_uploader
+from pattern_translator.components.custom_cropper import custom_select_area
+from pattern_translator.components.plausible_event import emit_plausible_event, plausible_link_button
+from pattern_translator.engine import terminology as terminology_engine
+from pattern_translator.engine import line_translation as line_translation_engine
+from pattern_translator.engine import diagnostic_report as diagnostic_report_engine
+from pattern_translator.engine import overlay as overlay_engine
+from pattern_translator.engine import pattern_document as pattern_document_engine
+from pattern_translator.engine import ocr_lines as ocr_lines_engine
+from pattern_translator.engine import ocr_cleanup as ocr_cleanup_engine
 
 APP_VERSION = "Pattern OCR Translator (Beta RC26)"
 APP_DIR = Path(__file__).resolve().parent
@@ -43,7 +56,6 @@ FALLBACK_CSV = KNOWLEDGE_BASE_DIR / "releases" / "database" / "stitches_1_8e.csv
 DEBUG_MODE = os.getenv("CROCHET_DEBUG", "").strip().lower() in {"1", "true", "yes", "on"}
 FEEDBACK_FORM_URL = "https://docs.google.com/forms/d/e/1FAIpQLScoDrN0xsyOg800O8Pw7aXAa5GREQIU-RmxlmXIlBOE7y_Q_w/viewform"
 SELECT_AREA_PREVIEW_WIDTH = 360
-SELECT_AREA_CROPPER_STROKE_WIDTH = 4
 
 TRANSLATION_PROFILE: Optional[Dict[str, Dict[str, float]]] = None
 
@@ -79,131 +91,363 @@ def profile_function(time_name: str, count_name: str):
         return wrapped
     return decorator
 
+
+terminology_engine.configure_profile_context(
+    lambda: TRANSLATION_PROFILE,
+    profile_count,
+    profile_add_time,
+)
+line_translation_engine.configure_profile_context(
+    lambda: TRANSLATION_PROFILE,
+    profile_count,
+    profile_add_time,
+)
+overlay_engine.configure_profile_context(
+    lambda: TRANSLATION_PROFILE,
+    profile_count,
+    profile_add_time,
+)
+ocr_lines_engine.configure_profile_context(
+    lambda: TRANSLATION_PROFILE,
+    profile_count,
+    profile_add_time,
+)
+
 st.set_page_config(page_title="Crochet Translator", page_icon="🧶", layout="centered")
 
 st.markdown(
     """
 <style>
-h1, h2, h3 { color: #5f73a8 !important; }
-.block-container { padding-top: 1.5rem; }
-h1 { margin-bottom: 0.15rem !important; line-height: 1.12 !important; }
+:root {
+    --ci-teal-700: #0F766E;
+    --ci-teal-600: #13867D;
+    --ci-teal-100: #DDEDEA;
+    --ci-teal-050: #EAF4F2;
+    --ci-terracotta-700: #C2613F;
+    --ci-terracotta-500: #D97A5A;
+    --ci-terracotta-100: #F6E8E3;
+    --ci-bg: #FAF9F7;
+    --ci-surface: #FFFFFF;
+    --ci-surface-subtle: #F2EEE9;
+    --ci-border: #E7E3DE;
+    --ci-text-primary: #1E1E20;
+    --ci-text-secondary: #55565A;
+    --ci-text-muted: #8A8D91;
+    --ci-text-on-primary: #FFFFFF;
+    --ci-primary: #0F766E;
+    --ci-primary-hover: #13867D;
+    --ci-primary-soft: #DDEDEA;
+    --ci-success: #2E7D5B;
+    --ci-warning: #D99A24;
+    --ci-error: #D64545;
+    --ci-info: #3A7BD5;
+    --ci-focus-ring: rgba(15, 118, 110, 0.28);
+    --ci-font: "Noto Sans TC", "Noto Sans SC", "Noto Sans JP", "Noto Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --ci-radius-sm: 8px;
+    --ci-radius-md: 12px;
+    --ci-radius-lg: 16px;
+    --ci-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+html, body, .stApp {
+    font-family: var(--ci-font);
+    letter-spacing: 0;
+}
+
+body, .stApp, [data-testid="stAppViewContainer"] {
+    background: var(--ci-bg);
+    color: var(--ci-text-primary);
+}
+
+.block-container {
+    width: 100%;
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 24px 20px 32px;
+}
+
+h1, h2, h3 { color: var(--ci-text-primary) !important; }
+h1 {
+    color: var(--ci-teal-700) !important;
+    font-size: 30px !important;
+    line-height: 36px !important;
+    font-weight: 700 !important;
+    margin: 0 !important;
+    padding: 20px 0 4px !important;
+}
+h2 {
+    font-size: 22px !important;
+    line-height: 28px !important;
+    font-weight: 600 !important;
+}
+h3 {
+    font-size: 18px !important;
+    line-height: 26px !important;
+    font-weight: 600 !important;
+}
 h1 a[href^="#"], h1 .anchor-link { display: none !important; }
-h1 + div[data-testid="stCaptionContainer"] { margin-top: -0.25rem; }
-div[data-testid="stCaptionContainer"] { margin-bottom: 0.35rem; }
-.small-note { font-size: 0.9rem; opacity: 0.82; margin: 0.15rem 0 0.35rem; line-height: 1.35; }
+h1 + div[data-testid="stCaptionContainer"] { margin-top: 0; }
+div[data-testid="stCaptionContainer"] {
+    color: var(--ci-text-muted);
+    font-size: 14px;
+    line-height: 20px;
+    margin-bottom: 8px;
+    opacity: 1;
+}
+p, label, li { line-height: 24px; }
+.small-note {
+    color: var(--ci-text-secondary);
+    font-size: 14px;
+    line-height: 20px;
+    margin: 4px 0 8px;
+}
 .warning-box {
-    border: 1px solid rgba(180, 130, 60, 0.35);
-    border-radius: 0.6rem;
-    padding: 0.55rem 0.65rem;
-    background: rgba(180, 130, 60, 0.08);
-    font-size: 0.9rem;
-    line-height: 1.35;
+    border: 1px solid rgba(217, 154, 36, 0.42);
+    border-radius: var(--ci-radius-md);
+    padding: 12px 16px;
+    background: rgba(217, 154, 36, 0.09);
+    color: var(--ci-text-primary);
+    font-size: 14px;
+    line-height: 21px;
+}
+.privacy-box {
+    color: var(--ci-text-secondary);
+    font-size: 14px;
+    line-height: 21px;
 }
 .good-box {
-    border: 1px solid rgba(80, 150, 100, 0.35);
-    border-radius: 0.6rem;
-    padding: 0.75rem;
-    background: rgba(80, 150, 100, 0.08);
+    border: 1px solid rgba(46, 125, 91, 0.34);
+    border-radius: var(--ci-radius-md);
+    padding: 12px 16px;
+    background: rgba(46, 125, 91, 0.08);
 }
-div[data-testid="stExpander"] { margin-bottom: 0.45rem; }
-div[data-testid="stExpander"] details { border-radius: 0.5rem; }
-div[data-testid="stExpander"] summary { min-height: 2rem; }
-div[data-testid="stExpander"] div[data-testid="stMarkdownContainer"] p { margin-bottom: 0.25rem; }
-div[data-testid="stVerticalBlock"] > div { gap: 0.45rem; }
-div[data-testid="stSelectbox"], div[data-testid="stRadio"], div[data-testid="stFileUploader"] { margin-bottom: 0.15rem; }
+div[data-testid="stExpander"] { margin-bottom: 8px; }
+div[data-testid="stExpander"] details {
+    border: 1px solid var(--ci-border);
+    border-radius: var(--ci-radius-md);
+    background: var(--ci-surface);
+    box-shadow: var(--ci-shadow-sm);
+    overflow: hidden;
+}
+div[data-testid="stExpander"] summary {
+    min-height: 56px;
+    padding: 0 16px;
+    color: var(--ci-text-primary);
+    font-size: 16px;
+    font-weight: 500;
+}
+div[data-testid="stExpander"] div[data-testid="stMarkdownContainer"] p { margin-bottom: 8px; }
+div[data-testid="stExpander"] div[data-testid="stMarkdownContainer"] { margin-bottom: 0 !important; }
+div[data-testid="stVerticalBlock"] > div { gap: 8px; }
+div[data-testid="stSelectbox"], div[data-testid="stRadio"] { margin-bottom: 4px; }
 div[data-testid="stHorizontalBlock"] div[data-testid="stSelectbox"] { margin-bottom: 0; }
 div[data-testid="stHorizontalBlock"] div[data-testid="stSelectbox"] label { min-height: 0; }
-div[data-testid="stFileUploader"] section {
-    border-color: rgba(95, 115, 168, 0.28);
-    background: rgba(95, 115, 168, 0.045);
-    border-radius: 0.55rem;
+
+div[data-baseweb="select"] > div,
+div[role="radiogroup"] label,
+div[data-testid="stTextArea"] textarea,
+div[data-testid="stTextInput"] input {
+    border-color: var(--ci-border);
+    border-radius: var(--ci-radius-md);
+    background: var(--ci-surface);
+    color: var(--ci-text-primary);
 }
-div[data-testid="stFileUploader"] section:hover {
-    border-color: rgba(95, 115, 168, 0.48);
-    background: rgba(95, 115, 168, 0.07);
+
+label[data-testid="stWidgetLabel"],
+label[data-testid="stWidgetLabel"] p,
+div[role="radiogroup"] label,
+div[role="radiogroup"] label p,
+div[data-testid="stCheckbox"] label,
+div[data-testid="stCheckbox"] label p,
+div[data-baseweb="select"] [value] {
+    color: var(--ci-text-primary) !important;
+}
+
+[role="listbox"] {
+    border-color: var(--ci-border) !important;
+    background: var(--ci-surface) !important;
+}
+
+[role="listbox"] [role="option"] {
+    color: var(--ci-text-primary) !important;
+}
+
+[role="listbox"] [role="option"][aria-selected="true"] {
+    background: var(--ci-surface-subtle) !important;
+}
+
+button:focus-visible,
+a:focus-visible,
+textarea:focus-visible,
+summary:focus-visible,
+[role="radio"]:focus-visible,
+div[data-testid="stTextInput"] input:focus-visible {
+    outline: 3px solid var(--ci-focus-ring) !important;
+    outline-offset: 2px !important;
+}
+
+div[data-baseweb="select"]:focus-within > div {
+    outline: 3px solid var(--ci-focus-ring) !important;
+    outline-offset: 2px !important;
+}
+
+div[data-testid="stButton"] > button,
+div[data-testid="stDownloadButton"] > button,
+div[data-testid="stLinkButton"] > a {
+    min-height: 52px;
+    padding: 0 20px;
+    border: 1px solid var(--ci-primary);
+    border-radius: var(--ci-radius-md);
+    background: transparent;
+    color: var(--ci-primary);
+    font-size: 16px;
+    line-height: 24px;
+    font-weight: 600;
+    box-shadow: none;
+}
+
+div[data-testid="stButton"] > button[kind="primary"] {
+    min-height: 56px;
+    padding: 0 24px;
+    border-color: var(--ci-primary);
+    background: var(--ci-primary);
+    color: var(--ci-text-on-primary);
+    font-size: 17px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+    div[data-testid="stButton"] > button:hover,
+    div[data-testid="stDownloadButton"] > button:hover,
+    div[data-testid="stLinkButton"] > a:hover {
+        border-color: var(--ci-primary-hover);
+        background: var(--ci-primary-soft);
+        color: var(--ci-primary-hover);
+    }
+    div[data-testid="stButton"] > button[kind="primary"]:hover {
+        border-color: var(--ci-primary-hover);
+        background: var(--ci-primary-hover);
+        color: var(--ci-text-on-primary);
+    }
+}
+
+div[data-testid="stButton"] > button:active,
+div[data-testid="stDownloadButton"] > button:active,
+div[data-testid="stLinkButton"] > a:active {
+    transform: translateY(1px);
+}
+
+div[data-testid="stAlert"] {
+    border-radius: var(--ci-radius-md);
+}
+
+div[data-testid="stImage"] img {
+    border-radius: var(--ci-radius-sm);
 }
 .report-action {
-    font-size: 1rem;
-    font-weight: 650;
-    margin: 0.85rem 0 0.15rem;
+    color: var(--ci-text-primary);
+    font-size: 16px;
+    line-height: 24px;
+    font-weight: 600;
+    margin: 16px 0 4px;
 }
 .report-helper {
-    color: rgba(120, 120, 120, 0.95);
-    font-size: 0.9rem;
-    line-height: 1.35;
-    margin: 0 0 0.45rem 1.35rem;
+    color: var(--ci-text-muted);
+    font-size: 14px;
+    line-height: 20px;
+    margin: 0 0 8px 20px;
 }
 .feedback-link {
     display: inline-block;
-    min-height: 2.4rem;
-    line-height: 2.4rem;
-    padding: 0 1rem;
-    border: 1px solid rgba(120, 120, 120, 0.55);
-    border-radius: 0.5rem;
-    color: inherit !important;
+    min-height: 52px;
+    line-height: 50px;
+    padding: 0 20px;
+    border: 1px solid var(--ci-primary);
+    border-radius: var(--ci-radius-md);
+    color: var(--ci-primary) !important;
     text-decoration: none !important;
-    font-weight: 500;
-    margin-top: 0.15rem;
+    font-weight: 600;
+    margin-top: 4px;
 }
 .feedback-link:hover {
-    border-color: rgba(120, 120, 120, 0.85);
+    border-color: var(--ci-primary-hover);
+    background: var(--ci-primary-soft);
+    color: var(--ci-primary-hover) !important;
     text-decoration: none !important;
 }
+
 @media (max-width: 640px) {
-    .block-container { padding-top: 0.75rem; padding-left: 1rem; padding-right: 1rem; }
-    h1 { font-size: 1.85rem !important; margin-top: 0 !important; }
-    .small-note { font-size: 0.86rem; margin-bottom: 0.25rem; }
-    div[data-testid="stExpander"] { margin-bottom: 0.25rem; }
-    div[data-testid="stHorizontalBlock"] { gap: 0.25rem; }
-    div[data-testid="stFileUploader"] section { padding: 0.75rem; }
+    .block-container { padding: 24px 20px 32px; }
+    div[data-testid="stHorizontalBlock"] { gap: 8px; }
+}
+
+@media (max-width: 359px) {
+    .block-container { padding-left: 16px; padding-right: 16px; }
+}
+
+@media (min-width: 768px) {
+    .block-container { padding-left: 32px; padding-right: 32px; }
+}
+
+@media (prefers-color-scheme: dark) {
+    :root {
+        --ci-bg: #17191A;
+        --ci-surface: #202426;
+        --ci-surface-subtle: #292D2F;
+        --ci-border: #434A4D;
+        --ci-text-primary: #F4F3F1;
+        --ci-text-secondary: #C9C7C3;
+        --ci-text-muted: #999C9D;
+        --ci-text-on-primary: #FFFFFF;
+        --ci-primary: #2F928A;
+        --ci-primary-hover: #3AA49B;
+        --ci-primary-soft: #213B39;
+        --ci-focus-ring: rgba(47, 146, 138, 0.34);
+        --ci-shadow-sm: none;
+    }
+    h1 { color: var(--ci-primary) !important; }
+    .warning-box { background: rgba(217, 154, 36, 0.12); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        scroll-behavior: auto !important;
+        transition-duration: 0.01ms !important;
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+    }
 }
 </style>
 """,
     unsafe_allow_html=True,
 )
 
-# -----------------------------
-# Text normalisation
-# -----------------------------
-ZH_VARIANTS = str.maketrans({
-    "钩": "鈎", "勾": "鈎", "针": "針", "锁": "鎖", "长": "長",
-    "编": "編", "织": "織", "线": "線", "绕": "繞", "组": "組",
-    "环": "環", "双": "雙", "单": "單", "减": "減", "裏": "裡",
-    "里": "裡", "辫": "辮", "结": "結", "记": "記", "内": "內",
-    "后": "後",
-})
-
-def norm_text(value: object) -> str:
-    profile_count("norm_text calls")
-    if TRANSLATION_PROFILE is not None:
-        try:
-            caller = sys._getframe(1).f_code.co_name
-        except Exception:
-            caller = "unknown"
-        profile_count(f"norm_text caller: {caller}")
-    profile_start = time.perf_counter() if TRANSLATION_PROFILE is not None else None
-    if value is None or pd.isna(value):
-        if profile_start is not None:
-            profile_add_time("OCR text normalization", time.perf_counter() - profile_start)
-        return ""
-    text = str(value).strip()
-    text = unicodedata.normalize("NFKC", text)
-    text = text.translate(ZH_VARIANTS)
-    text = text.lower()
-    text = re.sub(r"[\u200b\u200c\u200d]", "", text)
-    text = re.sub(r"[“”‘’'\"`´]", "", text)
-    text = re.sub(r"\s+", " ", text)
-    out = text.strip()
-    if profile_start is not None:
-        profile_add_time("OCR text normalization", time.perf_counter() - profile_start)
-    return out
-
-def split_aliases(value: object) -> List[str]:
-    if value is None or pd.isna(value):
-        return []
-    raw = str(value)
-    parts = re.split(r"[|,;；，/]+", raw)
-    return [p.strip() for p in parts if p.strip()]
+active_theme_type = getattr(st.context.theme, "type", "light")
+configured_theme_base = st.get_option("theme.base")
+if active_theme_type == "dark" or configured_theme_base == "dark":
+    st.markdown(
+        """
+<style>
+:root {
+    --ci-bg: #17191A;
+    --ci-surface: #202426;
+    --ci-surface-subtle: #292D2F;
+    --ci-border: #434A4D;
+    --ci-text-primary: #F4F3F1;
+    --ci-text-secondary: #C9C7C3;
+    --ci-text-muted: #999C9D;
+    --ci-text-on-primary: #FFFFFF;
+    --ci-primary: #2F928A;
+    --ci-primary-hover: #3AA49B;
+    --ci-primary-soft: #213B39;
+    --ci-focus-ring: rgba(47, 146, 138, 0.34);
+    --ci-shadow-sm: none;
+}
+h1 { color: var(--ci-primary) !important; }
+.warning-box { background: rgba(217, 154, 36, 0.12); }
+</style>
+""",
+        unsafe_allow_html=True,
+    )
 
 # -----------------------------
 # Load data and build index
@@ -217,63 +461,14 @@ def load_database() -> pd.DataFrame:
     df = pd.read_csv(csv_path).fillna("")
     return df
 
-def get_active_search_df(df: pd.DataFrame) -> pd.DataFrame:
-    if df is None or df.empty or "search_status" not in df.columns:
-        return df
-    status = df["search_status"].fillna("").astype(str).str.strip().str.lower()
-    return df[(status == "") | (status == "active")].copy()
-
-def get_source_columns(source_mode: str) -> List[str]:
-    if source_mode in ["English — UK", "English UK terms"]:
-        return ["UK_term", "UK_term_alias", "UK_abb", "UK_abb1"]
-    if source_mode in ["English — US", "English US terms"]:
-        return ["US_term", "US_term_alias", "US_abb", "US_abb1"]
-    if source_mode in ["Traditional Chinese", "Simplified Chinese", "Chinese"]:
-        return ["Chinese_term", "Chinese_term_alias", "Chinese_abb"]
-    if source_mode == "Japanese":
-        return ["Japanese", "Japanese_alias"]
-    return [
-        "US_term", "US_term_alias", "US_abb", "US_abb1",
-        "UK_term", "UK_term_alias", "UK_abb", "UK_abb1",
-        "Chinese_term", "Chinese_term_alias", "Chinese_abb",
-        "Japanese", "Japanese_alias",
-    ]
-
 @st.cache_data
 def build_term_index(df: pd.DataFrame, source_mode: str) -> Dict[str, int]:
-    df = get_active_search_df(df)
-    cols = [c for c in get_source_columns(source_mode) if c in df.columns]
-    index: Dict[str, int] = {}
-    for i, row in df.iterrows():
-        for col in cols:
-            values = [row.get(col, "")] + split_aliases(row.get(col, ""))
-            for v in values:
-                key = norm_text(v)
-                if key and key not in index:
-                    index[key] = i
-    return index
+    return terminology_engine.build_term_index(df, source_mode)
 
 
 @st.cache_data
 def build_all_term_index(df: pd.DataFrame) -> Dict[str, int]:
-    df = get_active_search_df(df)
-    fallback_cols = [
-        "US_term", "US_term_alias", "US_abb", "US_abb1",
-        "UK_term", "UK_term_alias", "UK_abb", "UK_abb1",
-        "Chinese_term", "Chinese_term_alias", "Chinese_abb",
-        "Japanese", "Japanese_alias",
-    ]
-    all_index: Dict[str, int] = {}
-    for i, row in df.iterrows():
-        for col in fallback_cols:
-            if col not in df.columns:
-                continue
-            values = [row.get(col, "")] + split_aliases(row.get(col, ""))
-            for value in values:
-                key = norm_text(value)
-                if key and key not in all_index:
-                    all_index[key] = i
-    return all_index
+    return terminology_engine.build_all_term_index(df)
 
 
 # -----------------------------
@@ -553,6 +748,12 @@ def _image_size_dict(image: Image.Image) -> Dict[str, int]:
         "height": int(height),
         "pixels": int(width * height),
     }
+
+
+def _debug_cell(value: object) -> str:
+    """Normalize app-collected diagnostic metadata without depending on report rendering."""
+    text = "" if value is None else str(value).strip()
+    return text.replace("\n", " ")
 
 
 def run_paddle_ocr_single(
@@ -877,7 +1078,7 @@ def prepare_two_column_rows(rows: pd.DataFrame, image_width: int, lang_mode: str
 
     # De-duplicate repeated overlap recognitions by normalized text.
     # Keep the higher-confidence reading, then sort left column top-down, then right column top-down.
-    work["_norm"] = work["text"].map(lambda x: norm_text(x))
+    work["_norm"] = work["text"].map(lambda x: terminology_engine.norm_text(x))
     work = work.sort_values(["_norm", "confidence"], ascending=[True, False])
     work = work.drop_duplicates(subset=["_norm"], keep="first")
     work = work.sort_values(["column_order", "y", "global_x"]).drop(columns=["_norm"])
@@ -906,114 +1107,10 @@ def run_ocr(image: Image.Image, lang_mode: str, layout_mode: str) -> Tuple[str, 
     return "\n".join(lines), rows, None
 
 # -----------------------------
-# OCR cleanup
-# -----------------------------
-def normalize_pattern_rounds(text: str) -> str:
-    """Repair common OCR mistakes around amigurumi round labels.
-
-    Examples:
-    - 9; (2SC, 1DEC)x6 [18]  -> R9: (2SC, 1DEC)x6 [18]
-    - 10: (1SC, 1DEC)x6 [12] -> R10: (1SC, 1DEC)x6 [12]
-    - Rs-R8:                  -> R5-R8:
-    - RI1 / Rl1 / R1o         -> R11 / R11 / R10
-    """
-    # Character-level / short-token repairs often caused by OCR.
-    repairs = {
-        "R1o": "R10", "R1O": "R10", "R10;": "R10:",
-        "RI1": "R11", "Rl1": "R11", "Rll": "R11", "R11;": "R11:",
-        "Rs-R8": "R5-R8", "RS-R8": "R5-R8", "R$-R8": "R5-R8",
-        "Rs - R8": "R5-R8", "RS - R8": "R5-R8",
-    }
-    for bad, good in repairs.items():
-        text = text.replace(bad, good)
-
-    # Normalise R 1 / R1; / R1. to R1:
-    text = re.sub(r"\bR\s*(\d+)", r"R\1", text, flags=re.IGNORECASE)
-    text = re.sub(r"\bR(\d+)\s*[;.]", r"R\1:", text, flags=re.IGNORECASE)
-
-    # If OCR drops the R at the start of a line, restore it when the line looks like a round row.
-    # Example: 9; (2SC, 1DEC)x6 [18] / 10: (1SC, 1DEC)x6 [12]
-    fixed_lines = []
-    for line in text.splitlines():
-        stripped = line.strip()
-        if re.match(r"^\d{1,2}\s*[:;]\s*", stripped) and re.search(
-            r"\b(SC|INC|DEC|HDC|DC|TR|SLST|MR)\b|\[[0-9]+\]",
-            stripped,
-            flags=re.IGNORECASE,
-        ):
-            stripped = re.sub(r"^(\d{1,2})\s*[:;]\s*", r"R\1: ", stripped)
-            fixed_lines.append(stripped)
-        else:
-            fixed_lines.append(line)
-
-    text = "\n".join(fixed_lines)
-
-    # Sometimes OCR reads R5-R8 as R5 R8 or R5-RB. Handle the obvious safe cases only.
-    text = re.sub(r"\bR5\s*[-–]\s*R?8\s*[:;]", "R5-R8:", text, flags=re.IGNORECASE)
-    return text
-
-
-def clean_ocr_text(raw: str) -> str:
-    text = unicodedata.normalize("NFKC", raw)
-    text = normalize_decimal_mm(text)
-    # Common OCR repairs in amigurumi patterns.
-    replacements = {
-        "；": ":",
-        "：": ":",
-        "IINC": "1INC",
-        "IInc": "1INC",
-        "lINC": "1INC",
-        "InC": "INC",
-        "INc": "INC",
-        "DEc": "DEC",
-        "IDEC": "1DEC",
-        "ISc": "1SC",
-        "IS C": "1SC",
-        "S LST": "SLST",
-        "SL ST": "SLST",
-        "S L ST": "SLST",
-    }
-    for bad, good in replacements.items():
-        text = text.replace(bad, good)
-
-    text = normalize_pattern_rounds(text)
-
-    # V27: English patterns often use Rnd 1 / Rnd 3-4 instead of R1 / R3-4.
-    # Normalise only the crochet round abbreviation, not the ordinary word "round".
-    text = re.sub(r"\bRnd\s*(\d+)", r"R\1", text, flags=re.IGNORECASE)
-
-    # More Chinese-pattern OCR normalization. Many mainland screenshots mix R labels,
-    # digits, Chinese characters, and X/V/A shorthand.
-    text = re.sub(r"\br\s*(\d+)", r"R\1", text, flags=re.IGNORECASE)
-    text = re.sub(r"\bR(\d+)\s*[;.]", r"R\1:", text, flags=re.IGNORECASE)
-    text = re.sub(r"\bR[gq]\s*[:：]", "R9:", text, flags=re.IGNORECASE)
-    text = re.sub(r"\bR[lI]\s*[:：]", "R1:", text, flags=re.IGNORECASE)
-    text = re.sub(r"\bR114\s*[:：]", "R14:", text, flags=re.IGNORECASE)
-    text = re.sub(r"\bR[lI]0\s*[:：]", "R10:", text, flags=re.IGNORECASE)
-    text = re.sub(r"\bR[lI]{2}\s*[:：]", "R11:", text, flags=re.IGNORECASE)
-    text = text.replace("。", ".").replace("，", ",").replace("、", ",")
-    text = normalize_decimal_mm(text)
-    text = re.sub(r"([xvaftesl])\s*[.]\s*([xvaftesl])", r"\1,\2", text, flags=re.I)
-    text = re.sub(r"([XVAFTESL])\s*[.]\s*([XVAFTESL])", r"\1,\2", text)
-
-    text = re.sub(r"\b(\d+)\s*(SC|INC|DEC|HDC|DC|TR|SLST|SL\s*ST|MR|CH|BLO|FLO|FO|STS?|STITCHES?)\b", r"\1\2", text, flags=re.IGNORECASE)
-    text = re.sub(r"\b(SLST|SC|INC|DEC|HDC|DC|TR|MR)\b", lambda m: m.group(1).upper(), text, flags=re.IGNORECASE)
-
-    # Mainland Chinese crochet shorthand often uses X/V/A/T/F/E.
-    # Uppercase them when they appear as stitch symbols, without touching ordinary words.
-    text = re.sub(r"(?<=\d)\s*([xvatfe])\b", lambda m: m.group(1).upper(), text, flags=re.I)
-    text = re.sub(r"(?<=[(,，、.。\s])([xvatfe])(?=[),，、.。\s])", lambda m: m.group(1).upper(), text, flags=re.I)
-    text = re.sub(r"(?<=[不加減交叉])([xvatfe])\b", lambda m: m.group(1).upper(), text, flags=re.I)
-    text = normalize_decimal_mm(text)
-    text = re.sub(r"[ \t]+", " ", text)
-    text = re.sub(r"\n{3,}", "\n\n", text)
-    return text.strip()
-
-# -----------------------------
 # Matching
 # -----------------------------
 def make_candidates(ocr_text: str) -> List[str]:
-    text = norm_text(ocr_text)
+    text = terminology_engine.norm_text(ocr_text)
     candidates = set()
 
     for line in text.splitlines():
@@ -1045,7 +1142,7 @@ def find_matches(ocr_text: str, df: pd.DataFrame, index: Dict[str, int]) -> Tupl
     unmatched = []
 
     for cand in candidates:
-        key = norm_text(cand)
+        key = terminology_engine.norm_text(cand)
         if not key or len(key) <= 1:
             continue
         if key in index:
@@ -1070,1113 +1167,9 @@ def find_matches(ocr_text: str, df: pd.DataFrame, index: Dict[str, int]) -> Tupl
 
     return pd.DataFrame(matched_rows), unmatched[:40]
 
-# -----------------------------
-# Pattern parser / interpreter
-# -----------------------------
-SIMP_MAP = str.maketrans({
-    "針": "针", "鎖": "锁", "長": "长", "環": "环", "編": "编", "織": "织",
-    "線": "线", "減": "减", "鈎": "钩", "鉤": "钩", "雙": "双", "單": "单",
-    "組": "组", "記": "记", "裡": "里", "辮": "辫", "結": "结", "狀": "状",
-    "內": "内", "後": "后",
-})
+NORMALIZED_LOOKUP_INDEX_STATS = terminology_engine.NORMALIZED_LOOKUP_INDEX_STATS
 
-def to_simplified(text: str) -> str:
-    return str(text).translate(SIMP_MAP)
-
-def term_from_row(row: pd.Series, output_mode: str, prefer_abbrev: bool = False) -> str:
-    """Return the same crochet concept in the user's chosen output language."""
-    if output_mode == "Traditional Chinese":
-        return str(row.get("Chinese_term", "") or row.get("US_term", "")).strip()
-    if output_mode == "Simplified Chinese":
-        return to_simplified(str(row.get("Chinese_term", "") or row.get("US_term", "")).strip())
-    if output_mode in ["English — US", "English US terms"]:
-        return str((row.get("US_abb", "") if prefer_abbrev else row.get("US_term", "")) or row.get("US_term", "")).strip()
-    if output_mode in ["English — UK", "English UK terms"]:
-        return str((row.get("UK_abb", "") if prefer_abbrev else row.get("UK_term", "")) or row.get("UK_term", "") or row.get("US_term", "")).strip()
-    if output_mode == "Japanese":
-        return str(row.get("Japanese", "") or row.get("US_term", "")).strip()
-    return str(row.get("Chinese_term", "") or row.get("US_term", "")).strip()
-
-def format_counted_term(term_text: str, number: str, kind: str, output_mode: str) -> str:
-    kind = kind.lower()
-    n = str(number)
-    if output_mode == "Traditional Chinese":
-        if kind in ["increase", "decrease"]:
-            return f"{term_text}{n}次"
-        return f"{term_text}{n}針"
-    if output_mode == "Simplified Chinese":
-        if kind in ["increase", "decrease"]:
-            return f"{term_text}{n}次"
-        return f"{term_text}{n}针"
-    if output_mode in ["English — US", "English — UK", "English US terms", "English UK terms"]:
-        if kind in ["increase", "decrease"]:
-            return f"{term_text} x{n}"
-        return f"{n} {term_text}"
-    if output_mode == "Japanese":
-        if kind in ["increase", "decrease"]:
-            return f"{term_text}{n}回"
-        return f"{term_text}{n}目"
-    return f"{term_text}{n}"
-
-def format_stitch_count(number: str, output_mode: str) -> str:
-    n = str(number).strip()
-    if output_mode == "Simplified Chinese":
-        return f"{n}针"
-    if output_mode == "Traditional Chinese":
-        return f"{n}針"
-    if output_mode == "Japanese":
-        return f"{n}目"
-    return f"{n} sts"
-
-
-CHAIN_START_INSTRUCTION_ID = "st_090_start_in_stitch"
-FOUNDATION_CHAIN_INSTRUCTION_RE = re.compile(
-    r"(?<![環环圈])起\s*(?P<number>\d+|[一二三四五六七八九十]+)\s*(?:个|個)?\s*(?:辮子針|辫子针|鎖針|锁针|CH|ch|chain)"
-)
-TURNING_CHAIN_INSTRUCTION_RE = re.compile(
-    r"(?<![A-Za-z0-9])(?:起立針|起立针|立針|立针|立)\s*(?P<number>\d+|[一二三四五六七八九十]+)\s*(?:CH|ch|chain|鎖針|锁针|辮子針|辫子针)(?![A-Za-z0-9])"
-)
-CHAIN_START_INSTRUCTION_RE = re.compile(
-    r"倒\s*(?:[數数]\s*第\s*)?(?P<number>\d+|[一二三四五六七八九十]+)\s*(?:[針针]|(?:回\s*)?[鉤钩鈎勾])"
-)
-BARE_CHAIN_START_RECOVERY_RE = re.compile(
-    r"倒\s*(?![數数])(?P<number>\d+|[一二三四五六七八九十]+)\s*(?P<context_sep>[\.:：,，;；、。．])?"
-)
-CHAIN_START_BEFORE_CONTEXT_RE = re.compile(
-    r"(?:ch|chain|鎖針|锁针|辮子針|辫子针)\s*[\.:：,，;；、。．]*\s*$",
-    flags=re.I,
-)
-CHAIN_START_AFTER_CONTEXT_RE = re.compile(
-    r"^\s*[\.:：,，;；、。．]*\s*(?:sl\s*st|slst|sc|dc|tr|hdc|inc|dec|mr|ch|[XVAWFTESLM])(?=$|[^A-Za-z])",
-    flags=re.I,
-)
-INSTRUCTION_CONTINUATION_RE = re.compile(
-    r"^\s*(?:倒|sl\s*st|slst|sc|dc|tr|hdc|inc|dec|mr|ch|[XxVvAaTtFfEeSsLlWw]|M{1,2}|\d+\s*(?:sl\s*st|slst|sc|dc|tr|hdc|ch|blo|flo|fo|[XxVvAaTtFfEeSsLlWw]|M{1,2}))",
-    flags=re.I,
-)
-
-
-def parse_small_chinese_number(value: str) -> Optional[int]:
-    token = str(value or "").strip()
-    if not token:
-        return None
-    if token.isdigit():
-        return int(token)
-    digits = {
-        "零": 0,
-        "一": 1,
-        "二": 2,
-        "兩": 2,
-        "两": 2,
-        "三": 3,
-        "四": 4,
-        "五": 5,
-        "六": 6,
-        "七": 7,
-        "八": 8,
-        "九": 9,
-    }
-    if token in digits:
-        return digits[token]
-    if token == "十":
-        return 10
-    if "十" in token:
-        left, _, right = token.partition("十")
-        tens = digits.get(left, 1 if left == "" else None)
-        ones = digits.get(right, 0 if right == "" else None)
-        if tens is not None and ones is not None:
-            return tens * 10 + ones
-    return None
-
-
-def english_ordinal(number: int) -> str:
-    suffix = "th"
-    if number % 100 not in {11, 12, 13}:
-        suffix = {1: "st", 2: "nd", 3: "rd"}.get(number % 10, "th")
-    return f"{number}{suffix}"
-
-
-def get_chain_start_instruction_row(df: pd.DataFrame) -> Optional[pd.Series]:
-    if df is None or df.empty or "stitch_id" not in df.columns:
-        return None
-    active_df = get_active_search_df(df)
-    matches = active_df[active_df["stitch_id"].astype(str).str.strip() == CHAIN_START_INSTRUCTION_ID]
-    if matches.empty:
-        return None
-    return matches.iloc[0]
-
-
-def chain_start_template_from_row(row: pd.Series, output_mode: str) -> str:
-    if row is None:
-        return ""
-    if output_mode in ["English — US", "English US terms"]:
-        options = [row.get("US_term", "")] + split_aliases(row.get("US_term_alias", ""))
-        return next((str(v).strip() for v in options if "the ..." in str(v)), str(row.get("US_term", "")).strip())
-    if output_mode in ["English — UK", "English UK terms"]:
-        options = [row.get("UK_term", "")] + split_aliases(row.get("UK_term_alias", ""))
-        return next((str(v).strip() for v in options if "the ..." in str(v)), str(row.get("UK_term", "") or row.get("US_term", "")).strip())
-    if output_mode == "Japanese" and not str(row.get("Japanese", "")).strip():
-        options = [row.get("US_term", "")] + split_aliases(row.get("US_term_alias", ""))
-        return next((str(v).strip() for v in options if "the ..." in str(v)), str(row.get("US_term", "")).strip())
-    return term_from_row(row, output_mode)
-
-
-def format_chain_start_instruction(number: int, df: pd.DataFrame, output_mode: str) -> str:
-    row = get_chain_start_instruction_row(df)
-    if row is None:
-        if output_mode == "Simplified Chinese":
-            return f"倒{number}针"
-        if output_mode == "Traditional Chinese":
-            return f"倒{number}針"
-        return f"Start in the {english_ordinal(number)} chain from hook"
-    template = chain_start_template_from_row(row, output_mode)
-    if not template:
-        template = str(row.get("US_term", "") or "start in ... chain from hook").strip()
-    replacement = english_ordinal(number) if output_mode in ["English — US", "English — UK", "English US terms", "English UK terms", "Japanese"] else str(number)
-    out = template.replace("...", replacement)
-    if output_mode == "Simplified Chinese":
-        out = to_simplified(out)
-    if output_mode in ["English — US", "English — UK", "English US terms", "English UK terms", "Japanese"] and out:
-        out = out[0].upper() + out[1:]
-    return out
-
-
-def format_foundation_chain_instruction(number: int, output_mode: str) -> str:
-    if output_mode == "Simplified Chinese":
-        return f"起{number}锁针"
-    if output_mode == "Traditional Chinese":
-        return f"起{number}鎖針"
-    if output_mode == "Japanese":
-        return f"鎖編み{number}目"
-    return f"Chain {number}"
-
-
-def format_turning_chain_instruction(number: int, index: Dict[str, int], df: pd.DataFrame, output_mode: str) -> str:
-    turning = lookup_term("立", index, df, output_mode, prefer_abbrev=False).strip()
-    if not turning:
-        turning = "turning chain"
-    chain_term = lookup_term("CH", index, df, output_mode, prefer_abbrev=(output_mode in ["English — US", "English — UK", "English US terms", "English UK terms"])).strip()
-    if not chain_term:
-        chain_term = "ch"
-    chain_count = format_counted_term(chain_term, str(number), term_kind("CH", index, df), output_mode)
-    out = f"{turning} {chain_count}".strip()
-    if output_mode == "Simplified Chinese":
-        out = to_simplified(out)
-    if output_mode in ["English — US", "English — UK", "English US terms", "English UK terms"] and out:
-        out = out[0].upper() + out[1:]
-    return out
-
-
-def instruction_suffix(source: str, end: int) -> str:
-    after = str(source or "")[end:]
-    if not after:
-        return ""
-    first = after[0]
-    if first.isspace() or first in ")]）}：:,，;；、.":
-        return ""
-    return ", " if INSTRUCTION_CONTINUATION_RE.match(after) else " "
-
-
-def instruction_prefix(source: str, start: int) -> str:
-    before = str(source or "")[start - 1] if start > 0 else ""
-    return " " if before and not before.isspace() and before not in "([（{：:,，;；、" else ""
-
-
-def replace_foundation_chain_instructions(
-    text: str,
-    output_mode: str,
-    protect: Optional[Callable[[str], str]] = None,
-) -> str:
-    def repl(m: re.Match) -> str:
-        number = parse_small_chinese_number(m.group("number"))
-        if number is None:
-            return m.group(0)
-        translated = format_foundation_chain_instruction(number, output_mode)
-        rendered = protect(translated) if protect is not None else translated
-        return f"{instruction_prefix(m.string, m.start())}{rendered}{instruction_suffix(m.string, m.end())}"
-
-    return FOUNDATION_CHAIN_INSTRUCTION_RE.sub(repl, str(text or ""))
-
-
-def replace_turning_chain_instructions(
-    text: str,
-    index: Dict[str, int],
-    df: pd.DataFrame,
-    output_mode: str,
-    protect: Optional[Callable[[str], str]] = None,
-) -> str:
-    def repl(m: re.Match) -> str:
-        number = parse_small_chinese_number(m.group("number"))
-        if number is None:
-            return m.group(0)
-        translated = format_turning_chain_instruction(number, index, df, output_mode)
-        rendered = protect(translated) if protect is not None else translated
-        return f"{instruction_prefix(m.string, m.start())}{rendered}{instruction_suffix(m.string, m.end())}"
-
-    return TURNING_CHAIN_INSTRUCTION_RE.sub(repl, str(text or ""))
-
-
-def has_bare_chain_start_context(source: str, start: int, end: int) -> bool:
-    before = str(source or "")[:start]
-    after = str(source or "")[end:]
-    before_window = before[-40:]
-    after_window = after[:40]
-    return bool(
-        CHAIN_START_BEFORE_CONTEXT_RE.search(before_window)
-        or CHAIN_START_AFTER_CONTEXT_RE.search(after_window)
-    )
-
-
-def replace_chain_start_instructions(
-    text: str,
-    df: pd.DataFrame,
-    output_mode: str,
-    protect: Optional[Callable[[str], str]] = None,
-) -> str:
-    def repl(m: re.Match) -> str:
-        number = parse_small_chinese_number(m.group("number"))
-        if number is None:
-            return m.group(0)
-        translated = format_chain_start_instruction(number, df, output_mode)
-        rendered = protect(translated) if protect is not None else translated
-        return f"{instruction_prefix(m.string, m.start())}{rendered}{instruction_suffix(m.string, m.end())}"
-
-    s = CHAIN_START_INSTRUCTION_RE.sub(repl, str(text or ""))
-
-    def bare_repl(m: re.Match) -> str:
-        if not has_bare_chain_start_context(m.string, m.start(), m.end()):
-            return m.group(0)
-        return repl(m)
-
-    return BARE_CHAIN_START_RECOVERY_RE.sub(bare_repl, s)
-
-
-def translate_chain_start_expression_if_full(text: str, df: pd.DataFrame, output_mode: str) -> Optional[str]:
-    s = unicodedata.normalize("NFKC", str(text or "")).strip()
-    m = re.fullmatch(CHAIN_START_INSTRUCTION_RE, s)
-    if not m:
-        return None
-    number = parse_small_chinese_number(m.group("number"))
-    if number is None:
-        return None
-    return format_chain_start_instruction(number, df, output_mode)
-
-
-def contains_chinese_stitch_count(text: str) -> bool:
-    return bool(re.search(r"(?<![A-Za-z0-9.])\d+\s*[針针](?![A-Za-z0-9])", str(text)))
-
-def format_group_with_stitch_count(inner: str, count: str, index: Dict[str, int], df: pd.DataFrame, output_mode: str) -> str:
-    parts = [translate_group_part(part, index, df, output_mode) for part in split_expression_parts(inner)]
-    return f"({', '.join(parts)})({format_stitch_count(count, output_mode)})"
-
-def format_symbol_with_stitch_count(term: str, count: str, index: Dict[str, int], df: pd.DataFrame, output_mode: str) -> str:
-    term_clean = re.sub(r"\s+", "", term).upper()
-    term_text = lookup_expression_symbol(term_clean, index, df, output_mode)
-    return f"{term_text}({format_stitch_count(count, output_mode)})"
-
-def lookup_expression_symbol(term: str, index: Dict[str, int], df: pd.DataFrame, output_mode: str) -> str:
-    term_clean = re.sub(r"\s+", "", str(term or "")).upper()
-    if term_clean == "M":
-        m_key = norm_text(term_clean)
-        for _, row in get_active_search_df(df).iterrows():
-            aliases = split_aliases(row.get("Chinese_abb", ""))
-            values = [row.get("Chinese_abb", "")] + aliases
-            if any(norm_text(value) == m_key for value in values):
-                us_abb = norm_text(row.get("US_abb", ""))
-                uk_abb = norm_text(row.get("UK_abb", ""))
-                if us_abb == "sc3tog" or uk_abb == "dc3tog":
-                    return term_from_row(row, output_mode, prefer_abbrev=(output_mode in ["English — US", "English — UK", "English US terms", "English UK terms"]))
-    return lookup_term(term_clean, index, df, output_mode, prefer_abbrev=(output_mode in ["English — US", "English — UK", "English US terms", "English UK terms"]))
-
-COUNTED_TOKEN_TERM_PATTERN = (
-    r"(?i:sl\s*st|slst|sts?|stitches?|sc|inc|dec|hdc|dc|tr|mr|ch|blo|flo|fo)"
-    r"|[XxVvAaTtFfEeSsLlWw]{1,2}|M{1,2}"
-)
-
-
-def translate_counted_token(
-    number: str,
-    term: str,
-    index: Dict[str, int],
-    df: pd.DataFrame,
-    output_mode: str,
-    protect: Optional[Callable[[str], str]] = None,
-) -> str:
-    """Translate compact number-before-term tokens consistently across paths."""
-    n = str(number)
-    term_clean = re.sub(r"\s+", "", str(term or ""))
-    key = norm_text(term_clean)
-    if key in {"st", "sts", "stitch", "stitches"}:
-        if output_mode == "Simplified Chinese":
-            return protect(f"{n}针") if protect is not None else f"{n}针"
-        if output_mode == "Traditional Chinese":
-            return protect(f"{n}針") if protect is not None else f"{n}針"
-        if output_mode == "Japanese":
-            return protect(f"{n}目") if protect is not None else f"{n}目"
-        term_text = lookup_term(term_clean, index, df, output_mode, prefer_abbrev=True)
-        term_text = protect(term_text) if protect is not None else term_text
-        return f"{n} {term_text}"
-    term_text = lookup_expression_symbol(term_clean, index, df, output_mode)
-    term_text = protect(term_text) if protect is not None else term_text
-    return format_counted_term(term_text, n, term_kind(term_clean, index, df), output_mode)
-
-def normalize_decimal_mm(text: str) -> str:
-    return re.sub(r"\b(\d+)\s*[\.,，]\s*(\d)\s*m\s*m\b", r"\1.\2mm", str(text), flags=re.I)
-
-def translate_around_connector(text: str, output_mode: str) -> str:
-    if output_mode == "Traditional Chinese":
-        return re.sub(r"\b(?:work\s+|rnd\s+)?around\b", "一圈", text, flags=re.I)
-    if output_mode == "Simplified Chinese":
-        return re.sub(r"\b(?:work\s+|rnd\s+)?around\b", "一圈", text, flags=re.I)
-    if output_mode == "Japanese":
-        return re.sub(r"\b(?:work\s+|rnd\s+)?around\b", "1周", text, flags=re.I)
-    return text
-
-def join_parts(parts: List[str], output_mode: str) -> str:
-    parts = [p for p in parts if p]
-    if output_mode in ["Traditional Chinese", "Simplified Chinese", "Japanese"]:
-        return "，".join(parts)
-    return ", ".join(parts)
-
-def repeat_phrase(inner: str, repeat: str, output_mode: str) -> str:
-    if output_mode == "Traditional Chinese":
-        return f"（{inner}）重複{repeat}次"
-    if output_mode == "Simplified Chinese":
-        return f"（{inner}）重复{repeat}次"
-    if output_mode == "Japanese":
-        return f"（{inner}）を{repeat}回繰り返す"
-    return f"({inner}) x{repeat}"
-
-def row_to_chinese(row: pd.Series) -> str:
-    zh = str(row.get("Chinese_term", "")).strip()
-    return zh or str(row.get("US_term", "")).strip()
-
-
-NORMALIZED_LOOKUP_INDEX_STATS = {
-    "enabled": "Yes",
-    "last_key": "",
-    "build_count": 0,
-    "cache_hits": 0,
-    "cache_misses": 0,
-    "index_size": 0,
-    "duplicate_keys": 0,
-    "indexed_lookup_attempts": 0,
-    "indexed_lookup_hits": 0,
-    "indexed_lookup_misses": 0,
-    "fallback_lookup_attempts": 0,
-    "fallback_lookup_hits": 0,
-    "fallback_lookup_misses": 0,
-    "index_error": "",
-}
-
-
-def build_normalized_lookup_index(
-    index: Dict[str, int],
-    all_term_index: Dict[str, int],
-    source_mode: str,
-) -> Dict[str, int]:
-    NORMALIZED_LOOKUP_INDEX_STATS["last_key"] = f"source_mode:{source_mode}"
-    NORMALIZED_LOOKUP_INDEX_STATS["cache_misses"] += 1
-    NORMALIZED_LOOKUP_INDEX_STATS["build_count"] += 1
-    combined: Dict[str, int] = {}
-    duplicate_count = 0
-    for term_key, row_idx in index.items():
-        if term_key and term_key not in combined:
-            combined[term_key] = row_idx
-        elif term_key:
-            duplicate_count += 1
-    for term_key, row_idx in all_term_index.items():
-        if term_key and term_key not in combined:
-            combined[term_key] = row_idx
-        elif term_key:
-            duplicate_count += 1
-    NORMALIZED_LOOKUP_INDEX_STATS["index_size"] = len(combined)
-    NORMALIZED_LOOKUP_INDEX_STATS["duplicate_keys"] = duplicate_count
-    return combined
-
-
-def build_row_lookup_cache(df: pd.DataFrame) -> Dict[int, Dict[str, object]]:
-    row_cache = df.attrs.get("row_lookup_cache")
-    if isinstance(row_cache, dict):
-        return row_cache
-    row_cache = {row_idx: row.to_dict() for row_idx, row in df.iterrows()}
-    df.attrs["row_lookup_cache"] = row_cache
-    return row_cache
-
-
-def cached_lookup_row(df: pd.DataFrame, row_idx: int) -> Optional[Dict[str, object]]:
-    return build_row_lookup_cache(df).get(row_idx)
-
-
-def lookup_row(term: str, index: Dict[str, int], df: pd.DataFrame) -> Optional[Dict[str, object]]:
-    profile_count("lookup_row calls")
-    profile_start = time.perf_counter() if TRANSLATION_PROFILE is not None else None
-    key = norm_text(term)
-    try:
-        NORMALIZED_LOOKUP_INDEX_STATS["indexed_lookup_attempts"] += 1
-        normalized_index = df.attrs.get("normalized_lookup_index", {})
-        if normalized_index and key in normalized_index:
-            NORMALIZED_LOOKUP_INDEX_STATS["indexed_lookup_hits"] += 1
-            profile_count("lookup_row normalized index hits")
-            if profile_start is not None:
-                profile_add_time("term lookup: lookup_row", time.perf_counter() - profile_start)
-            return cached_lookup_row(df, normalized_index[key])
-        NORMALIZED_LOOKUP_INDEX_STATS["indexed_lookup_misses"] += 1
-    except Exception as e:
-        NORMALIZED_LOOKUP_INDEX_STATS["index_error"] = str(e)
-        NORMALIZED_LOOKUP_INDEX_STATS["indexed_lookup_misses"] += 1
-
-    NORMALIZED_LOOKUP_INDEX_STATS["fallback_lookup_attempts"] += 1
-    if key in index:
-        NORMALIZED_LOOKUP_INDEX_STATS["fallback_lookup_hits"] += 1
-        profile_count("lookup_row fast hits")
-        if profile_start is not None:
-            profile_add_time("term lookup: lookup_row", time.perf_counter() - profile_start)
-        return cached_lookup_row(df, index[key])
-    # Search across all key columns as fallback, useful when source mode is Chinese but OCR produced English-style terms.
-    # RC9c preserves the old fallback search order, but uses a prebuilt dictionary instead of scanning the CSV per lookup.
-    all_term_index = df.attrs.get("all_term_index", {})
-    if not all_term_index:
-        all_term_index = build_all_term_index(df)
-        df.attrs["all_term_index"] = all_term_index
-    profile_count("lookup_row fallback dictionary checks")
-    if key in all_term_index:
-        NORMALIZED_LOOKUP_INDEX_STATS["fallback_lookup_hits"] += 1
-        profile_count("lookup_row fallback hits")
-        if profile_start is not None:
-            profile_add_time("term lookup: lookup_row", time.perf_counter() - profile_start)
-        return cached_lookup_row(df, all_term_index[key])
-    NORMALIZED_LOOKUP_INDEX_STATS["fallback_lookup_misses"] += 1
-    if profile_start is not None:
-        profile_add_time("term lookup: lookup_row", time.perf_counter() - profile_start)
-    return None
-
-def lookup_term(term: str, index: Dict[str, int], df: pd.DataFrame, output_mode: str = "Traditional Chinese", prefer_abbrev: bool = False) -> str:
-    profile_count("lookup_term calls")
-    profile_start = time.perf_counter() if TRANSLATION_PROFILE is not None else None
-    try:
-        row = lookup_row(term, index, df)
-        if row is not None:
-            return term_from_row(row, output_mode, prefer_abbrev=prefer_abbrev)
-        fallback_zh = {
-            "sc": "短針", "x": "短針", "inc": "加針", "v": "加針", "dec": "減針", "a": "減針", "mr": "環狀起針",
-            "magic ring": "環狀起針", "magic circle": "環狀起針", "adjustable ring": "環狀起針",
-            "slst": "引拔針", "sl st": "引拔針", "sl": "引拔針", "hdc": "中長針", "t": "中長針", "dc": "長針", "f": "長針", "tr": "長長針", "e": "長長針",
-            "fo": "收線", "blo": "後半針", "flo": "前半針", "ch": "鎖針", "chain": "鎖針", "chains": "鎖針", "st": "針", "sts": "針", "stitch": "針", "stitches": "針",
-        }
-        fallback_us = {
-            "x": "sc", "v": "inc", "a": "dec", "t": "hdc", "f": "dc", "e": "tr", "sl": "sl st",
-            "sc": "sc", "inc": "inc", "dec": "dec", "mr": "MR", "magic ring": "MR", "magic circle": "MR", "adjustable ring": "MR", "slst": "sl st", "sl st": "sl st", "ch": "ch", "chain": "ch", "chains": "ch", "st": "st", "sts": "sts", "stitch": "stitch", "stitches": "stitches",
-        }
-        key = norm_text(term)
-        if output_mode == "Simplified Chinese":
-            return to_simplified(fallback_zh.get(key, term))
-        if output_mode == "Traditional Chinese":
-            return fallback_zh.get(key, term)
-        if output_mode in ["English — US", "English — UK", "English US terms", "English UK terms"]:
-            return fallback_us.get(key, term)
-        if output_mode == "Japanese":
-            zh = fallback_zh.get(key, term)
-            jp = {"短針":"細編み", "加針":"増し目", "減針":"減らし目", "環狀起針":"輪の作り目", "引拔針":"引き抜き編み", "中長針":"中長編み", "長針":"長編み"}
-            return jp.get(zh, term)
-        return term
-    finally:
-        if profile_start is not None:
-            profile_add_time("term lookup: lookup_term", time.perf_counter() - profile_start)
-
-
-CSV_TERM_CACHE: Dict[Tuple[object, ...], Tuple[str, ...]] = {}
-CSV_TERM_CACHE_STATS = {
-    "hits": 0,
-    "misses": 0,
-    "generation_count": 0,
-    "served_from_cache_count": 0,
-    "last_key": "",
-    "last_error": "",
-    "last_terms_returned": 0,
-}
-
-
-def csv_term_cache_key(df: pd.DataFrame) -> Tuple[object, ...]:
-    try:
-        content_hash = hashlib.md5(
-            pd.util.hash_pandas_object(df.astype(str), index=True).values.tobytes()
-        ).hexdigest()
-    except Exception:
-        content_hash = "content-hash-unavailable"
-    return (
-        int(len(df)),
-        tuple(str(col) for col in df.columns),
-        tuple(int(v) for v in df.shape),
-        content_hash,
-    )
-
-
-def generate_all_csv_terms_uncached(df: pd.DataFrame) -> List[str]:
-    """Return all searchable terms/aliases from the crochet CSV.
-
-    This powers V24's term-replacement engine: do not hard-code whole
-    sentences; scan every OCR line for known crochet terms from the CSV.
-    """
-    cols = [
-        "US_term", "US_term_alias", "US_abb", "US_abb1",
-        "UK_term", "UK_term_alias", "UK_abb", "UK_abb1",
-        "Chinese_term", "Chinese_term_alias", "Chinese_abb",
-        "Japanese", "Japanese_alias",
-    ]
-    df = get_active_search_df(df)
-    seen = set()
-    terms: List[str] = []
-    for _, row in df.iterrows():
-        profile_count("get_all_csv_terms row scans")
-        for col in cols:
-            if col not in df.columns:
-                continue
-            vals = [row.get(col, "")] + split_aliases(row.get(col, ""))
-            for v in vals:
-                profile_count("alias values inspected")
-                t = unicodedata.normalize("NFKC", str(v)).strip()
-                if not t:
-                    continue
-                key = norm_text(t)
-                # Keep single-letter stitch symbols only; avoid broad accidental words.
-                if len(key) == 1 and key not in {"x", "v", "a", "t", "f", "e"}:
-                    continue
-                if key not in seen:
-                    seen.add(key)
-                    terms.append(t)
-    # Longest first so "magic ring" is replaced before "ring", and "sl st" before "st".
-    terms.sort(key=lambda x: len(norm_text(x)), reverse=True)
-    profile_count("protected terms generated", len(terms))
-    return terms
-
-
-def get_all_csv_terms(df: pd.DataFrame) -> List[str]:
-    profile_count("get_all_csv_terms calls")
-    profile_start = time.perf_counter() if TRANSLATION_PROFILE is not None else None
-    try:
-        key = csv_term_cache_key(df)
-        key_text = hashlib.md5(repr(key).encode("utf-8")).hexdigest()
-        CSV_TERM_CACHE_STATS["last_key"] = key_text
-        if key in CSV_TERM_CACHE:
-            CSV_TERM_CACHE_STATS["hits"] += 1
-            CSV_TERM_CACHE_STATS["served_from_cache_count"] += 1
-            terms = list(CSV_TERM_CACHE[key])
-            CSV_TERM_CACHE_STATS["last_terms_returned"] = len(terms)
-            profile_count("get_all_csv_terms served from cache")
-            profile_count("protected terms returned from cache", len(terms))
-            return terms
-        CSV_TERM_CACHE_STATS["misses"] += 1
-        CSV_TERM_CACHE_STATS["generation_count"] += 1
-        terms = generate_all_csv_terms_uncached(df)
-        CSV_TERM_CACHE[key] = tuple(terms)
-        CSV_TERM_CACHE_STATS["last_terms_returned"] = len(terms)
-        return list(terms)
-    except Exception as e:
-        CSV_TERM_CACHE_STATS["last_error"] = str(e)
-        terms = generate_all_csv_terms_uncached(df)
-        CSV_TERM_CACHE_STATS["last_terms_returned"] = len(terms)
-        return terms
-    finally:
-        if profile_start is not None:
-            profile_add_time("alias lookup / CSV term list", time.perf_counter() - profile_start)
-
-
-def _ascii_term_regex(term: str) -> str:
-    """Regex for English/abbreviation terms with safe boundaries."""
-    escaped = re.escape(term.strip())
-    escaped = re.sub(r"\\\s+", r"\\s+", escaped)
-    return rf"(?<![A-Za-z0-9]){escaped}(?![A-Za-z0-9])"
-
-
-def _looks_like_prose_line(text: str) -> bool:
-    """Return True for ordinary instruction sentences mixed with crochet terms.
-
-    Formulae like "ch, (sc, inc)x8, slst (24)" should still go through
-    the expression parser. Sentences like "Start with 8sc in a Magic ring"
-    should prefer CSV term replacement.
-    """
-    s = str(text or "").strip()
-    if not s:
-        return False
-    crochet_words = {
-        "sc", "inc", "dec", "hdc", "dc", "tr", "slst", "sl", "st", "sts",
-        "ch", "mr", "blo", "flo", "fo", "magic", "ring", "circle",
-        "stitch", "stitches", "chain", "chains",
-    }
-    words = re.findall(r"[A-Za-z]{3,}", s)
-    non_crochet = [w for w in words if w.lower() not in crochet_words]
-    return bool(non_crochet)
-
-
-def replace_csv_terms_in_line(text: str, index: Dict[str, int], df: pd.DataFrame, output_mode: str) -> str:
-    """Replace known crochet terms inside a normal sentence.
-
-    Example:
-        turn and slst until the end
-        -> 反轉 and 引拔 until the end
-
-    This is intentionally *not* a general translation engine. Unknown ordinary
-    language remains unchanged. The goal is to protect and translate crochet
-    terminology wherever it appears in a sentence.
-    """
-    profile_count("replace_csv_terms_in_line calls")
-    profile_start = time.perf_counter() if TRANSLATION_PROFILE is not None else None
-    s = normalize_decimal_mm(unicodedata.normalize("NFKC", str(text or "")).strip())
-    if not s:
-        if profile_start is not None:
-            profile_add_time("CSV replacement loops", time.perf_counter() - profile_start)
-        return ""
-
-    generated_terms: List[str] = []
-
-    def protect_generated_term(value: str) -> str:
-        marker = f"@@RC9D_TERM_{len(generated_terms)}@@"
-        generated_terms.append(str(value))
-        return marker
-
-    def restore_generated_terms(value: str) -> str:
-        out_value = str(value)
-        for i, original_value in enumerate(generated_terms):
-            out_value = out_value.replace(f"@@RC9D_TERM_{i}@@", original_value)
-        return out_value
-
-    s = replace_turning_chain_instructions(s, index, df, output_mode, protect=protect_generated_term)
-    s = replace_foundation_chain_instructions(s, output_mode, protect=protect_generated_term)
-    s = replace_chain_start_instructions(s, df, output_mode, protect=protect_generated_term)
-
-    def stitch_count_repl(m: re.Match) -> str:
-        return protect_generated_term(format_stitch_count(m.group(1), output_mode))
-
-    profile_count("regex passes estimated")
-    s = re.sub(r"(?<![A-Za-z0-9.])(\d+)\s*[針针](?![A-Za-z0-9])", stitch_count_repl, s)
-
-    # 1) Compact counted terms: 8sc, 4ch, 6sts, 2 dc.
-    counted_pat = re.compile(
-        rf"(?<![A-Za-z0-9])(\d+)\s*({COUNTED_TOKEN_TERM_PATTERN})\b",
-    )
-
-    def counted_repl(m: re.Match) -> str:
-        n, term = m.groups()
-        return translate_counted_token(n, term, index, df, output_mode, protect=protect_generated_term)
-
-    profile_count("regex passes estimated")
-    out = counted_pat.sub(counted_repl, s)
-
-    # V29: term-before-number shorthand, e.g. ch1 / ch 1 / sc 6.
-    # Many English patterns write "ch1" at the end of a long round, or
-    # "sc 6 into magic ring". V25/V28 only handled number-before-term
-    # such as 8sc / 4ch, so ch1 was left untranslated.
-    term_number_pat = re.compile(
-        r"(?<![A-Za-z0-9])(sl\s*st|slst|sts?|stitches?|sc|inc|dec|hdc|dc|tr|mr|ch|blo|flo|fo)\s*(\d+)(?![A-Za-z0-9])",
-        flags=re.I,
-    )
-
-    def term_number_repl(m: re.Match) -> str:
-        term, n = m.groups()
-        term_clean = re.sub(r"\s+", "", term)
-        key = norm_text(term_clean)
-        if key in {"st", "sts", "stitch", "stitches"}:
-            if output_mode == "Simplified Chinese":
-                return protect_generated_term(f"{n}针")
-            if output_mode == "Traditional Chinese":
-                return protect_generated_term(f"{n}針")
-            if output_mode == "Japanese":
-                return protect_generated_term(f"{n}目")
-            return f"{n} {protect_generated_term(lookup_term(term_clean, index, df, output_mode, prefer_abbrev=True))}"
-        term_text = lookup_term(term_clean, index, df, output_mode, prefer_abbrev=(output_mode in ["English — US", "English — UK", "English US terms", "English UK terms"]))
-        return format_counted_term(protect_generated_term(term_text), n, term_kind(term_clean, index, df), output_mode)
-
-    profile_count("regex passes estimated")
-    out = term_number_pat.sub(term_number_repl, out)
-
-    # V29: safe repair for common OCR confusion in crochet shorthand.
-    # "linc" is usually OCR's lowercase L + inc, meaning "1inc".
-    profile_count("regex passes estimated")
-    out = re.sub(r"(?<![A-Za-z0-9])linc(?![A-Za-z0-9])", lambda m: term_number_repl(type('M', (), {'groups': lambda self: ('inc','1')})()), out, flags=re.I)
-
-    # 2) Phrase and token replacement from CSV terms/aliases.
-    protected_terms = get_all_csv_terms(df)
-    # V25: include common OCR spellings that may not appear literally in CSV.
-    protected_terms.extend([
-        "slst", "sl st", "magic ring", "magic circle", "adjustable ring",
-        "stitch", "stitches", "sts", "turn", "fasten off", "weave in ends",
-    ])
-    # De-duplicate while preserving longest-first order.
-    seen_terms = set()
-    protected_terms = sorted(
-        [t for t in protected_terms if not (norm_text(t) in seen_terms or seen_terms.add(norm_text(t)))],
-        key=lambda x: len(norm_text(x)),
-        reverse=True,
-    )
-    for term in protected_terms:
-        profile_count("protected terms looped")
-        key = norm_text(term)
-        if not key:
-            continue
-        # Never replace bare single-letter symbols inside ordinary sentences.
-        # Example: the English article "a" must not become "減針".
-        # Counted forms such as 2A / 6X are handled earlier by counted_pat.
-        if re.fullmatch(r"[A-Za-z]", key):
-            profile_count("regex passes estimated")
-            continue
-        replacement = lookup_term(term, index, df, output_mode, prefer_abbrev=(output_mode in ["English — US", "English — UK", "English US terms", "English UK terms"]))
-        if not replacement:
-            continue
-        # Avoid replacing single-letter symbols in prose unless they are clearly separated.
-        if re.fullmatch(r"[A-Za-z0-9 ]+", term):
-            profile_count("regex passes estimated")
-            if norm_text(replacement) == key:
-                continue
-            pat = re.compile(_ascii_term_regex(term), flags=re.I)
-            profile_count("regex passes estimated")
-            out = pat.sub(replacement, out)
-        else:
-            # Chinese/Japanese terms: direct safe replacement.
-            out = out.replace(term, replacement)
-            cjk_variants = {
-                "針": "[針针]", "內": "[內内]", "後": "[後后]", "環": "[環环]",
-                "鎖": "[鎖锁]", "長": "[長长]", "減": "[減减]", "線": "[線线]",
-                "繞": "[繞绕]", "鈎": "[鈎钩勾]", "鉤": "[鉤钩勾]",
-            }
-            variant_pat = "".join(cjk_variants.get(ch, re.escape(ch)) for ch in term)
-            profile_count("regex passes estimated")
-            out = re.sub(variant_pat, replacement, out)
-
-    # V28: small crochet-context connectors. Check the ORIGINAL sentence, not
-    # only the already-replaced output. In v27, "6 inc around" became
-    # "加針6次 around" first, so the old English-token check missed "around".
-    profile_count("regex passes estimated")
-    has_crochet_context = bool(re.search(
-        r"\b(sc|inc|dec|hdc|dc|tr|sl\s*st|slst|ch|sts?|stitches?|blo|flo|fo|mr|magic\s+ring|x|v|a)\b",
-        s,
-        flags=re.I,
-    )) or bool(re.search(r"\b(?:work\s+|rnd\s+)?around\b", s, flags=re.I))
-    if has_crochet_context:
-        profile_count("regex passes estimated")
-        out = translate_around_connector(out, output_mode)
-
-    if profile_start is not None:
-        profile_add_time("CSV replacement loops", time.perf_counter() - profile_start)
-    return restore_generated_terms(out)
-
-def term_kind(term: str, index: Dict[str, int], df: pd.DataFrame) -> str:
-    row = lookup_row(term, index, df)
-    if row is not None:
-        cat = norm_text(row.get("category", ""))
-        if "increase" in cat:
-            return "increase"
-        if "decrease" in cat:
-            return "decrease"
-    key = norm_text(term)
-    if key in ["inc", "v"]:
-        return "increase"
-    if key in ["dec", "a"]:
-        return "decrease"
-    return "stitch"
-
-@profile_function("expression parsing: split_expression_parts", "split_expression_parts calls")
-def split_expression_parts(text: str) -> List[str]:
-    """Split crochet expressions on separators, but keep commas/dots inside brackets.
-
-    Naive splitting breaks common rows such as:
-    - ch, (sc, inc)x8, slst (24)
-    - 6(X,V)
-    - 2T.7X.3T.2Tv
-
-    This helper only splits when we are not inside parentheses/brackets.
-    """
-    if text is None:
-        return []
-    s = unicodedata.normalize("NFKC", str(text)).strip()
-    parts: List[str] = []
-    buf: List[str] = []
-    depth = 0
-    for i, ch in enumerate(s):
-        if ch in "([{（【":
-            depth += 1
-            buf.append(ch)
-            continue
-        if ch in ")]）】}":
-            depth = max(0, depth - 1)
-            buf.append(ch)
-            continue
-        # Dot is a separator in mainland symbol strings, but only outside brackets.
-        if depth == 0 and ch == ".":
-            prev_ch = s[i - 1] if i > 0 else ""
-            next_ch = s[i + 1] if i + 1 < len(s) else ""
-            if prev_ch.isdigit() and next_ch.isdigit():
-                buf.append(ch)
-                continue
-        if depth == 0 and ch in [",", "，", "、", ";", "；", "。", "."]:
-            item = "".join(buf).strip()
-            if item:
-                parts.append(item)
-            buf = []
-            continue
-        buf.append(ch)
-    item = "".join(buf).strip()
-    if item:
-        parts.append(item)
-    return parts
-
-def translate_group_part(part: str, index: Dict[str, int], df: pd.DataFrame, output_mode: str = "Traditional Chinese") -> str:
-    part_text = normalize_decimal_mm(unicodedata.normalize("NFKC", str(part or "")).strip())
-    if not part_text:
-        return ""
-    translated = translate_expression(part_text, index, df, output_mode)
-    return translated if translated else translate_piece(part_text, index, df, output_mode)
-
-@profile_function("translate_piece()", "translate_piece calls")
-def translate_piece(piece: str, index: Dict[str, int], df: pd.DataFrame, output_mode: str = "Traditional Chinese") -> str:
-    p = normalize_decimal_mm(unicodedata.normalize("NFKC", piece).strip())
-    if not p:
-        return ""
-
-    turning_chain = re.fullmatch(TURNING_CHAIN_INSTRUCTION_RE, p)
-    if turning_chain:
-        number = parse_small_chinese_number(turning_chain.group("number"))
-        if number is not None:
-            return format_turning_chain_instruction(number, index, df, output_mode)
-
-    foundation_chain = re.fullmatch(FOUNDATION_CHAIN_INSTRUCTION_RE, p)
-    if foundation_chain:
-        number = parse_small_chinese_number(foundation_chain.group("number"))
-        if number is not None:
-            return format_foundation_chain_instruction(number, output_mode)
-
-    chain_start = translate_chain_start_expression_if_full(p, df, output_mode)
-    if chain_start is not None:
-        return chain_start
-
-    # Repeat group as one comma-split part, e.g. (sc, inc)x8 / (2sc, dec, 2sc)x8.
-    m = re.fullmatch(r"\((.*?)\)\s*(?:[xX×]|\*)\s*(\d+)\s*[（(]\s*(\d+)\s*[)）]", p)
-    if m:
-        inside, repeat, total = m.groups()
-        parts = [translate_group_part(part, index, df, output_mode) for part in split_expression_parts(inside)]
-        return f"{repeat_phrase(join_parts(parts, output_mode), repeat, output_mode)} ({total})"
-
-    m = re.fullmatch(r"\((.*?)\)\s*(?:[xX×]|\*)\s*(\d+)", p)
-    if m:
-        inside, repeat = m.groups()
-        parts = [translate_group_part(part, index, df, output_mode) for part in split_expression_parts(inside)]
-        return repeat_phrase(join_parts(parts, output_mode), repeat, output_mode)
-
-    m = re.fullmatch(r"\((.*?)\)\s*[（(]\s*(\d+)\s*[針针]\s*[)）]", p)
-    if m:
-        inside, count = m.groups()
-        return format_group_with_stitch_count(inside, count, index, df, output_mode)
-
-    # Bare bracketed group without explicit repeat, e.g. (10X,V).
-    m = re.fullmatch(r"\((.*?)\)", p)
-    if m:
-        parts = [translate_group_part(part, index, df, output_mode) for part in split_expression_parts(m.group(1))]
-        return f"（{join_parts(parts, output_mode)}）" if output_mode in ["Traditional Chinese", "Simplified Chinese", "Japanese"] else f"({join_parts(parts, output_mode)})"
-
-    # Term with total count note, e.g. slst (24) / turn (6). Keep the count.
-    m = re.fullmatch(r"(SLST|SL\s*ST|CH|SC|INC|DEC|HDC|DC|TR|MR|BLO|FLO|FO)\s*[（(]\s*(\d+)\s*[)）]", p, flags=re.I)
-    if m:
-        term, total = m.groups()
-        term_text = lookup_term(term.replace(" ", ""), index, df, output_mode, prefer_abbrev=(output_mode in ["English — US", "English — UK", "English US terms", "English UK terms"]))
-        return f"{term_text} ({total})"
-
-    m = re.fullmatch(r"([XVATFESLWM]{1,2}|SC|INC|DEC|HDC|DC|TR|SLST|MR)\s*[（(]\s*(\d+)\s*[針针]\s*[)）]", p, flags=re.I)
-    if m:
-        term, count = m.groups()
-        return format_symbol_with_stitch_count(term, count, index, df, output_mode)
-
-    m = re.fullmatch(r"(\d+)\s*[針针]", p)
-    if m:
-        return format_stitch_count(m.group(1), output_mode)
-
-    # Bare English crochet terms.
-    if re.fullmatch(r"SLST|SL\s*ST|CH|SC|INC|DEC|HDC|DC|TR|MR|BLO|FLO|FO|ST|STS|STITCH|STITCHES", p, flags=re.I):
-        return lookup_term(p.replace(" ", ""), index, df, output_mode, prefer_abbrev=(output_mode in ["English — US", "English — UK", "English US terms", "English UK terms"]))
-
-    # Chinese-mainland shorthand: 2X / 10x / 1V / 6A / 2SL
-    m = re.fullmatch(r"(\d+)\s*([XxVvAaTtFfEeSsLlWw]{1,2}|M{1,2})", p)
-    if m:
-        n, term = m.groups()
-        return translate_counted_token(n, term, index, df, output_mode)
-
-    # English shorthand: 6SC / 1DEC / 2 SC
-    m = re.fullmatch(r"(\d+)\s*(SC|INC|DEC|HDC|DC|TR|SLST|SL\s*ST|MR|CH|BLO|FLO|FO|STS?|STITCHES?)", p, flags=re.I)
-    if m:
-        n, term = m.groups()
-        return translate_counted_token(n, term, index, df, output_mode)
-
-    # Bare V / X / A or SC / INC / DEC
-    if re.fullmatch(r"[XVATFESLWM]{1,2}|SC|INC|DEC|HDC|DC|TR|SLST|MR", p, flags=re.I):
-        return lookup_expression_symbol(p.upper(), index, df, output_mode)
-
-    # SC all around / 不加減 / 不加減交叉X
-    if re.search(r"\bSC\s+all\s+around\b", p, flags=re.I) or "不加減" in p or "不加减" in p:
-        cross = "交叉" in p
-        # Safe rule: 不加減X / 不加减X means no increase/decrease, usually X all around.
-        # For 交叉X, keep the wording conservative because the exact stitch is not confirmed in CSV yet.
-        if output_mode == "Simplified Chinese":
-            return "交叉X，不加不减一圈" if cross else "短针不加不减一圈"
-        if output_mode == "Traditional Chinese":
-            return "交叉X，不加不減一圈" if cross else "短針不加不減一圈"
-        if output_mode == "Japanese":
-            return "交差X、増減なしで1周" if cross else "細編みで増減なし1周"
-        return "cross X all around (not yet confirmed)" if cross else "sc all around"
-
-    # in MR / 環起 / 环起
-    if re.search(r"\bin\s+MR\b", p, flags=re.I):
-        before = re.sub(r"\bin\s+MR\b", "", p, flags=re.I).strip()
-        before_out = translate_piece(before, index, df, output_mode) if before else ""
-        if output_mode == "Simplified Chinese":
-            return f"在环状起针中钩{before_out}" if before_out else "环状起针"
-        if output_mode == "Traditional Chinese":
-            return f"在環狀起針中鈎{before_out}" if before_out else "環狀起針"
-        if output_mode == "Japanese":
-            return f"輪の作り目に{before_out}" if before_out else "輪の作り目"
-        return f"{before_out} in MR" if before_out else "MR"
-
-    m = re.search(r"(?:環起|环起|環狀起針|环状起针|環形起針|环形起针|圈起|起圈|環|环)\s*(\d+)\s*([XVATFESLWM]|SC|INC|DEC)?", p, flags=re.I)
-    if m:
-        n, term = m.groups()
-        term = term or "X"
-        counted = translate_piece(f"{n}{term}", index, df, output_mode)
-        if output_mode == "Simplified Chinese":
-            return f"环状起针，{counted}"
-        if output_mode == "Traditional Chinese":
-            return f"環狀起針，{counted}"
-        if output_mode == "Japanese":
-            return f"輪の作り目、{counted}"
-        return f"MR, {counted}"
-
-    # V26 fallback: expression fragments can contain embedded terms rather than
-    # being a single clean token, e.g. "40sc in BLO" or "6sts in between".
-    # Run the CSV replacement engine before giving up.
-    csv_replaced = replace_csv_terms_in_line(p, index, df, output_mode)
-    if csv_replaced and (norm_text(csv_replaced) != norm_text(p) or (contains_chinese_stitch_count(p) and csv_replaced != p)):
-        return csv_replaced
-
-    return p
-
-@profile_function("translate_expression()", "translate_expression calls")
-def translate_expression(expr: str, index: Dict[str, int], df: pd.DataFrame, output_mode: str = "Traditional Chinese") -> str:
-    original = unicodedata.normalize("NFKC", expr).strip()
-    if not original:
-        return ""
-
-    chain_start = translate_chain_start_expression_if_full(original, df, output_mode)
-    if chain_start is not None:
-        return chain_start
-
-    generated_chain_terms: List[str] = []
-
-    def protect_chain_start_term(value: str) -> str:
-        marker = f"@@R21A_{len(generated_chain_terms)}@@"
-        generated_chain_terms.append(str(value))
-        return marker
-
-    def restore_chain_start_terms(value: str) -> str:
-        out_value = str(value)
-        for i, original_value in enumerate(generated_chain_terms):
-            out_value = out_value.replace(f"@@R21A_{i}@@", original_value)
-        return out_value
-
-    chain_start_recovered = replace_turning_chain_instructions(original, index, df, output_mode, protect=protect_chain_start_term)
-    chain_start_recovered = replace_foundation_chain_instructions(chain_start_recovered, output_mode, protect=protect_chain_start_term)
-    chain_start_recovered = replace_chain_start_instructions(chain_start_recovered, df, output_mode, protect=protect_chain_start_term)
-    if chain_start_recovered != original:
-        original = chain_start_recovered
-
-    total_counts = re.findall(r"\[\s*(\d+)\s*\]", original)
-    total_suffix = " ".join(f"({format_stitch_count(count, output_mode)})" for count in total_counts)
-
-    def with_total(value: str) -> str:
-        value = restore_chain_start_terms(str(value or "").strip())
-        if total_suffix:
-            return f"{value} {total_suffix}".strip()
-        return value
-
-    expr_no_total = re.sub(r"\[[^\]]+\]", "", original).strip()
-    expr_no_total = expr_no_total.replace("×", "x")
-
-    # OCR can merge a formula row with nearby prose, e.g.
-    # "(9X,A.9X)*3(57) 把它们粘在脸上". Translate the leading formula
-    # through the normal parser, then keep/rewrite the trailing text normally.
-    m = re.fullmatch(r"(\([^)]*\)\s*(?:[xX]|\*)\s*\d+\s*(?:[（(]\s*\d+\s*[)）])?)(\s+.+)", expr_no_total)
-    if m:
-        leading_expr, trailing_text = m.groups()
-        trailing = replace_csv_terms_in_line(trailing_text.strip(), index, df, output_mode)
-        return with_total(f"{translate_expression(leading_expr, index, df, output_mode)} {trailing}".strip())
-
-    # Chinese shorthand with prefix repeat: 8(X,V) / 8 (2x.v)
-    m = re.search(r"^(\d+)\s*\((.*?)\)$", expr_no_total, flags=re.I)
-    if m:
-        repeat, inside = m.groups()
-        parts = [translate_group_part(p, index, df, output_mode) for p in split_expression_parts(inside)]
-        return with_total(repeat_phrase(join_parts(parts, output_mode), repeat, output_mode))
-
-    # English/general repeat: (2SC, 1DEC)x6 / (1INC, 1SC)x6 / (10X,V)
-    m = re.fullmatch(r"\((.*?)\)\s*(?:[xX×]|\*)\s*(\d+)\s*[（(]\s*(\d+)\s*[)）]", expr_no_total)
-    if m:
-        inside, repeat, total = m.groups()
-        parts = [translate_group_part(p, index, df, output_mode) for p in split_expression_parts(inside)]
-        return with_total(f"{repeat_phrase(join_parts(parts, output_mode), repeat, output_mode)} ({total})")
-
-    m = re.fullmatch(r"\((.*?)\)\s*(?:[xX×]|\*)\s*(\d+)", expr_no_total)
-    if m:
-        inside, repeat = m.groups()
-        parts = [translate_group_part(p, index, df, output_mode) for p in split_expression_parts(inside)]
-        return with_total(repeat_phrase(join_parts(parts, output_mode), repeat, output_mode))
-
-    m = re.fullmatch(r"\((.*?)\)\s*[（(]\s*(\d+)\s*[針针]\s*[)）]", expr_no_total)
-    if m:
-        inside, count = m.groups()
-        return with_total(format_group_with_stitch_count(inside, count, index, df, output_mode))
-
-    # A bracketed group without explicit repeat, e.g. (10X,V)
-    m = re.fullmatch(r"\((.*?)\)", expr_no_total)
-    if m:
-        parts = [translate_group_part(p, index, df, output_mode) for p in split_expression_parts(m.group(1))]
-        return with_total(f"（{join_parts(parts, output_mode)}）" if output_mode in ["Traditional Chinese", "Simplified Chinese", "Japanese"] else f"({join_parts(parts, output_mode)})")
-
-    if re.search(r"\bin\s+MR\b", expr_no_total, flags=re.I) or re.search(r"環起|环起|環狀起針|环状起针|環形起針|环形起针|圈起|起圈|環\s*\d|环\s*\d", expr_no_total):
-        return with_total(translate_piece(expr_no_total, index, df, output_mode))
-
-    if "," in expr_no_total or "，" in expr_no_total or "、" in expr_no_total or "." in expr_no_total:
-        split_parts = split_expression_parts(expr_no_total)
-        if len(split_parts) == 1 and split_parts[0] == expr_no_total:
-            return with_total(translate_piece(expr_no_total, index, df, output_mode))
-        parts = [translate_expression(p, index, df, output_mode) for p in split_parts]
-        return with_total(join_parts(parts, output_mode))
-
-    return with_total(translate_piece(expr_no_total, index, df, output_mode))
-
-
-def repair_ocr_round_token(token: str) -> str:
-    """Repair common OCR round labels such as Rl14, RI6, R2g."""
-    t = unicodedata.normalize("NFKC", token).strip()
-    t = t.replace("：", ":").replace("；", ":").replace(";", ":")
-    t = re.sub(r"^r", "R", t, flags=re.I)
-    t = re.sub(r"^R[gq](?=\s*:)", "R9", t, flags=re.I)
-    t = re.sub(r"^R[lI](?=\s*:)", "R1", t, flags=re.I)
-    t = re.sub(r"^R114(?=\s*:)", "R14", t, flags=re.I)
-    t = re.sub(r"^R2[gq](?=\s*:)", "R29", t, flags=re.I)
-
-    m = re.match(r"^R([lI])([0-9]+)(.*)$", t)
-    if m:
-        digits = m.group(2)
-        rest = m.group(3)
-        # Rl0 / RI0 usually means R10. Rl1 alone usually means R11.
-        if digits == "0":
-            return "R10" + rest
-        if digits == "1":
-            return "R11" + rest
-        # Rl14 / RI6 means an extra l/I was inserted after R. Drop it.
-        return "R" + digits + rest
-
-    t = re.sub(r"^R114", "R14", t)
-    t = re.sub(r"^Rl0", "R10", t)
-    t = re.sub(r"^Rl1", "R11", t)
-    t = re.sub(r"^RI1", "R11", t)
-    return t
+CSV_TERM_CACHE_STATS = terminology_engine.CSV_TERM_CACHE_STATS
 
 
 def normalize_chinese_pattern_text(text: str) -> str:
@@ -2187,12 +1180,12 @@ def normalize_chinese_pattern_text(text: str) -> str:
     by moving the orphan (7XV) into R10 and repairing Rl0/Rl1/R2g.
     """
     text = unicodedata.normalize("NFKC", text)
-    text = normalize_decimal_mm(text)
+    text = line_translation_engine.normalize_decimal_mm(text)
     text = text.replace("：", ":").replace("；", ":").replace(";", ":")
     text = text.replace("，", ",").replace("、", ",").replace("。", ".")
-    text = normalize_decimal_mm(text)
+    text = line_translation_engine.normalize_decimal_mm(text)
     text = re.sub(r"([xvaftesl])\s*[.]\s*([xvaftesl])", r"\1,\2", text, flags=re.I)
-    text = normalize_decimal_mm(text)
+    text = line_translation_engine.normalize_decimal_mm(text)
     text = re.sub(r"\bIOX\b", "10X", text, flags=re.I)
     text = re.sub(r"\bI0X\b", "10X", text, flags=re.I)
     text = re.sub(r"\bGX\b", "6X", text, flags=re.I)
@@ -2203,7 +1196,7 @@ def normalize_chinese_pattern_text(text: str) -> str:
     i = 0
     while i < len(raw_lines):
         line = raw_lines[i]
-        line = repair_ocr_round_token(line)
+        line = line_translation_engine.repair_ocr_round_token(line)
         line = re.sub(r"\br\s*(\d+)", r"R\1", line, flags=re.I)
         line = re.sub(r"\bR(\d+)\s*[.;]", r"R\1:", line, flags=re.I)
         line = re.sub(r"\bR[gq]\s*:", "R9:", line, flags=re.I)
@@ -2218,7 +1211,7 @@ def normalize_chinese_pattern_text(text: str) -> str:
         # Example: (XV) / R3:8 -> R3: 8 (XV)
         # Example: (7XV) / Rl0: -> R10: (7XV)
         if orphan_bracket and i + 1 < len(raw_lines):
-            nxt = repair_ocr_round_token(raw_lines[i + 1].strip())
+            nxt = line_translation_engine.repair_ocr_round_token(raw_lines[i + 1].strip())
             if re.fullmatch(r"R\d+\s*:\s*\d*\s*", nxt, flags=re.I):
                 fixed.append(f"{nxt} {line}".strip())
                 i += 2
@@ -2261,7 +1254,7 @@ def extract_rounds(clean_text: str) -> List[Dict[str, object]]:
     """Extract R1/R2/R5-R8 rows from both line-based and run-on OCR text."""
     text = unicodedata.normalize("NFKC", clean_text)
     text = normalize_chinese_pattern_text(text)
-    text = normalize_pattern_rounds(text)
+    text = ocr_cleanup_engine.normalize_pattern_rounds(text)
     text = re.sub(r"\br\s*(\d+)", r"R\1", text, flags=re.I)
     text = re.sub(r"\bR(\d+)\s*[;.]", r"R\1:", text, flags=re.I)
     text = re.sub(r"\s+", " ", text.replace("\n", " ")).strip()
@@ -2336,7 +1329,7 @@ def build_interpretation(clean_text: str, index: Dict[str, int], df: pd.DataFram
     rounds = extract_rounds(clean_text)
     rows = []
     for r in rounds:
-        translated = translate_expression(str(r["Original"]), index, df, output_mode)
+        translated = line_translation_engine.translate_expression(str(r["Original"]), index, df, output_mode)
         output_col = "解讀" if output_mode in ["Traditional Chinese", "Simplified Chinese"] else "Interpretation"
         rows.append({
             "Round": r["Round"],
@@ -2347,2268 +1340,21 @@ def build_interpretation(clean_text: str, index: Dict[str, int], df: pd.DataFram
     return pd.DataFrame(rows)
 
 
-# -----------------------------
-# Visual overlay + readable line output
-# -----------------------------
-def get_output_column_name(output_mode: str) -> str:
-    return "解讀" if output_mode in ["Traditional Chinese", "Simplified Chinese"] else "Interpretation"
 
-def build_line_by_line_text(interpretation_df: pd.DataFrame, output_mode: str) -> str:
-    if interpretation_df.empty:
-        return ""
-    output_col = get_output_column_name(output_mode)
-    lines = []
-    for _, row in interpretation_df.iterrows():
-        round_label = str(row.get("Round", "")).strip()
-        interp = str(row.get(output_col, "")).strip()
-        total = str(row.get("Total stitches", "")).strip()
-        if not round_label and not interp:
-            continue
-        suffix = ""
-        if total:
-            if output_mode == "Simplified Chinese":
-                suffix = f"（共{total}针）"
-            elif output_mode == "Traditional Chinese":
-                suffix = f"（共{total}針）"
-            elif output_mode == "Japanese":
-                suffix = f"（合計{total}目）"
-            else:
-                suffix = f" [{total} sts]"
-        lines.append(f"{round_label}: {interp}{suffix}".strip())
-    return "\n".join(lines)
 
-def _load_overlay_font(size: int):
-    from PIL import ImageFont
-    font_paths = [
-        "/System/Library/Fonts/PingFang.ttc",
-        "/System/Library/Fonts/STHeiti Light.ttc",
-        "/Library/Fonts/Arial Unicode.ttf",
-        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-    ]
-    for fp in font_paths:
-        try:
-            return ImageFont.truetype(fp, size=size)
-        except Exception:
-            continue
-    return ImageFont.load_default()
-
-def _wrap_label(text: str, max_chars: int = 24) -> List[str]:
-    text = str(text).strip()
-    if len(text) <= max_chars:
-        return [text]
-    # Prefer breaking at punctuation/spaces, but keep it simple and deterministic.
-    chunks = []
-    current = ""
-    for part in re.split(r"(,|，|、|\s+)", text):
-        if not part:
-            continue
-        if len(current) + len(part) > max_chars and current:
-            chunks.append(current.strip())
-            current = part.strip()
-        else:
-            current += part
-    if current.strip():
-        chunks.append(current.strip())
-    # Very long formula with no separators.
-    final = []
-    for c in chunks:
-        while len(c) > max_chars:
-            final.append(c[:max_chars])
-            c = c[max_chars:]
-        if c:
-            final.append(c)
-    return final[:3]
-
-
-def _wrap_label_to_width(text: str, draw, font, max_width: float, max_lines: int = 3) -> List[str]:
-    """Wrap overlay label text by rendered pixel width instead of character count."""
-    text = str(text).strip()
-    if not text:
-        return []
-    max_width = max(80, float(max_width))
-
-    def text_width(value: str) -> float:
-        bb = draw.textbbox((0, 0), value, font=font)
-        return float(bb[2] - bb[0])
-
-    if text_width(text) <= max_width:
-        return [text]
-
-    tokens = [token for token in re.split(r"(,|，|、|\s+)", text) if token]
-    lines: List[str] = []
-    current = ""
-    for token in tokens:
-        candidate = f"{current}{token}" if current else token.strip()
-        if current and text_width(candidate.strip()) > max_width:
-            lines.append(current.strip())
-            current = token.strip()
-        else:
-            current = candidate
-    if current.strip():
-        lines.append(current.strip())
-
-    final: List[str] = []
-    for line in lines:
-        if text_width(line) <= max_width:
-            final.append(line)
-            continue
-        chunk = ""
-        for ch in line:
-            candidate = chunk + ch
-            if chunk and text_width(candidate) > max_width:
-                final.append(chunk)
-                chunk = ch
-            else:
-                chunk = candidate
-        if chunk:
-            final.append(chunk)
-    return final[:max_lines]
-
-def _find_anchor_for_round(ocr_rows: pd.DataFrame, round_label: str) -> Optional[Dict[str, float]]:
-    if ocr_rows is None or ocr_rows.empty:
-        return None
-    if not round_label:
-        return None
-    m = re.match(r"R(\d+)", str(round_label), flags=re.I)
-    if not m:
-        return None
-    n = m.group(1)
-    patterns = [
-        rf"\bR\s*{n}\s*[:：;]",
-        rf"\br\s*{n}\s*[:：;]",
-    ]
-    rows = ocr_rows.copy()
-    rows["confidence"] = pd.to_numeric(rows.get("confidence", 0), errors="coerce").fillna(0)
-    # First pass: exact round marker.
-    for pat in patterns:
-        hit = rows[rows["text"].astype(str).str.contains(pat, regex=True, case=False, na=False)]
-        if not hit.empty:
-            hit = hit.sort_values(["confidence"], ascending=False).iloc[0]
-            return hit.to_dict()
-    # Second pass: common OCR errors for R1/R9/R10/R11.
-    if n == "1":
-        hit = rows[rows["text"].astype(str).str.contains(r"\bR[lI]?\s*[:：;]", regex=True, case=False, na=False)]
-        if not hit.empty:
-            return hit.sort_values(["confidence"], ascending=False).iloc[0].to_dict()
-    return None
-
-def make_translation_overlay(image: Image.Image, ocr_rows: pd.DataFrame, interpretation_df: pd.DataFrame, output_mode: str) -> Optional[Image.Image]:
-    """Draw compact translation labels near detected round rows on the original image.
-
-    This is deliberately not a full Google Translate style overwrite. It keeps the
-    original visible and places small labels near likely round anchors for debugging
-    and readability.
-    """
-    if interpretation_df.empty or ocr_rows is None or ocr_rows.empty:
-        return None
-    from PIL import ImageDraw
-    img = image.convert("RGBA")
-    w, h = img.size
-    overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
-    draw = ImageDraw.Draw(overlay)
-    font_size = max(14, min(28, int(w / 45)))
-    font = _load_overlay_font(font_size)
-    output_col = get_output_column_name(output_mode)
-
-    used_slots = []
-    for _, row in interpretation_df.head(40).iterrows():
-        round_label = str(row.get("Round", "")).strip()
-        interp = str(row.get(output_col, "")).strip()
-        if not round_label or not interp:
-            continue
-        anchor = _find_anchor_for_round(ocr_rows, round_label)
-        if not anchor:
-            continue
-        min_x = float(anchor.get("min_x", anchor.get("global_x", 0)))
-        max_x = float(anchor.get("max_x", min_x + 80))
-        min_y = float(anchor.get("min_y", anchor.get("y", 0)))
-        max_y = float(anchor.get("max_y", min_y + 20))
-        label = f"{round_label}: {interp}"
-        lines = _wrap_label(label, max_chars=28)
-
-        # Measure text.
-        bboxes = [draw.textbbox((0, 0), line, font=font) for line in lines]
-        tw = max(bb[2] - bb[0] for bb in bboxes) + 16
-        th = sum(bb[3] - bb[1] for bb in bboxes) + 10 + (len(lines) - 1) * 4
-
-        # Prefer right side of the detected text; if no room, place below/left.
-        x = max_x + 8
-        y = min_y - 2
-        if x + tw > w - 4:
-            x = max(4, min_x - tw - 8)
-        if x < 4:
-            x = max(4, min_x)
-            y = max_y + 4
-        if y + th > h - 4:
-            y = max(4, h - th - 4)
-
-        # Avoid stacking labels exactly on top of each other.
-        for _ in range(8):
-            rect = (x, y, x + tw, y + th)
-            overlap = any(not (rect[2] < r[0] or rect[0] > r[2] or rect[3] < r[1] or rect[1] > r[3]) for r in used_slots)
-            if not overlap:
-                break
-            y = min(h - th - 4, y + th + 4)
-        used_slots.append((x, y, x + tw, y + th))
-
-        # Draw anchor outline and label.
-        draw.rectangle((min_x, min_y, max_x, max_y), outline=(255, 80, 80, 210), width=max(2, w // 700))
-        draw.rounded_rectangle((x, y, x + tw, y + th), radius=8, fill=(255, 255, 245, 230), outline=(80, 80, 80, 170), width=1)
-        cursor_y = y + 5
-        for line, bb in zip(lines, bboxes):
-            draw.text((x + 8, cursor_y), line, fill=(20, 20, 20, 255), font=font)
-            cursor_y += (bb[3] - bb[1]) + 4
-
-    return Image.alpha_composite(img, overlay).convert("RGB")
-
-
-
-# -----------------------------
-# Line translation mode
-# -----------------------------
-@profile_function("OCR text normalization: clean_single_ocr_line", "clean_single_ocr_line calls")
-def clean_single_ocr_line(text: str) -> str:
-    """Clean one OCR box/line without trying to rebuild sections or columns."""
-    s = unicodedata.normalize("NFKC", str(text)).strip()
-    if not s:
-        return ""
-    s = normalize_decimal_mm(s)
-    # Keep this conservative. Do not invent missing separators such as XV -> X,V.
-    s = s.replace("：", ":").replace("；", ":").replace(";", ":")
-    s = s.replace("，", ",").replace("、", ",").replace("。", ".")
-    s = normalize_decimal_mm(s)
-    s = repair_ocr_round_token(s)
-    # Common OCR repairs only when very safe.
-    repairs = {
-        "Rl:": "R1:", "RI:": "R1:", "Rg:": "R9:", "R2g:": "R29:",
-        "Rl0:": "R10:", "RI0:": "R10:", "Rl1:": "R11:", "RI1:": "R11:",
-        "R114:": "R14:", "IOX": "10X", "I0X": "10X", "GX": "6X", "SXV": "5XV",
-        "S LST": "SLST", "SL ST": "SLST", "S L ST": "SLST", "IDEC": "1DEC", "ISc": "1SC",
-    }
-    for bad, good in repairs.items():
-        s = s.replace(bad, good)
-    # Safe OCR fixes in English patterns. 6cc is almost always 6ch in crochet; avoid changing ordinary words.
-    s = re.sub(r"(?<=\d)\s*cc\b", "ch", s, flags=re.I)
-    s = re.sub(r"\bsl\s*st\b", "slst", s, flags=re.I)
-    s = re.sub(r"\bsl\s*st(s)?\b", "slst", s, flags=re.I)
-    s = re.sub(r"\bR\s*(\d+)", r"R\1", s, flags=re.I)
-    s = re.sub(r"\bR(\d+)\s*[.]", r"R\1:", s, flags=re.I)
-    # Normalize punctuation between stitch symbols only if OCR already saw a dot/comma.
-    s = re.sub(r"([xvatfeXVATFE])\s*[.]\s*([xvatfeXVATFE])", r"\1,\2", s)
-    s = normalize_decimal_mm(s)
-    return s.strip()
-
-
-
-def translate_common_instruction_line(s: str, index: Dict[str, int], df: pd.DataFrame, output_mode: str) -> Optional[str]:
-    """Conservative translation for common non-round crochet instruction lines.
-
-    This is not a general translator. It only handles high-frequency pattern
-    phrases safely, while preserving the original when uncertain.
-    """
-    raw = unicodedata.normalize("NFKC", str(s)).strip()
-    if not raw:
-        return None
-
-    # Normalise compact stitch counts inside ordinary sentences: 6sts, 8sc, 4ch.
-    def counted(n: str, term: str) -> str:
-        return translate_piece(f"{n}{term}", index, df, output_mode)
-
-    # Start with 8sc in a Magic ring, slst (8)
-    m = re.search(
-        r"^Start\s+with\s+(\d+)\s*(sc|sts?|stitches?|ch|dc|hdc|tr)\s+in\s+a\s+Magic\s+ring\s*,?\s*(sl\s*st|slst)?\s*(?:\((\d+)\))?\s*$",
-        raw,
-        flags=re.I,
-    )
-    if m:
-        n, term, join_term, total = m.groups()
-        main = counted(n, "sc" if term.lower().startswith("st") else term)
-        mr = lookup_term("mr", index, df, output_mode)
-        join = lookup_term("slst", index, df, output_mode) if join_term else ""
-        if output_mode == "Simplified Chinese":
-            out = f"以{mr}起针，钩{main}"
-            if join:
-                out += f"，{join}"
-            if total:
-                out += f"（共{total}针）"
-            return out
-        if output_mode == "Traditional Chinese":
-            out = f"以{mr}起針，鈎{main}"
-            if join:
-                out += f"，{join}"
-            if total:
-                out += f"（共{total}針）"
-            return out
-        if output_mode == "Japanese":
-            out = f"{mr}で始め、{main}"
-            if join:
-                out += f"、{join}"
-            if total:
-                out += f"（合計{total}目）"
-            return out
-        out = f"Start with {main} in {mr}"
-        if join:
-            out += f", {join}"
-        if total:
-            out += f" ({total})"
-        return out
-
-    # Start from 4ch / Start with 6ch / Start with 6cc (OCR-safe)
-    m = re.search(r"^Start\s+(?:from|with)\s+(\d+)\s*(ch|cc)\s*$", raw, flags=re.I)
-    if m:
-        n, term = m.groups()
-        main = counted(n, "ch")
-        if output_mode == "Simplified Chinese":
-            return f"从{main}开始"
-        if output_mode == "Traditional Chinese":
-            return f"從{main}開始"
-        if output_mode == "Japanese":
-            return f"{main}から始める"
-        return f"Start from {main}"
-
-    # Pure explanatory sentence with embedded stitch count, e.g. "6sts in between".
-    # Keep it conservative to avoid Argos-style nonsense.
-    m = re.search(r"^(?:Place\s+the\s+eyes\s+on\s+the\s+center\s+of\s+the\s+sleeve,\s*)?(\d+)\s*sts?\s+in\s+between\.?$", raw, flags=re.I)
-    if m:
-        n = m.group(1)
-        stitch_word = counted(n, "st")
-        if output_mode == "Simplified Chinese":
-            return f"将眼睛放在袖子中央，中间相隔{stitch_word}。" if raw.lower().startswith("place") else f"中间相隔{stitch_word}。"
-        if output_mode == "Traditional Chinese":
-            return f"將眼睛放在袖子中央，中間相隔{stitch_word}。" if raw.lower().startswith("place") else f"中間相隔{stitch_word}。"
-        if output_mode == "Japanese":
-            return f"目を袖の中央に付け、間を{stitch_word}空ける。" if raw.lower().startswith("place") else f"間を{stitch_word}空ける。"
-        return raw
-
-    # Simple sewing line.
-    if re.fullmatch(r"Sew\s+the\s+mouth\.?", raw, flags=re.I):
-        if output_mode == "Simplified Chinese":
-            return "缝上嘴巴。"
-        if output_mode == "Traditional Chinese":
-            return "縫上嘴巴。"
-        if output_mode == "Japanese":
-            return "口を縫い付ける。"
-        return raw
-
-    return None
-
-@profile_function("line-by-line translation: translate_ocr_line", "translate_ocr_line calls")
-def translate_ocr_line(original: str, index: Dict[str, int], df: pd.DataFrame, output_mode: str) -> str:
-    """Translate one OCR text box. If uncertain, return the cleaned original.
-
-    This deliberately behaves like a conservative Google-Translate-ish reader:
-    translate recognisable crochet shorthand; keep unrecognised text intact.
-    """
-    s = clean_single_ocr_line(original)
-    if not s:
-        return ""
-
-    # V24: avoid hard-coded full-sentence translations.
-    # First try CSV term replacement inside the whole line; this lets CSV terms
-    # such as turn / slst / magic ring / ch / sts translate wherever they appear.
-    csv_replaced = replace_csv_terms_in_line(s, index, df, output_mode)
-
-    # Section headers / ordinary structural labels.
-    section_map = {
-        "上半部分": {"Traditional Chinese": "上半部分", "Simplified Chinese": "上半部分", "English — US": "Upper section", "English — UK": "Upper section", "Japanese": "上半分"},
-        "上半部份": {"Traditional Chinese": "上半部分", "Simplified Chinese": "上半部分", "English — US": "Upper section", "English — UK": "Upper section", "Japanese": "上半分"},
-        "下半部分": {"Traditional Chinese": "下半部分", "Simplified Chinese": "下半部分", "English — US": "Lower section", "English — UK": "Lower section", "Japanese": "下半分"},
-        "下半部份": {"Traditional Chinese": "下半部分", "Simplified Chinese": "下半部分", "English — US": "Lower section", "English — UK": "Lower section", "Japanese": "下半分"},
-        "腳丫": {"Traditional Chinese": "腳丫", "Simplified Chinese": "脚丫", "English — US": "Feet", "English — UK": "Feet", "Japanese": "足"},
-        "脚丫": {"Traditional Chinese": "腳丫", "Simplified Chinese": "脚丫", "English — US": "Feet", "English — UK": "Feet", "Japanese": "足"},
-    }
-    for key, outputs in section_map.items():
-        if key in s:
-            return outputs.get(output_mode, outputs.get("Traditional Chinese", key))
-
-    # Round label plus expression: R1: 环6x / R3: 6(X,V) / Rnd 1: sc 6
-    m = re.match(r"^(?:Rnd\s*)?R?\s*([lI]?[0-9gq]+(?:\s*[-–—~～〜－]\s*R?\d+)?)\s*[:：]\s*(.*)$", s, flags=re.I)
-    if m:
-        label_core, expr = m.groups()
-        label = "R" + repair_ocr_round_token(label_core).replace(" ", "")
-        label = re.sub(r"^RR", "R", label, flags=re.I)
-        label = re.sub(r"[-–—~～〜－]", "-", label)
-        expr = expr.strip()
-        if not expr:
-            return label
-        translated = translate_expression(expr, index, df, output_mode)
-        # If no useful change, keep original expression.
-        return f"{label}: {translated}"
-
-    # A line can be a raw crochet formula without R label.
-    translated = translate_expression(s, index, df, output_mode)
-
-    # V25: for ordinary instruction sentences, prefer CSV term replacement.
-    # This avoids partial expression-parser output such as leaving 8sc / Magic ring
-    # untranslated in "Start with 8sc in a Magic ring, slst (8)".
-    if _looks_like_prose_line(s):
-        if csv_replaced and (norm_text(csv_replaced) != norm_text(s) or (contains_chinese_stitch_count(s) and csv_replaced != s)):
-            return csv_replaced
-        return translated if translated else s
-
-    # Prefer full pattern-expression translation when it clearly changed the line.
-    if translated and norm_text(translated) != norm_text(s):
-        return translated
-
-    # Otherwise return CSV term replacement. Unknown ordinary language remains as-is.
-    if csv_replaced and (norm_text(csv_replaced) != norm_text(s) or (contains_chinese_stitch_count(s) and csv_replaced != s)):
-        return csv_replaced
-
-    return translated if translated else s
-
-
-
-def merge_ocr_boxes_into_visual_lines(ocr_rows: pd.DataFrame) -> pd.DataFrame:
-    """Merge PaddleOCR text boxes that sit on the same visual line.
-
-    PaddleOCR often returns English pattern rows as separate boxes:
-        "Rnd 2:"   "6 inc around"   "(12)"
-    If we translate box-by-box, the order becomes messy and the round label is
-    detached from the instruction. This function groups boxes by vertical
-    position, then merges nearby boxes left-to-right while avoiding large column
-    gaps.
-    """
-    if ocr_rows is None or ocr_rows.empty:
-        return pd.DataFrame()
-
-    rows = ocr_rows.copy()
-    for col in ["min_x", "max_x", "min_y", "max_y", "x", "y", "global_x", "confidence"]:
-        if col in rows.columns:
-            rows[col] = pd.to_numeric(rows[col], errors="coerce")
-
-    if "min_y" not in rows.columns or "max_y" not in rows.columns:
-        rows = rows.sort_values(["y", "global_x" if "global_x" in rows.columns else "x"]).reset_index(drop=True)
-        return rows
-
-    rows["_cy"] = (rows["min_y"].fillna(rows.get("y", 0)) + rows["max_y"].fillna(rows.get("y", 0))) / 2
-    rows["_h"] = (rows["max_y"].fillna(rows.get("y", 0) + 20) - rows["min_y"].fillna(rows.get("y", 0))).abs()
-    median_h = float(rows["_h"].replace(0, pd.NA).dropna().median() or 20)
-    y_threshold = max(10.0, median_h * 0.65)
-
-    rows = rows.sort_values(["_cy", "min_x"]).reset_index(drop=True)
-    line_groups = []
-    cur = []
-    cur_cy = None
-    for idx, row in rows.iterrows():
-        cy = float(row.get("_cy", 0) or 0)
-        if cur_cy is None or abs(cy - cur_cy) <= y_threshold:
-            cur.append(idx)
-            cur_cy = cy if cur_cy is None else (cur_cy * (len(cur) - 1) + cy) / len(cur)
-        else:
-            line_groups.append(cur)
-            cur = [idx]
-            cur_cy = cy
-    if cur:
-        line_groups.append(cur)
-
-    canvas_width = float(max(rows["max_x"].max() if "max_x" in rows.columns else 0, 1.0))
-    gap_threshold = max(180.0, canvas_width * 0.20)
-    merged_records = []
-
-    for group in line_groups:
-        line = rows.loc[group].copy().sort_values("min_x")
-        cluster = []
-        last_max_x = None
-        for _, r in line.iterrows():
-            min_x = float(r.get("min_x", r.get("x", 0)) or 0)
-            if cluster and last_max_x is not None and min_x - last_max_x > gap_threshold:
-                merged_records.append(_merge_ocr_cluster(cluster))
-                cluster = []
-            cluster.append(r)
-            last_max_x = float(r.get("max_x", r.get("x", min_x) + 80) or (min_x + 80))
-        if cluster:
-            merged_records.append(_merge_ocr_cluster(cluster))
-
-    out = pd.DataFrame(merged_records)
-    if out.empty:
-        return rows.drop(columns=[c for c in ["_cy", "_h"] if c in rows.columns], errors="ignore")
-    return out.sort_values(["min_y", "min_x"]).reset_index(drop=True)
-
-
-def _merge_ocr_cluster(cluster: list) -> Dict[str, object]:
-    texts = [str(r.get("text", "")).strip() for r in cluster if str(r.get("text", "")).strip()]
-    # Tighten punctuation spacing after joining left-to-right OCR boxes.
-    text = " ".join(texts)
-    text = re.sub(r"\s+([:：,，;；)])", r"\1", text)
-    text = re.sub(r"([(（])\s+", r"\1", text)
-    text = re.sub(r"\b(Rnd|R)\s+(\d)", r"\1 \2", text, flags=re.I)
-    confs = [float(r.get("confidence", 0) or 0) for r in cluster]
-    min_x = min(float(r.get("min_x", r.get("x", 0)) or 0) for r in cluster)
-    max_x = max(float(r.get("max_x", r.get("x", 0) + 80) or 80) for r in cluster)
-    min_y = min(float(r.get("min_y", r.get("y", 0)) or 0) for r in cluster)
-    max_y = max(float(r.get("max_y", r.get("y", 0) + 20) or 20) for r in cluster)
-    return {
-        "text": text,
-        "confidence": sum(confs) / len(confs) if confs else 0,
-        "x": (min_x + max_x) / 2,
-        "global_x": (min_x + max_x) / 2,
-        "y": (min_y + max_y) / 2,
-        "min_x": min_x,
-        "max_x": max_x,
-        "min_y": min_y,
-        "max_y": max_y,
-        "source": "visual line merge",
-    }
-
-@profile_function("line-by-line translation: build_ocr_line_translations", "build_ocr_line_translations calls")
-def build_ocr_line_translations(ocr_rows: pd.DataFrame, index: Dict[str, int], df: pd.DataFrame, output_mode: str) -> pd.DataFrame:
-    if ocr_rows is None or ocr_rows.empty:
-        return pd.DataFrame()
-    # V28: merge visually aligned OCR boxes before translation.
-    # This keeps rows like "Rnd 2:   6 inc around   (12)" together.
-    rows = merge_ocr_boxes_into_visual_lines(ocr_rows)
-    rows["confidence"] = pd.to_numeric(rows.get("confidence", 0), errors="coerce").fillna(0)
-    # For line-translation mode, do NOT discard aggressively. Keep low-confidence rows visible.
-    rows = rows.sort_values(["min_y", "min_x"]).reset_index(drop=True)
-    profile_count("merged OCR lines", len(rows))
-    out = []
-    for _, r in rows.iterrows():
-        original = str(r.get("text", "")).strip()
-        if not original:
-            continue
-        profile_count("OCR lines processed")
-        cleaned = clean_single_ocr_line(original)
-        translated = translate_ocr_line(cleaned, index, df, output_mode)
-        changed = norm_text(cleaned) != norm_text(translated)
-        out.append({
-            "Original": cleaned,
-            "Translation": translated,
-            "Confidence": round(float(r.get("confidence", 0)), 3),
-            "Changed": "✓" if changed else "",
-            "min_x": float(r.get("min_x", r.get("x", 0))),
-            "max_x": float(r.get("max_x", r.get("x", 0) + 80)),
-            "min_y": float(r.get("min_y", r.get("y", 0))),
-            "max_y": float(r.get("max_y", r.get("y", 0) + 20)),
-        })
-    return pd.DataFrame(out)
-
-
-@profile_function("line-by-line translation: build_readable_line_translation", "build_readable_line_translation calls")
-def build_readable_line_translation(line_df: pd.DataFrame) -> str:
-    if line_df is None or line_df.empty:
-        return ""
-    lines = []
-    for _, row in line_df.iterrows():
-        original = str(row.get("Original", "")).strip()
-        translated = str(row.get("Translation", "")).strip()
-        if not original and not translated:
-            continue
-        if norm_text(original) == norm_text(translated):
-            lines.append(original)
-        else:
-            lines.append(f"{original}\n→ {translated}")
-    return "\n\n".join(lines)
-
-
-
-# -----------------------------
-# Watermark / noise filtering
-# -----------------------------
-WATERMARK_KEYWORDS = [
-    "HANDMADE", "handmade", "小红书", "小紅書", "小红书号", "小紅書號",
-    "禁商用", "禁盗图", "禁盜圖", "禁止商用", "禁止盗图", "禁止盜圖",
-    "转载请", "請標明", "请标明", "轉載請", "转载请", "转载", "轉載",
-    "cookie_", "cookie", "ID:", "id:", "號:", "号:", "书号", "書號",
-]
-
-WATERMARK_TRAILING_PATTERNS = [
-    r"[\.。·、,，\s]*小[红紅]書(?:號|号)?\s*[:：]?\s*[A-Za-z0-9_\-]*.*$",
-    r"[\.。·、,，\s]*布丁\s*HANDMADE.*$",
-    r"[\.。·、,，\s]*HANDMADE.*$",
-    r"[\.。·、,，\s]*(?:禁商用|禁盗图|禁盜圖|禁止商用|禁止盗图|禁止盜圖).*$",
-    r"[\.。·、,，\s]*(?:转载请|轉載請|转载请|轉載|转载).*$",
-]
-
-
-def strip_watermark_substrings(text: str) -> str:
-    s = str(text or "").strip()
-    for pat in WATERMARK_TRAILING_PATTERNS:
-        s = re.sub(pat, "", s, flags=re.I)
-    return s.strip(" .。·、,，;；")
-
-
-def looks_like_section_header_text(text: str) -> bool:
-    return detect_section_header(str(text or ""), "English — US") is not None
-
-
-def looks_like_pattern_text(text: str) -> bool:
-    """Protect real crochet content from watermark removal.
-
-    Do not remove repeated R1/R2/6V/X/V/A lines. Repeated watermarks are only
-    removed when they do *not* look like crochet notation, section headers, or
-    instructions.
-    """
-    s = unicodedata.normalize("NFKC", str(text or "")).strip()
-    if not s:
-        return False
-    if looks_like_section_header_text(s):
-        return True
-    patterns = [
-        r"\b[Rr]\s*\d+\b",                         # R1 / R20
-        r"\b[Rr]\s*\d+\s*[-~～]\s*\d+\b",          # R5-6 / R5~6
-        r"\d+\s*[xXvVaAtTfFeE]\b",                 # 6V / 18x / 2T
-        r"[xXvVaAtTfFeE]\s*[\.．,，、]\s*[xXvVaAtTfFeE]",  # X.V / T.v
-        r"\d+\s*ch\b|\bch\s*\d+",                 # 6ch / ch6
-        r"\b(?:MR|mr|sc|SC|dc|DC|hdc|HDC|tr|TR|sl\s*st|SLST|inc|INC|dec|DEC|blo|BLO|flo|FLO)\b",
-        r"環起|环起|環|环|起針|起针|針|针|半針|半针|外半針|内半针|內半針|加針|加针|減針|减针|不加減|不加减|交叉|倒\d+",
-    ]
-    return any(re.search(pat, s, flags=re.I) for pat in patterns)
-
-
-def is_watermark_like_text(text: str, repeated_count: int = 1) -> bool:
-    s = unicodedata.normalize("NFKC", str(text or "")).strip()
-    if not s:
-        return True
-    # Strong blacklist, but only remove if it is not also a real pattern line.
-    if any(k.lower() in s.lower() for k in WATERMARK_KEYWORDS) and not looks_like_pattern_text(s):
-        return True
-    # Repeated text filter: safe version. Never remove crochet-looking content.
-    if repeated_count >= 5 and not looks_like_pattern_text(s):
-        return True
-    # Very short decorative leftovers with no crochet meaning.
-    if len(s) <= 2 and not looks_like_pattern_text(s):
-        return True
-    return False
-
-
-def filter_noise_and_watermarks(ocr_rows: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
-    """Remove common watermark/noise rows without deleting real pattern rows.
-
-    Also strips trailing watermark fragments from otherwise useful rows, e.g.
-    R9: ... 小紅書號:7110260553
-    """
-    if ocr_rows is None or ocr_rows.empty:
-        return pd.DataFrame(), pd.DataFrame()
-
-    rows = ocr_rows.copy().reset_index(drop=True)
-    rows["original_text_before_filter"] = rows["text"].astype(str)
-    rows["text"] = rows["text"].astype(str).map(strip_watermark_substrings)
-
-    norm_counts = rows["text"].map(lambda x: norm_text(x)).value_counts().to_dict()
-    keep = []
-    removed = []
-    for _, r in rows.iterrows():
-        txt = str(r.get("text", "")).strip()
-        original_txt = str(r.get("original_text_before_filter", "")).strip()
-        nkey = norm_text(txt)
-        repeated = int(norm_counts.get(nkey, 0)) if nkey else 0
-        reason = ""
-        if original_txt and txt != original_txt and not txt:
-            reason = "watermark substring only"
-        elif is_watermark_like_text(txt, repeated_count=repeated):
-            reason = f"watermark/noise; repeated={repeated}"
-        if reason:
-            rr = r.to_dict()
-            rr["removed_reason"] = reason
-            removed.append(rr)
-        else:
-            keep.append(r.to_dict())
-
-    keep_df = pd.DataFrame(keep)
-    removed_df = pd.DataFrame(removed)
-    if not keep_df.empty and "original_text_before_filter" in keep_df.columns:
-        # Keep this hidden unless debugging removed rows.
-        pass
-    return keep_df, removed_df
-
-
-# -----------------------------
-# Section detection / section-aware output
-# -----------------------------
-SECTION_TRANSLATIONS = {
-    "上半部分": {"Traditional Chinese": "上半部分", "Simplified Chinese": "上半部分", "English — US": "Upper section", "English — UK": "Upper section", "Japanese": "上半分"},
-    "上半部份": {"Traditional Chinese": "上半部分", "Simplified Chinese": "上半部分", "English — US": "Upper section", "English — UK": "Upper section", "Japanese": "上半分"},
-    "下半部分": {"Traditional Chinese": "下半部分", "Simplified Chinese": "下半部分", "English — US": "Lower section", "English — UK": "Lower section", "Japanese": "下半分"},
-    "下半部份": {"Traditional Chinese": "下半部分", "Simplified Chinese": "下半部分", "English — US": "Lower section", "English — UK": "Lower section", "Japanese": "下半分"},
-    "腳丫": {"Traditional Chinese": "腳丫", "Simplified Chinese": "脚丫", "English — US": "Feet", "English — UK": "Feet", "Japanese": "足"},
-    "脚丫": {"Traditional Chinese": "腳丫", "Simplified Chinese": "脚丫", "English — US": "Feet", "English — UK": "Feet", "Japanese": "足"},
-    "腳Y": {"Traditional Chinese": "腳丫", "Simplified Chinese": "脚丫", "English — US": "Feet", "English — UK": "Feet", "Japanese": "足"},
-    "脚Y": {"Traditional Chinese": "腳丫", "Simplified Chinese": "脚丫", "English — US": "Feet", "English — UK": "Feet", "Japanese": "足"},
-    "頭": {"Traditional Chinese": "頭", "Simplified Chinese": "头", "English — US": "Head", "English — UK": "Head", "Japanese": "頭"},
-    "头": {"Traditional Chinese": "頭", "Simplified Chinese": "头", "English — US": "Head", "English — UK": "Head", "Japanese": "頭"},
-    "身體": {"Traditional Chinese": "身體", "Simplified Chinese": "身体", "English — US": "Body", "English — UK": "Body", "Japanese": "体"},
-    "身体": {"Traditional Chinese": "身體", "Simplified Chinese": "身体", "English — US": "Body", "English — UK": "Body", "Japanese": "体"},
-    "耳朵": {"Traditional Chinese": "耳朵", "Simplified Chinese": "耳朵", "English — US": "Ears", "English — UK": "Ears", "Japanese": "耳"},
-    "尾巴": {"Traditional Chinese": "尾巴", "Simplified Chinese": "尾巴", "English — US": "Tail", "English — UK": "Tail", "Japanese": "しっぽ"},
-    "手臂": {"Traditional Chinese": "手臂", "Simplified Chinese": "手臂", "English — US": "Arms", "English — UK": "Arms", "Japanese": "腕"},
-    "腿": {"Traditional Chinese": "腿", "Simplified Chinese": "腿", "English — US": "Legs", "English — UK": "Legs", "Japanese": "脚"},
-}
-
-
-def _clean_section_candidate(text: str) -> str:
-    s = unicodedata.normalize("NFKC", str(text or "")).strip()
-    s = s.replace("（", "(").replace("）", ")")
-    s = re.sub(r"^[\s\-~:：;；,，、.。()]+|[\s\-~:：;；,，、.。()]+$", "", s)
-    s = re.sub(r"\s+", "", s)
-    return s
-
-
-def detect_section_header(original: str, output_mode: str) -> Optional[str]:
-    """Return translated section title if this OCR line looks like a section header.
-
-    Be conservative. A line containing 手 in a note like 靠近自己手半针 should NOT
-    become a section. Short standalone labels such as （上半部分） or 脚丫: should.
-    """
-    raw = str(original or "").strip()
-    s = _clean_section_candidate(raw)
-    if not s:
-        return None
-
-    # Direct known headers. Allow titles plus a colon, but avoid long instruction notes.
-    for key, outputs in SECTION_TRANSLATIONS.items():
-        if s == key or s.startswith(key + ":") or s.startswith(key + "："):
-            return outputs.get(output_mode, outputs.get("Traditional Chinese", key))
-        if key in ["上半部分", "上半部份", "下半部分", "下半部份"] and key in s and len(s) <= 12:
-            return outputs.get(output_mode, outputs.get("Traditional Chinese", key))
-
-    # Common OCR: 脚丫 can appear as 脚Y / 腳Y and may include colon.
-    if re.fullmatch(r"[腳脚][丫Yy]", s):
-        return SECTION_TRANSLATIONS["腳丫"].get(output_mode, "腳丫")
-
-    # Very short part headers only. Do not classify longer notes.
-    short_part_map = {
-        "耳": "Ears", "耳朵": "Ears", "尾": "Tail", "尾巴": "Tail",
-        "花瓣": "Petals", "葉子": "Leaves", "叶子": "Leaves", "翅膀": "Wings",
-    }
-    if len(s) <= 4 and s in short_part_map:
-        if output_mode == "Traditional Chinese":
-            return {"叶子":"葉子"}.get(s, s)
-        if output_mode == "Simplified Chinese":
-            return {"葉子":"叶子"}.get(s, s)
-        return short_part_map[s]
-
-    return None
-
-
-def extract_round_label_from_line(original: str) -> Optional[str]:
-    """Extract round labels including ranges such as R10~15 / R10-15 / Rnd 3-4."""
-    s = unicodedata.normalize("NFKC", str(original or "")).strip()
-    s = s.replace("：", ":").replace("；", ":").replace(";", ":")
-    # Support common range separators used in Chinese / Japanese / English patterns.
-    sep = r"[-–—~～〜－]"
-    # Accept both compact R labels and English "Rnd" labels.
-    m = re.match(rf"^(?:Rnd\s*)?R?\s*([lI]?[0-9gq]+(?:\s*{sep}\s*R?\s*[0-9gq]+)?)\s*:", s, flags=re.I)
-    if not m:
-        return None
-    label = "R" + repair_ocr_round_token(m.group(1)).replace(" ", "")
-    label = re.sub(r"^RR", "R", label, flags=re.I)
-    # Normalise all range separators for display and downstream parsing.
-    label = re.sub(sep, "-", label)
-    return label
-
-
-def _line_to_section_item(row: pd.Series, assigned_by: str = "") -> Dict[str, object]:
-    original = str(row.get("Original", "")).strip()
-    translated = str(row.get("Translation", "")).strip()
-    round_label = extract_round_label_from_line(original) or ""
-    return {
-        "Original": original,
-        "Translation": translated or original,
-        "Round": round_label,
-        "Confidence": row.get("Confidence", ""),
-        "Changed": row.get("Changed", ""),
-        "x": float(row.get("min_x", 0) or 0),
-        "y": float(row.get("min_y", 0) or 0),
-        "assigned_by": assigned_by,
-    }
-
-
-def _round_number(label: str) -> Optional[int]:
-    m = re.match(r"^R(\d+)", str(label or ""), flags=re.I)
-    if not m:
-        return None
-    try:
-        return int(m.group(1))
-    except Exception:
-        return None
-
-
-def _row_has_pattern_tokens(original: str) -> bool:
-    s = unicodedata.normalize("NFKC", str(original or ""))
-    return bool(
-        extract_round_label_from_line(s)
-        or re.search(r"\d+\s*[xXvVaAtTfFeE]", s)
-        or re.search(r"[xXvVaAtTfFeE]\s*[.．,，]", s)
-        or re.search(r"\d+\s*(?:ch|sc|dc|hdc|tr|inc|dec|slst|sts?)\b", s, flags=re.I)
-        or re.search(r"\b(ch|mr|magic\s*ring|sc|dc|hdc|tr|inc|dec|blo|flo|slst|sl\s*st|sts?|stitch(?:es)?)\b", s, flags=re.I)
-        or re.search(r"[環环]\s*\d+\s*[xX]", s)
-    )
-
-
-def _looks_like_instruction_continuation(original: str) -> bool:
-    """Detect non-R instruction lines that belong to the current pattern block.
-
-    Example: 雪絨花內半針扭花短針48 is an instruction under R16, not a new section title.
-    """
-    s = unicodedata.normalize("NFKC", str(original or "")).strip()
-    if not s or extract_round_label_from_line(s):
-        return False
-    # Chinese stitch / loop / crochet instruction with a count usually continues the previous row.
-    if re.search(r"[針针半外內内短長长中扭翻圈繞绕鈎钩加減减]", s) and re.search(r"\d+", s):
-        return True
-    # English-style instruction with a count, but no round label. Handles compact terms: 8sc, 6ch, slst (8).
-    if re.search(r"\d+\s*(?:ch|sc|dc|hdc|tr|inc|dec|slst|sts?)\b", s, flags=re.I):
-        return True
-    if re.search(r"\b(?:start\s+with|start\s+from|magic\s+ring|slst|sl\s*st|blo|flo|turn|join|sew|place)\b", s, flags=re.I) and re.search(r"\d+|\b(?:sc|dc|hdc|tr|ch|inc|dec|slst|mr)\b", s, flags=re.I):
-        return True
-    return False
-
-
-def _looks_like_block_title(original: str) -> bool:
-    """Heuristic title detector. No fixed title dictionary.
-
-    A title is a short non-round line that is near pattern rows. We do not need
-    to know what 蛋糕主體 / 櫻桃 / 蠟燭 means; we only need to avoid treating it as
-    a crochet instruction row.
-    """
-    s = unicodedata.normalize("NFKC", str(original or "")).strip()
-    if not s:
-        return False
-    if extract_round_label_from_line(s):
-        return False
-    if _row_has_pattern_tokens(s):
-        # e.g. 起83CH... is an instruction, not a title.
-        return False
-    if _looks_like_instruction_continuation(s):
-        return False
-    if len(s) > 28:
-        return False
-    # Chinese part names or short English headings/material labels, without hard-coding every title.
-    if re.search(r"[\u4e00-\u9fff]", s):
-        return True
-    # English part headings tend to be short Title Case words: Body, Cover, Legs, Strap, Sleeve.
-    if re.fullmatch(r"[A-Z][A-Za-z ]{1,24}", s) and len(s.split()) <= 4:
-        return True
-    # Material headings such as <white yarn> should stay with the upcoming section.
-    if re.fullmatch(r"<[^>]{2,40}>", s):
-        return True
-    return False
-
-
-def _cluster_rows_by_x(rows: pd.DataFrame) -> Dict[int, List[int]]:
-    """Cluster rows into rough visual columns using x-start of pattern rows.
-
-    This is intentionally simple. It helps with layouts where left and right
-    columns contain separate parts but OCR reading order interleaves them.
-    """
-    if rows.empty:
-        return {0: []}
-
-    rows = rows.copy()
-    canvas_width = float(max(rows["max_x"].max(), 1.0))
-    pattern_indices = []
-    xs = []
-    for idx, row in rows.iterrows():
-        original = str(row.get("Original", ""))
-        if _row_has_pattern_tokens(original) or _looks_like_block_title(original):
-            pattern_indices.append(idx)
-            xs.append(float(row.get("min_x", 0) or 0))
-
-    if not xs:
-        return {0: list(rows.index)}
-
-    points = sorted(xs)
-    # A gap of roughly a fifth of the page usually separates columns.
-    gap_threshold = max(170.0, canvas_width * 0.18)
-    centers = []
-    cur = [points[0]]
-    for x in points[1:]:
-        if x - cur[-1] > gap_threshold:
-            centers.append(sum(cur) / len(cur))
-            cur = [x]
-        else:
-            cur.append(x)
-    centers.append(sum(cur) / len(cur))
-
-    if len(centers) > 4:
-        # Too many means decorative text polluted clustering. Collapse a little.
-        merged = []
-        for c in centers:
-            if not merged or abs(c - merged[-1]) > gap_threshold:
-                merged.append(c)
-            else:
-                merged[-1] = (merged[-1] + c) / 2
-        centers = merged[:4]
-
-    groups: Dict[int, List[int]] = {i: [] for i in range(len(centers))}
-    for idx, row in rows.iterrows():
-        original = str(row.get("Original", ""))
-        if not (_row_has_pattern_tokens(original) or _looks_like_block_title(original)):
-            # General noise/instruction goes to nearest column only if close; otherwise leave for group 0.
-            pass
-        x = float(row.get("min_x", 0) or 0)
-        nearest = min(range(len(centers)), key=lambda i: abs(x - centers[i]))
-        # If far from every column and not pattern-like, keep in first group as detected text.
-        if abs(x - centers[nearest]) > max(260.0, gap_threshold * 1.2) and not _row_has_pattern_tokens(original):
-            nearest = 0
-        groups[nearest].append(idx)
-    return groups
-
-
-def _make_section_title_from_pending(pending_titles: List[Tuple[float, str]], default_title: str) -> str:
-    if not pending_titles:
-        return default_title
-    # Use the closest preceding title. If it has bracket notes, keep it; user can judge.
-    title = pending_titles[-1][1].strip()
-    # Remove common punctuation around it.
-    title = re.sub(r"^[\s:：()（）]+|[\s:：()（）]+$", "", title)
-    return title or default_title
-
-
-def _build_layout_blocks_without_headers(rows: pd.DataFrame, output_mode: str) -> List[Dict[str, object]]:
-    """Fallback layout parser v1.
-
-    When no explicit known section headers are detected, infer blocks from visual
-    columns + round sequence. This avoids merging left-column and right-column
-    parts into one section when titles are arbitrary, such as 蛋糕主體 / 櫻桃.
-    """
-    groups = _cluster_rows_by_x(rows)
-    all_sections: List[Dict[str, object]] = []
-    unsectioned_lines: List[Dict[str, object]] = []
-    section_counter = 1
-
-    # Process columns visually left-to-right.
-    for group_id, idxs in sorted(groups.items(), key=lambda kv: float(rows.loc[kv[1], "min_x"].median()) if kv[1] else 0):
-        group = rows.loc[idxs].copy().sort_values(["min_y", "min_x"]).reset_index(drop=True)
-        current: Optional[Dict[str, object]] = None
-        last_round_num: Optional[int] = None
-        pending_titles: List[Tuple[float, str]] = []
-        current_has_rounds = False
-
-        for _, row in group.iterrows():
-            original = str(row.get("Original", "")).strip()
-            if not original:
-                continue
-            round_label = extract_round_label_from_line(original)
-            round_num = _round_number(round_label or "")
-            y = float(row.get("min_y", 0) or 0)
-
-            if round_label:
-                # Start a new block when a new R1 appears, or when numbering goes
-                # backwards / repeats after the current block already has rounds.
-                restart = False
-                if current is None:
-                    restart = True
-                elif round_num == 1 and current_has_rounds:
-                    restart = True
-                elif round_num is not None and last_round_num is not None:
-                    # R3 followed by another R3/R2 in the same visual column usually
-                    # means another nearby part was interleaved, so start a new block.
-                    if round_num <= last_round_num and current_has_rounds:
-                        restart = True
-
-                if restart:
-                    if current and current.get("lines"):
-                        all_sections.append(current)
-                        section_counter += 1
-                    title = _make_section_title_from_pending(pending_titles, f"Section {section_counter}")
-                    current = {"title": title, "lines": [], "explicit": False, "x": float(row.get("min_x", 0) or 0), "y": y}
-                    pending_titles = []
-                    last_round_num = None
-                    current_has_rounds = False
-
-                if current is None:
-                    current = {"title": f"Section {section_counter}", "lines": [], "explicit": False, "x": float(row.get("min_x", 0) or 0), "y": y}
-                current["lines"].append(_line_to_section_item(row, assigned_by=f"layout/col{group_id}"))
-                current_has_rounds = True
-                if round_num is not None:
-                    last_round_num = round_num
-                continue
-
-            # Non-round rows.
-            if _looks_like_instruction_continuation(original) and current is not None:
-                current["lines"].append(_line_to_section_item(row, assigned_by=f"instruction-cont/col{group_id}"))
-                continue
-
-            if _looks_like_block_title(original):
-                # A title after a block has begun usually starts a new nearby part.
-                # Close current so the next R1/R2 can become a clean new block.
-                if current and current_has_rounds and current.get("lines"):
-                    all_sections.append(current)
-                    section_counter += 1
-                    current = None
-                    last_round_num = None
-                    current_has_rounds = False
-                pending_titles.append((y, original))
-                # Keep only the closest few title candidates.
-                pending_titles = pending_titles[-3:]
-                continue
-
-            if _row_has_pattern_tokens(original) or _looks_like_instruction_continuation(original):
-                # Continuation of previous pattern line, e.g. x.Tv.3Fv... after R6.
-                if current is None:
-                    title = _make_section_title_from_pending(pending_titles, f"Section {section_counter}")
-                    current = {"title": title, "lines": [], "explicit": False, "x": float(row.get("min_x", 0) or 0), "y": y}
-                    pending_titles = []
-                current["lines"].append(_line_to_section_item(row, assigned_by=f"layout-cont/col{group_id}"))
-            else:
-                # General non-pattern text: keep only before any sections as Detected text.
-                if current is None and not all_sections:
-                    unsectioned_lines.append(_line_to_section_item(row, assigned_by="non-pattern"))
-
-        if current and current.get("lines"):
-            all_sections.append(current)
-            section_counter += 1
-
-    # Sort final sections visually: top-to-bottom, then left-to-right, but keep unsectioned first.
-    all_sections = sorted(all_sections, key=lambda sec: (float(sec.get("y", 0) or 0), float(sec.get("x", 0) or 0)))
-    if unsectioned_lines:
-        return [{"title": "Detected text", "lines": unsectioned_lines, "explicit": False}] + all_sections
-    return all_sections or [{"title": "Detected text", "lines": [_line_to_section_item(r, assigned_by="fallback") for _, r in rows.iterrows()], "explicit": False}]
-
-
-
-def merge_section_continuation_lines(sections: List[Dict[str, object]]) -> List[Dict[str, object]]:
-    """Merge OCR-wrapped continuation lines back into the previous round row.
-
-    Long rows are often split by OCR, e.g.
-        R1 In a magic ring: 1sc, 2hdc, ...
-        1hdc, 1dc, 2hdc, 2sc, ch1 (12)
-        slst and fo, leave a long tail for sewing.
-
-    The second/third lines do not start with R1, but they clearly continue the
-    previous round. We merge only conservative continuation-looking rows:
-    - no own round label
-    - previous row has a round label
-    - contains crochet tokens or starts with a formula-like token
-    This avoids swallowing ordinary notes such as "At the end you should...".
-    """
-    if not sections:
-        return sections
-
-    def continuation_like(text: str) -> bool:
-        t = unicodedata.normalize("NFKC", str(text or "")).strip()
-        if not t or extract_round_label_from_line(t):
-            return False
-        if re.match(r"^[,，.;；)）]", t):
-            return True
-        if re.match(r"^\d+\s*(?:ch|sc|hdc|dc|tr|inc|dec|slst|sl\s*st|sts?|[XVAFTES])\b", t, flags=re.I):
-            return True
-        if re.match(r"^(?:slst|sl\s*st|fo|fasten\s+off|turn|join|ch|sc|hdc|dc|tr|inc|dec)\b", t, flags=re.I):
-            return True
-        # Formula fragments without a round prefix.
-        if re.search(r"\d+\s*(?:ch|sc|hdc|dc|tr|inc|dec|slst|sl\s*st|sts?)\b", t, flags=re.I):
-            return True
-        if re.search(r"[()]|[XVAFTES]\s*[,.]", t, flags=re.I) and re.search(r"\d", t):
-            return True
-        return False
-
-    for sec in sections:
-        merged = []
-        for line in sec.get("lines", []):
-            original = str(line.get("Original", "")).strip()
-            if (
-                merged
-                and not str(line.get("Round", "")).strip()
-                and str(merged[-1].get("Round", "")).strip()
-                and continuation_like(original)
-            ):
-                prev = merged[-1]
-                prev["Original"] = (str(prev.get("Original", "")).rstrip() + " " + original).strip()
-                prev["Translation"] = (str(prev.get("Translation", "")).rstrip() + " " + str(line.get("Translation", "")).strip()).strip()
-                # Keep the lower confidence as a conservative signal.
-                try:
-                    prev["Confidence"] = round(min(float(prev.get("Confidence", 1)), float(line.get("Confidence", 1))), 3)
-                except Exception:
-                    pass
-                if line.get("Changed"):
-                    prev["Changed"] = "✓"
-            else:
-                merged.append(line)
-        sec["lines"] = merged
-    return sections
-
-def build_section_blocks(line_df: pd.DataFrame, output_mode: str) -> List[Dict[str, object]]:
-    """Group OCR line translations into human-readable pattern sections.
-
-    V19 adds Layout Parser v1 for pages with arbitrary titles. Instead of
-    relying on a title dictionary, it groups by visual columns and round-number
-    sequences, then uses the nearest short non-pattern line above as the block
-    title. This handles titles like 蛋糕主體 / 櫻桃 without knowing the words.
-    """
-    if line_df is None or line_df.empty:
-        return []
-
-    rows = line_df.copy().reset_index(drop=True)
-    for c in ["min_x", "max_x", "min_y", "max_y"]:
-        if c not in rows.columns:
-            rows[c] = 0.0
-        rows[c] = pd.to_numeric(rows[c], errors="coerce").fillna(0.0)
-    rows["cx"] = (rows["min_x"] + rows["max_x"]) / 2
-    rows["cy"] = (rows["min_y"] + rows["max_y"]) / 2
-
-    header_rows: List[Dict[str, object]] = []
-    for idx, row in rows.iterrows():
-        title = detect_section_header(str(row.get("Original", "")), output_mode)
-        if title:
-            header_rows.append({
-                "idx": idx,
-                "title": title,
-                "x": float(row["min_x"]),
-                "cx": float(row["cx"]),
-                "y": float(row["min_y"]),
-                "cy": float(row["cy"]),
-                "lines": [],
-                "explicit": True,
-            })
-
-    # Position-based path: explicit section headers were found.
-    if header_rows:
-        header_rows = sorted(header_rows, key=lambda h: (h["y"], h["x"]))
-        unsectioned = {"title": "Unsectioned text", "lines": [], "explicit": False, "x": 0, "y": 0}
-
-        for idx, row in rows.iterrows():
-            original = str(row.get("Original", "")).strip()
-            if not original:
-                continue
-            if any(h["idx"] == idx for h in header_rows):
-                continue
-
-            cy = float(row["cy"])
-            cx = float(row["cx"])
-            min_x = float(row["min_x"])
-            max_x = float(row["max_x"])
-            width = max(1.0, max_x - min_x)
-
-            is_roundish = bool(extract_round_label_from_line(original)) or bool(re.match(r"^\s*[Rr][0-9lIgq]+", original))
-            has_crochet_tokens = bool(re.search(r"[0-9]+\s*[xXvVaAtTfFeE]|[xXvVaAtTfFeE]\s*[.．,，]", original))
-            if is_roundish or has_crochet_tokens or width > 260:
-                anchor_x = min_x
-                anchor_reason = "start-x"
-            else:
-                anchor_x = cx
-                anchor_reason = "center-x"
-
-            candidates = []
-            for h in header_rows:
-                if h["cy"] <= cy + 35:
-                    vertical_gap = max(0.0, cy - h["cy"])
-                    horizontal_gap = abs(anchor_x - h["x"])
-                    score = vertical_gap + horizontal_gap * 1.25
-                    candidates.append((score, vertical_gap, horizontal_gap, h, anchor_reason))
-
-            if candidates:
-                candidates.sort(key=lambda x: (x[0], x[1], x[2]))
-                chosen = candidates[0][3]
-                chosen["lines"].append(_line_to_section_item(row, assigned_by=f"position/{candidates[0][4]}"))
-            else:
-                unsectioned["lines"].append(_line_to_section_item(row, assigned_by="above first header"))
-
-        sections: List[Dict[str, object]] = []
-        if unsectioned["lines"]:
-            sections.append(unsectioned)
-        for h in header_rows:
-            if h["lines"]:
-                sections.append({
-                    "title": h["title"],
-                    "lines": h["lines"],
-                    "explicit": True,
-                    "x": h["x"],
-                    "y": h["y"],
-                })
-        return merge_section_continuation_lines(sections)
-
-    # V19 fallback: no explicit known headers. Infer layout blocks.
-    return merge_section_continuation_lines(_build_layout_blocks_without_headers(rows, output_mode))
-
-def section_blocks_to_debug_df(sections: List[Dict[str, object]]) -> pd.DataFrame:
-    rows = []
-    for i, sec in enumerate(sections, start=1):
-        lines = sec.get("lines", [])
-        rows.append({
-            "#": i,
-            "Section": sec.get("title", f"Section {i}"),
-            "Lines": len(lines),
-            "Header x": round(float(sec.get("x", 0) or 0), 1) if sec.get("explicit") else "",
-            "Header y": round(float(sec.get("y", 0) or 0), 1) if sec.get("explicit") else "",
-            "Round labels": ", ".join([l.get("Round", "") for l in lines if l.get("Round", "")])[:120],
-        })
-    return pd.DataFrame(rows)
-
-
-def build_section_readable_text(sections: List[Dict[str, object]]) -> str:
-    chunks = []
-    for sec in sections:
-        title = str(sec.get("title", "Section")).strip()
-        lines = sec.get("lines", [])
-        if not lines:
-            continue
-        chunks.append(f"## {title}")
-        for line in lines:
-            original = str(line.get("Original", "")).strip()
-            translated = str(line.get("Translation", "")).strip()
-            if norm_text(original) == norm_text(translated):
-                chunks.append(original)
-            else:
-                chunks.append(f"{original}\n→ {translated}")
-        chunks.append("")
-    return "\n".join(chunks).strip()
-
-
-
-
-def build_section_export_text(sections: List[Dict[str, object]], clean_text: str = "", raw_text: str = "") -> str:
-    """Plain-text export for users to copy/edit after OCR.
-
-    Keeps both original and translated lines when they differ.
-    """
-    parts = [
-        "Crochet OCR Translation Export",
-        "Generated by Crochet OCR Prototype",
-        "",
-        "Note: OCR and translation may contain mistakes. Please check against the original pattern image.",
-        "",
-    ]
-    readable = build_section_readable_text(sections) if sections else ""
-    if readable:
-        parts.append("=== Section translation ===")
-        parts.append(readable)
-        parts.append("")
-    if clean_text.strip():
-        parts.append("=== Cleaned OCR text ===")
-        parts.append(clean_text.strip())
-        parts.append("")
-    if raw_text.strip():
-        parts.append("=== Raw OCR text ===")
-        parts.append(raw_text.strip())
-        parts.append("")
-    return "\n".join(parts).strip() + "\n"
-
-
-def build_pattern_export_text(interpretation_df: pd.DataFrame, clean_text: str = "", raw_text: str = "", output_mode: str = "Traditional Chinese") -> str:
-    parts = [
-        "Crochet OCR Pattern Export",
-        "Generated by Crochet OCR Prototype",
-        "",
-        "Note: OCR and pattern interpretation may contain mistakes. Please check against the original pattern image.",
-        "",
-    ]
-    line_text = build_line_by_line_text(interpretation_df, output_mode) if interpretation_df is not None and not interpretation_df.empty else ""
-    if line_text:
-        parts.append("=== Pattern interpretation ===")
-        parts.append(line_text)
-        parts.append("")
-    if clean_text.strip():
-        parts.append("=== Cleaned OCR text ===")
-        parts.append(clean_text.strip())
-        parts.append("")
-    if raw_text.strip():
-        parts.append("=== Raw OCR text ===")
-        parts.append(raw_text.strip())
-        parts.append("")
-    return "\n".join(parts).strip() + "\n"
-
-
-def _rects_overlap(a: Tuple[float, float, float, float], b: Tuple[float, float, float, float]) -> bool:
-    return not (a[2] < b[0] or a[0] > b[2] or a[3] < b[1] or a[1] > b[3])
-
-
-def _pad_rect(rect: Tuple[float, float, float, float], pad: float) -> Tuple[float, float, float, float]:
-    return (rect[0] - pad, rect[1] - pad, rect[2] + pad, rect[3] + pad)
-
-
-def _left_reading_margin_protected_slot(
-    min_x: float,
-    min_y: float,
-    max_x: float,
-    max_y: float,
-) -> Tuple[float, float, float, float]:
-    """Protect the left reading anchor of the current OCR row."""
-    row_width = max(1.0, float(max_x) - float(min_x))
-    protected_width = min(row_width, max(30.0, min(80.0, row_width * 0.22)))
-    return _pad_rect((min_x, min_y, min_x + protected_width, max_y), 2)
-
-
-def _find_free_label_position(
-    min_x: float,
-    min_y: float,
-    max_x: float,
-    max_y: float,
-    tw: float,
-    th: float,
-    image_w: int,
-    image_h: int,
-    used_slots: List[Tuple[float, float, float, float]],
-    protected_slots: Optional[List[Tuple[float, float, float, float]]] = None,
-) -> Optional[Tuple[float, float]]:
-    """Find a reading-order-safe label position that avoids source text."""
-    protected_slots = protected_slots or []
-
-    def safe_at(x: float, y: float) -> Optional[Tuple[float, float]]:
-        x = max(4, min(float(x), image_w - tw - 4))
-        y = max(4, min(float(y), image_h - th - 4))
-        if y + 1 < min_y:
-            return None
-        rect = (x, y, x + tw, y + th)
-        if not any(_rects_overlap(rect, r) for r in used_slots + protected_slots):
-            return x, y
-        return None
-
-    # Same-row/right placement can often be rescued by sliding a little farther
-    # right while preserving reading order and protected OCR regions.
-    start_x = max_x + 6
-    max_search_x = min(image_w - tw - 4, max(start_x, image_w * 0.72))
-    for y in [min_y, min_y + th * 0.35]:
-        x = start_x
-        while x <= max_search_x:
-            pos = safe_at(x, y)
-            if pos is not None:
-                return pos
-            x += 10
-
-    candidates = [
-        (min_x - tw - 6, min_y),         # same-row left
-        (min_x, max_y + 4),              # below
-        (max_x + 6, max_y + 4),          # lower-right
-        (min_x - tw - 6, max_y + 4),     # lower-left
-    ]
-    for x, y in candidates:
-        pos = safe_at(x, y)
-        if pos is not None:
-            return pos
-    return None
-
-
-def _find_free_marker_position(
-    min_x: float,
-    min_y: float,
-    max_x: float,
-    max_y: float,
-    mw: float,
-    mh: float,
-    image_w: int,
-    image_h: int,
-    used_slots: List[Tuple[float, float, float, float]],
-    protected_slots: Optional[List[Tuple[float, float, float, float]]] = None,
-    marker_column_x: Optional[float] = None,
-) -> Tuple[float, float, Tuple[float, float, float, float]]:
-    """Place a small marker near its source box without covering OCR text."""
-    protected_slots = protected_slots or []
-    candidates = [
-        (max_x + 4, min_y),              # right of source text
-        (max_x + 4, max_y - mh),         # right, aligned to lower edge
-        (min_x, max_y + 3),              # just below
-        (max_x + 4, max_y + 3),          # lower-right
-        (min_x - mw - 4, min_y),         # left, last same-row option
-        (min_x - mw - 4, max_y + 3),     # lower-left
-    ]
-    for x, y in candidates:
-        x = max(4, min(float(x), image_w - mw - 4))
-        y = max(4, min(float(y), image_h - mh - 4))
-        rect = (x, y, x + mw, y + mh)
-        if not any(_rects_overlap(rect, r) for r in used_slots + protected_slots):
-            return x, y, rect
-
-    # Final fallback: preserve row association. In narrow crops, distant vertical
-    # searching can make marker numbers appear beside the wrong OCR rows, which
-    # is worse than marker crowding. Use a controlled marker column near the row.
-    column_x = marker_column_x if marker_column_x is not None else max_x + 4
-    x = max(4, min(float(column_x), image_w - mw - 4))
-    y = max(4, min(float(min_y + ((max_y - min_y) - mh) / 2), image_h - mh - 4))
-    row_band_top = max(4, min_y - max(4.0, mh * 0.35))
-    row_band_bottom = min(image_h - mh - 4, max_y + max(4.0, mh * 0.35))
-    for offset in [0, -mh * 0.35, mh * 0.35, -mh * 0.7, mh * 0.7]:
-        yy = max(row_band_top, min(y + offset, row_band_bottom))
-        rect = (x, yy, x + mw, yy + mh)
-        if not any(_rects_overlap(rect, r) for r in protected_slots):
-            return x, yy, rect
-    return x, y, (x, y, x + mw, y + mh)
-
-
-@profile_function("overlay label preparation", "make_line_translation_overlay calls")
-def make_line_translation_overlay(
-    image: Image.Image,
-    line_df: pd.DataFrame,
-    output_mode: str,
-    max_labels: int = 120,
-    max_full_label_chars: int = 42,
-) -> Tuple[Optional[Image.Image], str, pd.DataFrame]:
-    """Draw smart overlay labels for translated OCR visual lines.
-
-    Short translations are drawn near their OCR boxes. Long or colliding labels are
-    replaced by numbered markers, with the full text returned as a legend. This is
-    designed for beta stability rather than beautiful automatic typesetting.
-    """
-    if line_df is None or line_df.empty:
-        return None, "", pd.DataFrame()
-    from PIL import ImageDraw
-
-    img = image.convert("RGBA")
-    w, h = img.size
-    overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
-    draw = ImageDraw.Draw(overlay)
-    font_size = max(18, min(34, int(w / 38)))
-    font = _load_overlay_font(font_size)
-    marker_font = _load_overlay_font(max(font_size, 20))
-
-    source_slots: List[Tuple[float, float, float, float]] = []
-    for _, source_row in line_df.iterrows():
-        source_text = str(source_row.get("Original", "")).strip()
-        if not source_text:
-            continue
-        sx1 = float(source_row.get("min_x", 0)); sx2 = float(source_row.get("max_x", sx1 + 80))
-        sy1 = float(source_row.get("min_y", 0)); sy2 = float(source_row.get("max_y", sy1 + 20))
-        sx1 = max(0, min(sx1, w - 1)); sx2 = max(0, min(sx2, w - 1))
-        sy1 = max(0, min(sy1, h - 1)); sy2 = max(0, min(sy2, h - 1))
-        source_slots.append(_pad_rect((sx1, sy1, sx2, sy2), 3))
-
-    used_slots: List[Tuple[float, float, float, float]] = []
-    legend_rows: List[Dict[str, object]] = []
-    drawn_count = 0
-    marker_no = 1
-    marker_column_x = max(4.0, min(w - 34.0, w * 0.82))
-
-    for row_no, (_, row) in enumerate(line_df.iterrows()):
-        if drawn_count >= max_labels:
-            break
-        original = str(row.get("Original", "")).strip()
-        translated = str(row.get("Translation", "")).strip()
-        if not translated or norm_text(original) == norm_text(translated):
-            continue
-
-        min_x = float(row.get("min_x", 0)); max_x = float(row.get("max_x", min_x + 80))
-        min_y = float(row.get("min_y", 0)); max_y = float(row.get("max_y", min_y + 20))
-        min_x = max(0, min(min_x, w - 1)); max_x = max(0, min(max_x, w - 1))
-        min_y = max(0, min(min_y, h - 1)); max_y = max(0, min(max_y, h - 1))
-        current_row_marker_slot = _left_reading_margin_protected_slot(min_x, min_y, max_x, max_y)
-
-        label = translated
-        force_marker = len(label) > max_full_label_chars
-        placed_full = False
-
-        if not force_marker:
-            protected_slots = source_slots[:row_no] + source_slots[row_no + 1:]
-            if current_row_marker_slot is not None:
-                protected_slots = protected_slots + [current_row_marker_slot]
-            right_space = w - max_x - 12
-            max_label_width = min(w - 8, max(180, min(int(w * 0.58), int(max(right_space, w * 0.38)))))
-            lines = _wrap_label_to_width(label, draw, font, max_label_width)
-            bboxes = [draw.textbbox((0, 0), line, font=font) for line in lines]
-            tw = max(bb[2] - bb[0] for bb in bboxes) + 14
-            th = sum(bb[3] - bb[1] for bb in bboxes) + 10 + (len(lines)-1)*3
-            pos = _find_free_label_position(min_x, min_y, max_x, max_y, tw, th, w, h, used_slots, protected_slots)
-            if pos is not None:
-                x, y = pos
-                used_slots.append((x, y, x + tw, y + th))
-                draw.rectangle((min_x, min_y, max_x, max_y), outline=(255, 80, 80, 185), width=max(1, w//900))
-                draw.rounded_rectangle((x, y, x+tw, y+th), radius=7, fill=(255,255,245,232), outline=(60,60,60,150), width=1)
-                cy = y + 5
-                for line, bb in zip(lines, bboxes):
-                    draw.text((x+7, cy), line, fill=(15,15,15,255), font=font)
-                    cy += (bb[3]-bb[1]) + 3
-                placed_full = True
-                legend_rows.append({
-                    "Marker": "",
-                    "Original": original,
-                    "Translation": translated,
-                    "Overlay": "full label",
-                    "Confidence": row.get("Confidence", ""),
-                })
-
-        if not placed_full:
-            marker = f"[{marker_no}]"
-            marker_no += 1
-            mbb = draw.textbbox((0, 0), marker, font=marker_font)
-            mw = mbb[2] - mbb[0] + 12
-            mh = mbb[3] - mbb[1] + 8
-            protected_slots = source_slots[:row_no] + source_slots[row_no + 1:]
-            current_source_slot = _pad_rect((min_x, min_y, max_x, max_y), 2)
-            if current_row_marker_slot is not None:
-                protected_slots = protected_slots + [current_row_marker_slot]
-            x, y, rect = _find_free_marker_position(
-                min_x,
-                min_y,
-                max_x,
-                max_y,
-                mw,
-                mh,
-                w,
-                h,
-                used_slots,
-                protected_slots + [current_source_slot],
-                marker_column_x=marker_column_x,
-            )
-            used_slots.append(rect)
-            draw.rectangle((min_x, min_y, max_x, max_y), outline=(255, 80, 80, 170), width=max(1, w//1000))
-            draw.rounded_rectangle(rect, radius=6, fill=(255,255,245,240), outline=(40,40,40,180), width=1)
-            draw.text((x + 6, y + 4), marker, fill=(15,15,15,255), font=marker_font)
-            legend_rows.append({
-                "Marker": marker,
-                "Original": original,
-                "Translation": translated,
-                "Overlay": "numbered marker",
-                "Confidence": row.get("Confidence", ""),
-            })
-
-        drawn_count += 1
-
-    if drawn_count == 0:
-        return None, "", pd.DataFrame()
-
-    legend_df = pd.DataFrame(legend_rows)
-    legend_lines = []
-    for _, r in legend_df.iterrows():
-        marker = str(r.get("Marker", "")).strip()
-        original = str(r.get("Original", "")).strip()
-        translated = str(r.get("Translation", "")).strip()
-        prefix = f"{marker} " if marker else ""
-        legend_lines.append(f"{prefix}{original} → {translated}".strip())
-    legend_text = "\n".join(legend_lines)
-    return Image.alpha_composite(img, overlay).convert("RGB"), legend_text, legend_df
-
-
-def image_to_png_bytes(image: Image.Image) -> bytes:
-    buf = io.BytesIO()
-    image.save(buf, format="PNG")
-    return buf.getvalue()
-
-
-@profile_function("line-by-line translation: build_overlay_export_text", "build_overlay_export_text calls")
-def build_overlay_export_text(line_df: pd.DataFrame, legend_text: str = "", clean_text: str = "", raw_text: str = "") -> str:
-    """User-facing TXT export: line-by-line translation only."""
-    readable = build_readable_line_translation(line_df) if line_df is not None and not line_df.empty else ""
-    return readable.strip() + "\n" if readable.strip() else ""
-
-
-def _debug_cell(value: object) -> str:
-    text = "" if value is None else str(value).strip()
-    return text.replace("\n", " ")
-
-
-def _match_target_from_row(row: pd.Series, output_mode: str) -> str:
-    if output_mode == "English — US":
-        return _debug_cell(row.get("US abb", "")) or _debug_cell(row.get("US", ""))
-    if output_mode == "English — UK":
-        return _debug_cell(row.get("UK abb", "")) or _debug_cell(row.get("UK", ""))
-    if output_mode == "Japanese":
-        return _debug_cell(row.get("日本語", ""))
-    zh = _debug_cell(row.get("中文", ""))
-    if output_mode == "Simplified Chinese" and zh:
-        return to_simplified(zh)
-    return zh or _debug_cell(row.get("US abb", "")) or _debug_cell(row.get("US", ""))
-
-
-def _format_matched_terms(matches_df: Optional[pd.DataFrame], output_mode: str) -> str:
-    if matches_df is None or matches_df.empty:
-        return "No matched dictionary terms found."
-    lines = []
-    for _, row in matches_df.iterrows():
-        detected = _debug_cell(row.get("Original detected", ""))
-        target = _match_target_from_row(row, output_mode)
-        category = _debug_cell(row.get("Category", ""))
-        if detected and target:
-            suffix = f" [{category}]" if category else ""
-            lines.append(f"{detected} -> {target}{suffix}")
-    return "\n".join(lines) if lines else "No matched dictionary terms found."
-
-
-def _format_unmatched_terms(unmatched: Optional[List[str]]) -> str:
-    if not unmatched:
-        return "No unmatched candidates captured."
-    return "\n".join(_debug_cell(term) for term in unmatched if _debug_cell(term))
-
-
-def _format_csv_match_details(matches_df: Optional[pd.DataFrame]) -> str:
-    if matches_df is None or matches_df.empty:
-        return "No CSV match detail rows available."
-    columns = [str(c) for c in matches_df.columns]
-    lines = [" | ".join(columns)]
-    for _, row in matches_df.iterrows():
-        lines.append(" | ".join(_debug_cell(row.get(col, "")) for col in columns))
-    return "\n".join(lines)
-
-
-def _format_debug_timings(timings: Optional[Dict[str, object]]) -> str:
-    if not timings:
-        return "No timing data captured."
-    ordered = [
-        "Image load",
-        "Crop extraction",
-        "PaddleOCR inference",
-        "OCR cleanup",
-        "Translation processing",
-        "Overlay generation",
-        "Total runtime",
-    ]
-    lines = []
-    for key in ordered:
-        if key in timings:
-            try:
-                value = f"{float(timings.get(key, 0.0)):.3f} sec"
-            except Exception:
-                value = _debug_cell(timings.get(key, ""))
-            lines.append(f"{key}: {value}")
-    for key, value in timings.items():
-        if key in ordered:
-            continue
-        try:
-            display_value = f"{float(value):.3f} sec"
-        except Exception:
-            display_value = _debug_cell(value)
-        lines.append(f"{key}: {display_value}")
-    return "\n".join(lines) if lines else "No timing data captured."
-
-
-def format_runtime_profile(runtime_profile: Optional[Dict[str, object]]) -> str:
-    if not runtime_profile:
-        return "No runtime profile captured."
-    resize_label = str(runtime_profile.get("ocr_resize_test") or "").strip()
-    heading = f"Runtime Profile (Resize: {resize_label})" if resize_label else "Runtime Profile"
-    ordered = [
-        ("image_loading", "Image loading"),
-        ("image_preprocessing", "Image preprocessing"),
-        ("ocr", "OCR"),
-        ("ocr_cleanup", "OCR cleanup / normalization"),
-        ("translation", "Translation"),
-        ("overlay_generation", "Overlay generation"),
-        ("png_encoding", "PNG encoding"),
-        ("translation_txt_generation", "Translation TXT generation"),
-        ("diagnostic_report_generation", "Diagnostic Report generation"),
-        ("ui_rendering", "UI rendering"),
-        ("total", "TOTAL runtime"),
-    ]
-    label_width = max(len(label) for _, label in ordered)
-    lines = [heading, ""]
-    for key, label in ordered:
-        value = runtime_profile.get(key)
-        if value is None:
-            display_value = "N/A"
-        else:
-            try:
-                display_value = f"{float(value):.2f} s"
-            except Exception:
-                display_value = _debug_cell(value)
-        lines.append(f"{label.ljust(label_width)}  {display_value}")
-    return "\n".join(lines)
-
-
-def _box_diag_row(row: pd.Series) -> str:
-    text = _debug_cell(row.get("text", ""))
-    confidence = _debug_cell(row.get("confidence", ""))
-    try:
-        min_x = float(row.get("min_x", 0))
-        min_y = float(row.get("min_y", 0))
-        max_x = float(row.get("max_x", 0))
-        max_y = float(row.get("max_y", 0))
-    except Exception:
-        min_x = min_y = max_x = max_y = 0.0
-    width = max(0.0, max_x - min_x)
-    height = max(0.0, max_y - min_y)
-    area = width * height
-    return (
-        f"{text} | {confidence} | "
-        f"{min_x:.1f},{min_y:.1f},{max_x:.1f},{max_y:.1f} | "
-        f"w={width:.1f}, h={height:.1f}, area={area:.1f}"
-    )
-
-
-def _format_ocr_box_list(rows: Optional[pd.DataFrame], mode: str, limit: int = 20) -> str:
-    if rows is None or rows.empty:
-        return "No OCR boxes captured."
-    work = rows.copy()
-    for col in ["confidence", "min_x", "max_x", "min_y", "max_y"]:
-        if col in work.columns:
-            work[col] = pd.to_numeric(work[col], errors="coerce").fillna(0)
-    if "box_area" not in work.columns:
-        work["box_area"] = (work.get("max_x", 0) - work.get("min_x", 0)).clip(lower=0) * (work.get("max_y", 0) - work.get("min_y", 0)).clip(lower=0)
-    if mode == "confidence":
-        work = work.sort_values("confidence", ascending=False)
-    elif mode == "largest":
-        work = work.sort_values("box_area", ascending=False)
-    elif mode == "smallest":
-        work = work.sort_values("box_area", ascending=True)
-    lines = ["text | confidence | x1,y1,x2,y2 | dimensions"]
-    for _, row in work.head(limit).iterrows():
-        lines.append(_box_diag_row(row))
-    return "\n".join(lines)
-
-
-def _format_ocr_workload_diagnostics(diagnostics: Optional[Dict[str, object]]) -> str:
-    diagnostics = diagnostics or {}
-    lines = [
-        f"Image width: {diagnostics.get('image_width', 'Not captured')}",
-        f"Image height: {diagnostics.get('image_height', 'Not captured')}",
-        f"Pixel count: {diagnostics.get('pixel_count', 'Not captured')}",
-        f"Megapixels: {diagnostics.get('megapixels', 'Not captured')}",
-        f"OCR boxes detected: {diagnostics.get('ocr_box_count', 'Not captured')}",
-        f"OCR text lines: {diagnostics.get('ocr_text_line_count', 'Not captured')}",
-        f"Overlay items: {diagnostics.get('overlay_item_count', 'Not captured')}",
-        f"Boxes per MP: {diagnostics.get('boxes_per_megapixel', 'Not captured')}",
-        f"PaddleOCR detect timing: {diagnostics.get('paddle_detect_timing', 'Not captured')}",
-        f"PaddleOCR recognize timing: {diagnostics.get('paddle_recognize_timing', 'Not captured')}",
-    ]
-    return "\n".join(lines)
-
-
-def _rc11a_value(value: object) -> object:
-    if value is None or value == "":
-        return "N/A"
-    return value
-
-
-def _rc11a_seconds(timings: Optional[Dict[str, object]], key: str) -> str:
-    timings = timings or {}
-    value = timings.get(key)
-    if value is None or value == "":
-        return "N/A"
-    try:
-        return f"{float(value):.3f} sec"
-    except Exception:
-        return _debug_cell(value) or "N/A"
-
-
-def _rc11a_sum_seconds(timings: Optional[Dict[str, object]], keys: List[str]) -> str:
-    timings = timings or {}
-    total = 0.0
-    found = False
-    for key in keys:
-        value = timings.get(key)
-        if value is None or value == "":
-            continue
-        try:
-            total += float(value)
-            found = True
-        except Exception:
-            pass
-    return f"{total:.3f} sec" if found else "N/A"
-
-
-def _format_rc11a_performance_diagnostics(
-    ocr_workload: Optional[Dict[str, object]],
-    ocr_call: Optional[Dict[str, object]],
-    timings: Optional[Dict[str, object]],
-    area_mode: str = "",
-) -> str:
-    ocr_workload = ocr_workload or {}
-    ocr_call = ocr_call or {}
-    run_primary_input = ocr_call.get("run_primary_ocr_input")
-    if isinstance(run_primary_input, dict):
-        input_width = run_primary_input.get("width")
-        input_height = run_primary_input.get("height")
-        input_pixels = run_primary_input.get("pixels")
-    else:
-        input_width = ocr_workload.get("image_width")
-        input_height = ocr_workload.get("image_height")
-        input_pixels = ocr_workload.get("pixel_count")
-    try:
-        input_megapixels = round(float(input_pixels) / 1_000_000, 3)
-    except Exception:
-        input_megapixels = ocr_workload.get("megapixels")
-    lines = [
-        f"OCR input image width: {_rc11a_value(input_width)}",
-        f"OCR input image height: {_rc11a_value(input_height)}",
-        f"OCR input megapixels: {_rc11a_value(input_megapixels)}",
-        f"OCR mode: {_rc11a_value(area_mode)}",
-        f"OCR box count: {_rc11a_value(ocr_workload.get('ocr_box_count'))}",
-        f"Image preprocess / preparation time: {_rc11a_sum_seconds(timings, ['Image load', 'Crop extraction'])}",
-        f"Image load time: {_rc11a_seconds(timings, 'Image load')}",
-        f"Crop extraction time: {_rc11a_seconds(timings, 'Crop extraction')}",
-        f"PaddleOCR inference time: {_rc11a_seconds(timings, 'PaddleOCR inference')}",
-        f"OCR cleanup / postprocess time: {_rc11a_seconds(timings, 'OCR cleanup')}",
-        f"Translation time: {_rc11a_seconds(timings, 'Translation processing')}",
-        f"Overlay generation time: {_rc11a_seconds(timings, 'Overlay generation')}",
-        f"Total time: {_rc11a_seconds(timings, 'Total runtime')}",
-    ]
-    return "\n".join(lines)
-
-
-def _format_size_info(value: object) -> str:
-    if isinstance(value, dict):
-        return f"{value.get('width')} x {value.get('height')} ({value.get('pixels')} px)"
-    return _debug_cell(value) or "Not captured"
-
-
-def _format_bytes(value: object) -> str:
-    try:
-        byte_count = int(value)
-        return f"{byte_count} bytes ({byte_count / (1024 * 1024):.2f} MB)"
-    except Exception:
-        return _debug_cell(value) or "Not captured"
-
-
-def _format_ocr_image_pipeline(diagnostics: Optional[Dict[str, object]]) -> str:
-    diagnostics = diagnostics or {}
-    lines = [
-        f"Original uploaded image: {_format_size_info(diagnostics.get('original_uploaded_image'))}",
-        f"Selected image: {_format_size_info(diagnostics.get('selected_image'))}",
-        f"Working image: {_format_size_info(diagnostics.get('working_image'))}",
-        f"Working image before downscale: {_format_size_info(diagnostics.get('working_image_before_downscale'))}",
-        f"Image actually passed to PaddleOCR: {_format_size_info(diagnostics.get('image_actually_passed_to_paddleocr'))}",
-        f"Image passed into run_primary_ocr(): {_format_size_info(diagnostics.get('run_primary_ocr_input'))}",
-        f"Image passed into run_paddle_ocr_single(): {_format_size_info(diagnostics.get('run_paddle_ocr_single_input'))}",
-        f"Temp PNG image: {_format_size_info(diagnostics.get('temp_png_image'))}",
-        f"Temp PNG size: {_format_bytes(diagnostics.get('temp_png_size_bytes'))}",
-        f"App-level resize before PaddleOCR: {diagnostics.get('app_level_resize_before_paddleocr', 'Not captured')}",
-        f"Size after downscale: {_format_size_info(diagnostics.get('size_after_downscale'))}",
-        f"Boxes scaled back for overlay: {diagnostics.get('boxes_scaled_back_for_overlay', 'Not captured')}",
-        f"Original size before app preprocessing: {_format_size_info(diagnostics.get('preprocessing_original_size'))}",
-        f"Size after app preprocessing: {_format_size_info(diagnostics.get('preprocessing_output_size'))}",
-        f"Whole Pattern sends full image: {diagnostics.get('whole_pattern_sends_full_image', 'Not captured')}",
-        f"Select Area sends cropped image: {diagnostics.get('select_area_sends_cropped_image', 'Not captured')}",
-        f"PaddleOCR actual loaded image size: {diagnostics.get('paddle_actual_loaded_image_size', 'Not captured')}",
-    ]
-    return "\n".join(lines)
-
-
-def _format_rc11b_downscale_diagnostics(
-    downscale_diagnostics: Optional[Dict[str, object]],
-    timings: Optional[Dict[str, object]],
-    ocr_workload: Optional[Dict[str, object]],
-) -> str:
-    downscale_diagnostics = downscale_diagnostics or {}
-    ocr_workload = ocr_workload or {}
-    lines = [
-        f"Downscale enabled: {downscale_diagnostics.get('downscale_enabled', 'N/A')}",
-        f"Downscale applied: {downscale_diagnostics.get('downscale_applied', 'N/A')}",
-        f"Requested max height: {downscale_diagnostics.get('requested_max_height', 'N/A')}",
-        f"Original OCR input width: {downscale_diagnostics.get('original_ocr_input_width', 'N/A')}",
-        f"Original OCR input height: {downscale_diagnostics.get('original_ocr_input_height', 'N/A')}",
-        f"Original OCR input megapixels: {downscale_diagnostics.get('original_ocr_input_megapixels', 'N/A')}",
-        f"Actual PaddleOCR image width: {downscale_diagnostics.get('actual_paddleocr_image_width', 'N/A')}",
-        f"Actual PaddleOCR image height: {downscale_diagnostics.get('actual_paddleocr_image_height', 'N/A')}",
-        f"Actual PaddleOCR megapixels: {downscale_diagnostics.get('actual_paddleocr_megapixels', 'N/A')}",
-        f"Downscale ratio: {downscale_diagnostics.get('downscale_ratio', 'N/A')}",
-        f"Coordinate scale_x: {downscale_diagnostics.get('coordinate_scale_x', 'N/A')}",
-        f"Coordinate scale_y: {downscale_diagnostics.get('coordinate_scale_y', 'N/A')}",
-        f"Boxes scaled back for overlay: {downscale_diagnostics.get('boxes_scaled_back_for_overlay', 'N/A')}",
-        f"PaddleOCR inference time: {_rc11a_seconds(timings, 'PaddleOCR inference')}",
-        f"OCR box count: {_rc11a_value(ocr_workload.get('ocr_box_count'))}",
-        f"Total time: {_rc11a_seconds(timings, 'Total runtime')}",
-        f"Downscale error: {downscale_diagnostics.get('downscale_error') or 'N/A'}",
-    ]
-    return "\n".join(lines)
-
-
-def _profile_timing(profile: Optional[Dict[str, Dict[str, float]]], key: str) -> Optional[float]:
-    if not isinstance(profile, dict):
-        return None
-    timings = profile.get("timings", {})
-    if not isinstance(timings, dict):
-        return None
-    value = timings.get(key)
-    try:
-        return float(value)
-    except Exception:
-        return None
-
-
-def _profile_count_value(profile: Optional[Dict[str, Dict[str, float]]], key: str) -> Optional[float]:
-    if not isinstance(profile, dict):
-        return None
-    counts = profile.get("counts", {})
-    if not isinstance(counts, dict):
-        return None
-    value = counts.get(key)
-    try:
-        return float(value)
-    except Exception:
-        return None
-
-
-def _format_diag_seconds(value: Optional[float]) -> str:
-    if value is None:
-        return "N/A"
-    try:
-        return f"{float(value):.3f} sec"
-    except Exception:
-        return "N/A"
-
-
-def _format_diag_count(value: Optional[float]) -> str:
-    if value is None:
-        return "N/A"
-    try:
-        numeric = float(value)
-        return str(int(numeric)) if numeric.is_integer() else str(round(numeric, 3))
-    except Exception:
-        return "N/A"
-
-
-def build_rc11c_translation_diagnostics(
-    translation_profile: Optional[Dict[str, Dict[str, float]]],
-    timings: Optional[Dict[str, object]],
-    ocr_rows: Optional[pd.DataFrame],
-    line_df: Optional[pd.DataFrame],
-    overlay_legend_df: Optional[pd.DataFrame],
-) -> Dict[str, object]:
-    parser_keys = [
-        "line-by-line translation: build_ocr_line_translations",
-    ]
-    csv_keys = [
-        "term lookup: lookup_row",
-        "term lookup: lookup_term",
-        "alias lookup / CSV term list",
-        "term matching: find_matches",
-    ]
-    regex_keys = [
-        "CSV replacement loops",
-    ]
-    replacement_keys = [
-        "CSV replacement loops",
-        "line-by-line translation: build_overlay_export_text",
-    ]
-    overlay_keys = [
-        "overlay label preparation",
-        "line-by-line translation: build_readable_line_translation",
-    ]
-
-    def sum_keys(keys: List[str]) -> Optional[float]:
-        values = [_profile_timing(translation_profile, key) for key in keys]
-        found = [value for value in values if value is not None]
-        return sum(found) if found else None
-
-    timings_dict = timings or {}
-    try:
-        total_translation = float(timings_dict.get("Translation processing"))
-    except Exception:
-        total_translation = None
-
-    lookup_attempts = _profile_count_value(translation_profile, "lookup_term calls")
-    lookup_matches = (
-        (_profile_count_value(translation_profile, "lookup_row fast hits") or 0)
-        + (_profile_count_value(translation_profile, "lookup_row fallback hits") or 0)
-    )
-    if lookup_matches == 0 and lookup_attempts is None:
-        lookup_matches_value: Optional[float] = None
-    else:
-        lookup_matches_value = lookup_matches
-
-    return {
-        "pattern_parser_time": sum_keys(parser_keys),
-        "csv_lookup_time": sum_keys(csv_keys),
-        "regex_processing_time": sum_keys(regex_keys),
-        "translation_replacement_time": sum_keys(replacement_keys),
-        "overlay_text_preparation_time": sum_keys(overlay_keys),
-        "total_translation_stage_time": total_translation,
-        "ocr_text_line_count": float(len(ocr_rows)) if ocr_rows is not None else None,
-        "pattern_rows_detected": _profile_count_value(translation_profile, "merged OCR lines"),
-        "dictionary_lookup_attempts": lookup_attempts,
-        "dictionary_matches": lookup_matches_value,
-        "regex_replacements": _profile_count_value(translation_profile, "regex replacements"),
-        "regex_passes_estimated": _profile_count_value(translation_profile, "regex passes estimated"),
-        "translated_output_rows": float(len(line_df)) if line_df is not None else None,
-        "overlay_legend_entries": float(len(overlay_legend_df)) if overlay_legend_df is not None else None,
-    }
-
-
-def _format_rc11c_translation_diagnostics(diagnostics: Optional[Dict[str, object]]) -> str:
-    diagnostics = diagnostics or {}
-    lines = [
-        f"Pattern parser time: {_format_diag_seconds(diagnostics.get('pattern_parser_time'))}",
-        f"CSV lookup time: {_format_diag_seconds(diagnostics.get('csv_lookup_time'))}",
-        f"Regex processing time: {_format_diag_seconds(diagnostics.get('regex_processing_time'))}",
-        f"Translation replacement time: {_format_diag_seconds(diagnostics.get('translation_replacement_time'))}",
-        f"Overlay text preparation time: {_format_diag_seconds(diagnostics.get('overlay_text_preparation_time'))}",
-        f"Total translation stage time: {_format_diag_seconds(diagnostics.get('total_translation_stage_time'))}",
-        "",
-        f"OCR text line count: {_format_diag_count(diagnostics.get('ocr_text_line_count'))}",
-        f"Pattern rows detected: {_format_diag_count(diagnostics.get('pattern_rows_detected'))}",
-        f"Dictionary lookup attempts: {_format_diag_count(diagnostics.get('dictionary_lookup_attempts'))}",
-        f"Dictionary matches: {_format_diag_count(diagnostics.get('dictionary_matches'))}",
-        f"Regex replacements: {_format_diag_count(diagnostics.get('regex_replacements'))}",
-        f"Regex passes estimated: {_format_diag_count(diagnostics.get('regex_passes_estimated'))}",
-        f"Translated output rows: {_format_diag_count(diagnostics.get('translated_output_rows'))}",
-        f"Overlay legend entries: {_format_diag_count(diagnostics.get('overlay_legend_entries'))}",
-    ]
-    return "\n".join(lines)
-
-
-def _format_rc11c_translation_cost_summary(diagnostics: Optional[Dict[str, object]]) -> str:
-    diagnostics = diagnostics or {}
-    items = [
-        ("Pattern parser", diagnostics.get("pattern_parser_time")),
-        ("CSV lookup", diagnostics.get("csv_lookup_time")),
-        ("Regex processing", diagnostics.get("regex_processing_time")),
-        ("Translation replacement", diagnostics.get("translation_replacement_time")),
-        ("Overlay text preparation", diagnostics.get("overlay_text_preparation_time")),
-    ]
-    parsed = []
-    for label, value in items:
-        try:
-            if value is not None:
-                parsed.append((label, float(value)))
-        except Exception:
-            pass
-    if not parsed:
-        return "N/A"
-    parsed.sort(key=lambda item: item[1], reverse=True)
-    return "\n".join(f"{label}: {seconds:.3f} sec" for label, seconds in parsed)
-
-
-def build_rc11d_validation_diagnostics(
-    translation_profile: Optional[Dict[str, Dict[str, float]]],
-    rc11c_translation_diagnostics: Optional[Dict[str, object]],
-) -> Dict[str, object]:
-    counts = translation_profile.get("counts", {}) if isinstance(translation_profile, dict) else {}
-    timings = translation_profile.get("timings", {}) if isinstance(translation_profile, dict) else {}
-    function_counts = {}
-    if isinstance(counts, dict):
-        for key, value in counts.items():
-            if str(key).endswith(" calls"):
-                function_counts[str(key)] = value
-    return {
-        "translation_profile_timings": timings if isinstance(timings, dict) else {},
-        "translation_profile_counts": counts if isinstance(counts, dict) else {},
-        "function_counts": function_counts,
-        "rc11c_translation_diagnostics": rc11c_translation_diagnostics or {},
-    }
-
-
-def _format_rc11d_timing_validation(_: Optional[Dict[str, object]]) -> str:
-    rows = [
-        (
-            "Pattern parser time",
-            "Top-level inclusive timing",
-            "Measured from the top-level build_ocr_line_translations() call. Detailed nested parser timings are still available in debug output, but they are not summed here because nested calls overlap and can exceed total translation stage time.",
-        ),
-        (
-            "CSV lookup time",
-            "Cumulative / overlapping aggregate",
-            "Sum of lookup_row, lookup_term, alias term-list generation, and find_matches timings. lookup_term calls lookup_row, and find_matches performs lookups, so this bucket overlaps internally.",
-        ),
-        (
-            "Regex processing time",
-            "Cumulative / inclusive function timing",
-            "Uses CSV replacement loops timing from replace_csv_terms_in_line. That function includes regex checks plus lookup and replacement work, so it is not regex-only exclusive time.",
-        ),
-        (
-            "Translation replacement time",
-            "Cumulative / overlapping aggregate",
-            "Sum of CSV replacement loops and build_overlay_export_text. CSV replacement loops already include regex and lookup work, so this overlaps with CSV lookup and regex processing.",
-        ),
-        (
-            "Overlay text preparation time",
-            "Cumulative / separate-stage aggregate",
-            "Sum of make_line_translation_overlay profile timing and build_readable_line_translation. make_line_translation_overlay is accounted under overlay generation, not under the top-level Translation processing timer.",
-        ),
-        (
-            "Total translation stage time",
-            "Top-level wall-clock timing",
-            "Measured in the OCR success block as Translation processing. It covers build_ocr_line_translations, find_matches/readable translation, and build_overlay_export_text, but not every nested/profiled bucket listed above and not overlay generation.",
-        ),
-    ]
-    lines = []
-    for name, timing_type, method in rows:
-        lines.append(f"{name}:")
-        lines.append(f"Type: {timing_type}")
-        lines.append(f"Calculation method: {method}")
-        lines.append("")
-    return "\n".join(lines).strip()
-
-
-def _format_rc11d_function_call_diagnostics(diagnostics: Optional[Dict[str, object]]) -> str:
-    diagnostics = diagnostics or {}
-    function_counts = diagnostics.get("function_counts", {})
-    if not isinstance(function_counts, dict) or not function_counts:
-        return "N/A"
-    display_names = {
-        "find_matches calls": "find_matches()",
-        "split_expression_parts calls": "split_expression_parts()",
-        "translate_piece calls": "translate_piece()",
-        "translate_expression calls": "translate_expression()",
-        "clean_single_ocr_line calls": "clean_single_ocr_line()",
-        "translate_ocr_line calls": "translate_ocr_line()",
-        "build_ocr_line_translations calls": "build_ocr_line_translations()",
-        "build_readable_line_translation calls": "build_readable_line_translation()",
-        "make_line_translation_overlay calls": "make_line_translation_overlay()",
-        "build_overlay_export_text calls": "build_overlay_export_text()",
-        "lookup_row calls": "lookup_row()",
-        "lookup_term calls": "lookup_term()",
-        "get_all_csv_terms calls": "get_all_csv_terms()",
-        "replace_csv_terms_in_line calls": "replace_csv_terms_in_line()",
-    }
-    lines = []
-    for key in sorted(function_counts):
-        label = display_names.get(key, str(key).replace(" calls", "()"))
-        lines.append(f"{label}: {_format_diag_count(function_counts.get(key))}")
-    return "\n".join(lines)
-
-
-def _format_rc11d_lookup_validation(diagnostics: Optional[Dict[str, object]]) -> str:
-    diagnostics = diagnostics or {}
-    counts = diagnostics.get("translation_profile_counts", {})
-    if not isinstance(counts, dict):
-        counts = {}
-    lines = [
-        f"Lookup count value: {_format_diag_count(counts.get('lookup_term calls'))}",
-        "Lookup count source: profile_count('lookup_term calls') inside lookup_term()",
-        "Actual or estimated: Actual runtime call count for lookup_term()",
-        f"lookup_row() actual calls: {_format_diag_count(counts.get('lookup_row calls'))}",
-        f"lookup_row() fast hits: {_format_diag_count(counts.get('lookup_row fast hits'))}",
-        f"lookup_row() fallback dictionary checks: {_format_diag_count(counts.get('lookup_row fallback dictionary checks'))}",
-        f"lookup_row() fallback hits: {_format_diag_count(counts.get('lookup_row fallback hits'))}",
-        "Dictionary matches source: lookup_row fast hits + fallback hits",
-        "Dictionary matches actual or estimated: Actual counted successful lookup_row paths",
-    ]
-    return "\n".join(lines)
-
-
-def _format_rc11d_regex_validation(diagnostics: Optional[Dict[str, object]]) -> str:
-    diagnostics = diagnostics or {}
-    counts = diagnostics.get("translation_profile_counts", {})
-    if not isinstance(counts, dict):
-        counts = {}
-    lines = [
-        f"Regex count source: {_format_diag_count(counts.get('regex passes estimated'))}",
-        "Actual or estimated: Estimated",
-        "Calculation method: The code increments profile_count('regex passes estimated') before selected regex checks/substitution sites and loop branches in replace_csv_terms_in_line(). It is not an instrumented count of actual regex engine executions or replacements.",
-        f"Regex replacements: {_format_diag_count(counts.get('regex replacements'))}",
-        "Regex replacements source: No active replacement counter was found; value may be N/A unless a future build instruments actual substitutions.",
-    ]
-    return "\n".join(lines)
-
-
-def _format_rc11d_top_function_calls(diagnostics: Optional[Dict[str, object]]) -> str:
-    diagnostics = diagnostics or {}
-    function_counts = diagnostics.get("function_counts", {})
-    if not isinstance(function_counts, dict) or not function_counts:
-        return "N/A"
-    parsed = []
-    for key, value in function_counts.items():
-        try:
-            parsed.append((str(key).replace(" calls", "()"), float(value)))
-        except Exception:
-            pass
-    parsed.sort(key=lambda item: item[1], reverse=True)
-    return "\n".join(f"{name}: {_format_diag_count(count)}" for name, count in parsed)
-
-
-def build_rc11e_normalization_diagnostics(
-    translation_profile: Optional[Dict[str, Dict[str, float]]],
-    df: Optional[pd.DataFrame],
-) -> Dict[str, object]:
-    counts = translation_profile.get("counts", {}) if isinstance(translation_profile, dict) else {}
-    if not isinstance(counts, dict):
-        counts = {}
-    norm_callers = {}
-    for key, value in counts.items():
-        key_text = str(key)
-        if key_text.startswith("norm_text caller: "):
-            caller = key_text.replace("norm_text caller: ", "", 1)
-            norm_callers[caller] = value
-    get_all_calls = counts.get("get_all_csv_terms calls")
-    generated_terms = counts.get("protected terms generated")
-    try:
-        avg_terms = float(generated_terms) / float(get_all_calls) if get_all_calls else None
-    except Exception:
-        avg_terms = None
-    return {
-        "norm_text_total_calls": counts.get("norm_text calls"),
-        "norm_text_callers": norm_callers,
-        "lookup_term_calls": counts.get("lookup_term calls"),
-        "lookup_row_calls": counts.get("lookup_row calls"),
-        "lookup_row_norm_text_calls": norm_callers.get("lookup_row"),
-        "lookup_term_norm_text_calls": norm_callers.get("lookup_term"),
-        "csv_rows_loaded": float(len(df)) if df is not None else None,
-        "total_searchable_terms_generated": generated_terms,
-        "get_all_csv_terms_call_count": get_all_calls,
-        "average_terms_per_call": avg_terms,
-    }
-
-
-def _format_rc11e_normalization_diagnostics(diagnostics: Optional[Dict[str, object]]) -> str:
-    diagnostics = diagnostics or {}
-    callers = diagnostics.get("norm_text_callers", {})
-    lines = [
-        f"Total norm_text() calls: {_format_diag_count(diagnostics.get('norm_text_total_calls'))}",
-        "Caller breakdown:",
-    ]
-    if isinstance(callers, dict) and callers:
-        for caller in sorted(callers):
-            lines.append(f"{caller}() -> norm_text() calls: {_format_diag_count(callers.get(caller))}")
-    else:
-        lines.append("N/A")
-    return "\n".join(lines)
-
-
-def _format_rc11e_top_normalization_callers(diagnostics: Optional[Dict[str, object]]) -> str:
-    diagnostics = diagnostics or {}
-    callers = diagnostics.get("norm_text_callers", {})
-    if not isinstance(callers, dict) or not callers:
-        return "N/A"
-    parsed = []
-    for caller, value in callers.items():
-        try:
-            parsed.append((str(caller), float(value)))
-        except Exception:
-            pass
-    parsed.sort(key=lambda item: item[1], reverse=True)
-    return "\n".join(f"{caller}(): {_format_diag_count(count)}" for caller, count in parsed)
-
-
-def _format_rc11e_lookup_chain_diagnostics(diagnostics: Optional[Dict[str, object]]) -> str:
-    diagnostics = diagnostics or {}
-    lines = [
-        f"lookup_term() calls: {_format_diag_count(diagnostics.get('lookup_term_calls'))}",
-        f"lookup_row() calls: {_format_diag_count(diagnostics.get('lookup_row_calls'))}",
-        f"lookup_term() -> norm_text() calls: {_format_diag_count(diagnostics.get('lookup_term_norm_text_calls'))}",
-        f"lookup_row() -> norm_text() calls: {_format_diag_count(diagnostics.get('lookup_row_norm_text_calls'))}",
-        "lookup_term() -> lookup_row(): lookup_term calls lookup_row once per invocation in the current code path.",
-        "Counts are actual runtime counters from profile_count during the translation run.",
-    ]
-    return "\n".join(lines)
-
-
-def _format_rc11e_csv_term_diagnostics(diagnostics: Optional[Dict[str, object]]) -> str:
-    diagnostics = diagnostics or {}
-    lines = [
-        f"CSV rows loaded: {_format_diag_count(diagnostics.get('csv_rows_loaded'))}",
-        f"Total searchable terms generated: {_format_diag_count(diagnostics.get('total_searchable_terms_generated'))}",
-        f"get_all_csv_terms() call count: {_format_diag_count(diagnostics.get('get_all_csv_terms_call_count'))}",
-        f"Average terms per call: {_format_diag_count(diagnostics.get('average_terms_per_call'))}",
-        "Generation source: profile_count('protected terms generated') inside get_all_csv_terms().",
-        "Repeated generation check: if get_all_csv_terms() call count is greater than 1, searchable terms were regenerated multiple times during this OCR run.",
-    ]
-    return "\n".join(lines)
-
-
+# Diagnostic Report Engine wrappers. Streamlit context stays in app.py; pure
+# report construction lives in pattern_translator.engine.diagnostic_report.
 def build_rc11f_cache_diagnostics(
     translation_profile: Optional[Dict[str, Dict[str, float]]],
     timings: Optional[Dict[str, object]],
     translation_output: str,
 ) -> Dict[str, object]:
-    counts = translation_profile.get("counts", {}) if isinstance(translation_profile, dict) else {}
-    if not isinstance(counts, dict):
-        counts = {}
-    stats = dict(CSV_TERM_CACHE_STATS)
-    return {
-        "cache_enabled": "Yes",
-        "cache_key": stats.get("last_key") or "N/A",
-        "cache_hits": stats.get("hits"),
-        "cache_misses": stats.get("misses"),
-        "generation_count": stats.get("generation_count"),
-        "served_from_cache_count": stats.get("served_from_cache_count"),
-        "searchable_terms_returned": stats.get("last_terms_returned"),
-        "norm_text_total_calls": counts.get("norm_text calls"),
-        "lookup_term_calls": counts.get("lookup_term calls"),
-        "lookup_row_calls": counts.get("lookup_row calls"),
-        "translation_processing_time": (timings or {}).get("Translation processing"),
-        "total_runtime": (timings or {}).get("Total runtime"),
-        "translation_output_hash": hashlib.sha256(str(translation_output or "").encode("utf-8")).hexdigest(),
-        "cache_error": stats.get("last_error") or "N/A",
-    }
-
-
-def _format_rc11f_cache_diagnostics(diagnostics: Optional[Dict[str, object]]) -> str:
-    diagnostics = diagnostics or {}
-    lines = [
-        f"CSV term cache enabled: {diagnostics.get('cache_enabled', 'N/A')}",
-        f"CSV term cache key: {diagnostics.get('cache_key', 'N/A')}",
-        f"CSV term cache hits: {_format_diag_count(diagnostics.get('cache_hits'))}",
-        f"CSV term cache misses: {_format_diag_count(diagnostics.get('cache_misses'))}",
-        f"get_all_csv_terms() actual generation count: {_format_diag_count(diagnostics.get('generation_count'))}",
-        f"get_all_csv_terms() served from cache count: {_format_diag_count(diagnostics.get('served_from_cache_count'))}",
-        f"Searchable terms returned: {_format_diag_count(diagnostics.get('searchable_terms_returned'))}",
-        f"norm_text() total calls: {_format_diag_count(diagnostics.get('norm_text_total_calls'))}",
-        f"lookup_term() calls: {_format_diag_count(diagnostics.get('lookup_term_calls'))}",
-        f"lookup_row() calls: {_format_diag_count(diagnostics.get('lookup_row_calls'))}",
-        f"Translation processing time: {_format_diag_seconds(diagnostics.get('translation_processing_time'))}",
-        f"Total runtime: {_format_diag_seconds(diagnostics.get('total_runtime'))}",
-        f"Translation output hash: {diagnostics.get('translation_output_hash', 'N/A')}",
-        f"Cache error: {diagnostics.get('cache_error', 'N/A')}",
-    ]
-    return "\n".join(lines)
+    return diagnostic_report_engine.build_rc11f_cache_diagnostics(
+        translation_profile,
+        timings,
+        translation_output,
+        csv_term_cache_stats=CSV_TERM_CACHE_STATS,
+    )
 
 
 def build_rc11g_lookup_index_diagnostics(
@@ -4616,142 +1362,12 @@ def build_rc11g_lookup_index_diagnostics(
     timings: Optional[Dict[str, object]],
     translation_output: str,
 ) -> Dict[str, object]:
-    counts = translation_profile.get("counts", {}) if isinstance(translation_profile, dict) else {}
-    if not isinstance(counts, dict):
-        counts = {}
-    stats = dict(NORMALIZED_LOOKUP_INDEX_STATS)
-    return {
-        "lookup_index_enabled": stats.get("enabled", "Yes"),
-        "lookup_index_key": stats.get("last_key") or "N/A",
-        "lookup_index_build_count": stats.get("build_count"),
-        "lookup_index_cache_hits": stats.get("cache_hits"),
-        "lookup_index_cache_misses": stats.get("cache_misses"),
-        "lookup_index_size": stats.get("index_size"),
-        "duplicate_normalized_keys": stats.get("duplicate_keys"),
-        "indexed_lookup_attempts": stats.get("indexed_lookup_attempts"),
-        "indexed_lookup_hits": stats.get("indexed_lookup_hits"),
-        "indexed_lookup_misses": stats.get("indexed_lookup_misses"),
-        "fallback_lookup_attempts": stats.get("fallback_lookup_attempts"),
-        "fallback_lookup_hits": stats.get("fallback_lookup_hits"),
-        "fallback_lookup_misses": stats.get("fallback_lookup_misses"),
-        "lookup_term_calls": counts.get("lookup_term calls"),
-        "lookup_row_calls": counts.get("lookup_row calls"),
-        "norm_text_total_calls": counts.get("norm_text calls"),
-        "translation_processing_time": (timings or {}).get("Translation processing"),
-        "total_runtime": (timings or {}).get("Total runtime"),
-        "translation_output_hash": hashlib.sha256(str(translation_output or "").encode("utf-8")).hexdigest(),
-        "index_error": stats.get("index_error") or "N/A",
-    }
-
-
-def _format_rc11g_lookup_index_diagnostics(diagnostics: Optional[Dict[str, object]]) -> str:
-    diagnostics = diagnostics or {}
-    lines = [
-        f"Lookup index enabled: {diagnostics.get('lookup_index_enabled', 'N/A')}",
-        f"Lookup index key: {diagnostics.get('lookup_index_key', 'N/A')}",
-        f"Lookup index build count: {_format_diag_count(diagnostics.get('lookup_index_build_count'))}",
-        f"Lookup index cache hits: {_format_diag_count(diagnostics.get('lookup_index_cache_hits'))}",
-        f"Lookup index cache misses: {_format_diag_count(diagnostics.get('lookup_index_cache_misses'))}",
-        f"Lookup index size: {_format_diag_count(diagnostics.get('lookup_index_size'))}",
-        f"Duplicate normalized keys: {_format_diag_count(diagnostics.get('duplicate_normalized_keys'))}",
-        f"Indexed lookup attempts: {_format_diag_count(diagnostics.get('indexed_lookup_attempts'))}",
-        f"Indexed lookup hits: {_format_diag_count(diagnostics.get('indexed_lookup_hits'))}",
-        f"Indexed lookup misses: {_format_diag_count(diagnostics.get('indexed_lookup_misses'))}",
-        f"Fallback lookup attempts: {_format_diag_count(diagnostics.get('fallback_lookup_attempts'))}",
-        f"Fallback lookup hits: {_format_diag_count(diagnostics.get('fallback_lookup_hits'))}",
-        f"Fallback lookup misses: {_format_diag_count(diagnostics.get('fallback_lookup_misses'))}",
-        f"lookup_term() calls: {_format_diag_count(diagnostics.get('lookup_term_calls'))}",
-        f"lookup_row() calls: {_format_diag_count(diagnostics.get('lookup_row_calls'))}",
-        f"norm_text() total calls: {_format_diag_count(diagnostics.get('norm_text_total_calls'))}",
-        f"Translation processing time: {_format_diag_seconds(diagnostics.get('translation_processing_time'))}",
-        f"Total runtime: {_format_diag_seconds(diagnostics.get('total_runtime'))}",
-        f"Translation output hash: {diagnostics.get('translation_output_hash', 'N/A')}",
-        f"Index error: {diagnostics.get('index_error', 'N/A')}",
-    ]
-    return "\n".join(lines)
-
-
-def _format_ocr_model_diagnostics(diagnostics: Optional[Dict[str, object]]) -> str:
-    diagnostics = diagnostics or {}
-    lines = [
-        f"OCR backend: {diagnostics.get('ocr_backend', 'Not captured')}",
-        f"Language model: {diagnostics.get('ocr_language_model', 'Not captured')}",
-        f"OCR reader class: {diagnostics.get('ocr_reader_class', 'Not captured')}",
-        f"Detector model: {diagnostics.get('detector_model', 'Not captured')}",
-        f"Recognizer model: {diagnostics.get('recognizer_model', 'Not captured')}",
-    ]
-    return "\n".join(lines)
-
-
-def _format_ocr_invocation_counts(diagnostics: Optional[Dict[str, object]]) -> str:
-    diagnostics = diagnostics or {}
-    lines = [
-        f"run_primary_ocr calls: {diagnostics.get('run_primary_ocr_calls', 'Not captured')}",
-        f"run_paddle_ocr_single calls: {diagnostics.get('run_paddle_ocr_single_calls', 'Not captured')}",
-    ]
-    return "\n".join(lines)
-
-
-def _format_ocr_call_trace(trace: Optional[List[str]]) -> str:
-    if not trace:
-        return "No OCR call trace captured."
-    return "\n".join(_debug_cell(item) for item in trace)
-
-
-def _format_event_log(events: Optional[List[Dict[str, object]]]) -> str:
-    if not events:
-        return "No diagnostic events captured."
-    interesting_events = []
-    for event in events:
-        event_name = str(event.get("event", ""))
-        if any(token in event_name for token in ["image", "cropper", "Run OCR", "Pending OCR"]):
-            interesting_events.append(event)
-    if not interesting_events:
-        interesting_events = events
-    lines = []
-    for event in interesting_events[-100:]:
-        details = [
-            f"{key}={_debug_cell(value)}"
-            for key, value in event.items()
-            if key not in {"time", "event"}
-        ]
-        suffix = f" | {'; '.join(details)}" if details else ""
-        lines.append(f"{event.get('time', '')} | {event.get('event', '')}{suffix}")
-    return "\n".join(lines)
-
-
-def _format_session_diagnostics(diagnostics: Optional[Dict[str, object]]) -> str:
-    diagnostics = diagnostics or {}
-    lines = [
-        f"Total session_state keys: {diagnostics.get('total_session_state_keys', 'Not captured')}",
-        f"Cropper-related key count: {diagnostics.get('cropper_related_keys', 'Not captured')}",
-        f"Slider-related key count: {diagnostics.get('slider_related_keys', 'Not captured')}",
-        f"Image signature history length: {diagnostics.get('image_signature_history_length', 'Not captured')}",
-    ]
-    return "\n".join(lines)
-
-
-def _format_button_ocr_diagnostics(diagnostics: Optional[Dict[str, object]]) -> str:
-    diagnostics = diagnostics or {}
-    lines = [
-        f"Run button click count: {diagnostics.get('run_button_click_count', 'Not captured')}",
-        f"Reruns between click and OCR block: {diagnostics.get('reruns_between_click_and_ocr_block', 'Not captured')}",
-        f"pending_ocr_run status: {diagnostics.get('pending_ocr_run', 'Not captured')}",
-        f"latest_crop_box status: {diagnostics.get('latest_crop_box', 'Not captured')}",
-    ]
-    return "\n".join(lines)
-
-
-def _format_ocr_execution_diagnostics(diagnostics: Optional[Dict[str, object]]) -> str:
-    diagnostics = diagnostics or {}
-    lines = [
-        f"OCR started at: {diagnostics.get('ocr_started_at', 'Not captured')}",
-        f"OCR finished at: {diagnostics.get('ocr_finished_at', 'Not captured')}",
-        f"OCR duration: {diagnostics.get('ocr_duration_seconds', 'Not captured')}",
-        f"OCR running state: {diagnostics.get('ocr_running', 'Not captured')}",
-        f"OCR run request ignored because OCR already running: {diagnostics.get('duplicate_ocr_run_ignored_count', 'Not captured')}",
-    ]
-    return "\n".join(lines)
+    return diagnostic_report_engine.build_rc11g_lookup_index_diagnostics(
+        translation_profile,
+        timings,
+        translation_output,
+        normalized_lookup_index_stats=NORMALIZED_LOOKUP_INDEX_STATS,
+    )
 
 
 def build_debug_report_text(
@@ -4785,165 +1401,43 @@ def build_debug_report_text(
     rc11f_cache_diagnostics: Optional[Dict[str, object]] = None,
     rc11g_lookup_index_diagnostics: Optional[Dict[str, object]] = None,
 ) -> str:
-    """Developer-facing diagnostic export for beta testing."""
-    quality_metrics = quality_metrics or {}
-    readable = build_readable_line_translation(line_df) if line_df is not None and not line_df.empty else ""
-    report_timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
     if not platform:
         try:
-            platform = str(st.context.headers.get("user-agent", "") or "Not captured")
+            platform = str(get_request_headers().get("user-agent", "") or "Not captured")
         except Exception:
             platform = "Not captured"
-    parts = [
-        "================================================",
-        "Diagnostic Report",
-        "================================================",
-        "",
-        "Note: This report is for diagnosing OCR / dictionary / overlay issues.",
-        "",
-        "=== Application Information ===",
-        f"App version: {APP_VERSION}",
-        f"Timestamp: {report_timestamp}",
-        f"Interface language: {interface_language or 'Not captured'}",
-        f"Pattern language / terminology: {source_mode}",
-        f"Translate result to: {output_mode}",
-        f"Platform: {platform or 'Not captured'}",
-        "",
-        "=== Image Information ===",
-        f"Area selected: {area_mode}",
-        f"Crop box: {crop_box}",
-        f"OCR Resize Test: {ocr_resize_test}",
-        f"Image quality status: {image_quality_status or 'Not captured'}",
-        f"Resolution: {quality_metrics.get('width_px', '')} x {quality_metrics.get('height_px', '')} px",
-        f"Sharpness: {quality_metrics.get('sharpness_score', '')}",
-        f"Contrast: {quality_metrics.get('contrast_score', '')}",
-        "",
-        "=== OCR Image Pipeline ===",
-        _format_ocr_image_pipeline(ocr_call_diagnostics),
-        "",
-        "=== OCR Resize / Downscale Details ===",
-        _format_rc11b_downscale_diagnostics(
-            downscale_diagnostics,
-            timings,
-            ocr_workload_diagnostics,
-        ),
-        "",
-        "=== OCR Information ===",
-        f"OCR engine: {ocr_engine or 'Not captured'}",
-        "",
-        "=== OCR Configuration / Model ===",
-        _format_ocr_model_diagnostics(ocr_call_diagnostics),
-        "",
-        "=== OCR Invocation Counts ===",
-        _format_ocr_invocation_counts(ocr_call_diagnostics),
-        "",
-        "=== OCR EXECUTION ===",
-        _format_ocr_execution_diagnostics(session_diagnostics),
-        "",
-        "=== OCR WORKLOAD ===",
-        _format_ocr_workload_diagnostics(ocr_workload_diagnostics),
-        "",
-        "=== Whole Pattern Performance Diagnostics ===",
-        _format_rc11a_performance_diagnostics(
-            ocr_workload_diagnostics,
-            ocr_call_diagnostics,
-            timings,
-            area_mode=area_mode,
-        ),
-        "",
-        "=== Top 20 OCR Boxes By Confidence ===",
-        _format_ocr_box_list(ocr_box_rows, "confidence", limit=20),
-        "",
-        "=== Largest 20 OCR Boxes ===",
-        _format_ocr_box_list(ocr_box_rows, "largest", limit=20),
-        "",
-        "=== Smallest 20 OCR Boxes ===",
-        _format_ocr_box_list(ocr_box_rows, "smallest", limit=20),
-        "",
-        "=== Cleaned OCR ===",
-        clean_text.strip() or "Not captured",
-        "",
-        "=== Raw OCR ===",
-        raw_text.strip() or "Not captured",
-        "",
-        "=== Translation Information ===",
-        "",
-        "=== Translation Statistics ===",
-        _format_rc11c_translation_diagnostics(rc11c_translation_diagnostics),
-        "",
-        "=== Translation Cost Summary ===",
-        _format_rc11c_translation_cost_summary(rc11c_translation_diagnostics),
-        "",
-        "=== MATCHED TERMS ===",
-        _format_matched_terms(matches_df, output_mode),
-        "",
-        "=== UNMATCHED TERMS ===",
-        _format_unmatched_terms(unmatched),
-        "",
-        "=== CSV MATCH DETAILS ===",
-        _format_csv_match_details(matches_df),
-        "",
-        "=== Translation Output ===",
-        readable.strip() or "Not captured",
-        "",
-        "=== Overlay Legend ===",
-        legend_text.strip() or "Not captured",
-        "",
-        "=== Performance ===",
-        "",
-        "=== DEBUG TIMINGS ===",
-        _format_debug_timings(timings),
-        "",
-        "=== Developer Information ===",
-        "",
-        "=== Session Diagnostics ===",
-        _format_session_diagnostics(session_diagnostics),
-        "",
-        "=== Button / OCR Diagnostics ===",
-        _format_button_ocr_diagnostics(session_diagnostics),
-        "",
-        "=== OCR Call Trace ===",
-        _format_ocr_call_trace(ocr_call_trace),
-        "",
-        "=== Event Log ===",
-        _format_event_log(events),
-        "",
-        "=== Timing Validation ===",
-        _format_rc11d_timing_validation(rc11d_validation_diagnostics),
-        "",
-        "=== Function Call Diagnostics ===",
-        _format_rc11d_function_call_diagnostics(rc11d_validation_diagnostics),
-        "",
-        "=== Lookup Validation ===",
-        _format_rc11d_lookup_validation(rc11d_validation_diagnostics),
-        "",
-        "=== Regex Validation ===",
-        _format_rc11d_regex_validation(rc11d_validation_diagnostics),
-        "",
-        "=== Top Function Calls ===",
-        _format_rc11d_top_function_calls(rc11d_validation_diagnostics),
-        "",
-        "=== Normalization Diagnostics ===",
-        _format_rc11e_normalization_diagnostics(rc11e_normalization_diagnostics),
-        "",
-        "=== Top Normalization Callers ===",
-        _format_rc11e_top_normalization_callers(rc11e_normalization_diagnostics),
-        "",
-        "=== Lookup Chain Diagnostics ===",
-        _format_rc11e_lookup_chain_diagnostics(rc11e_normalization_diagnostics),
-        "",
-        "=== CSV Term Diagnostics ===",
-        _format_rc11e_csv_term_diagnostics(rc11e_normalization_diagnostics),
-        "",
-        "=== CSV Term Cache Diagnostics ===",
-        _format_rc11f_cache_diagnostics(rc11f_cache_diagnostics),
-        "",
-        "=== Normalized Lookup Index Diagnostics ===",
-        _format_rc11g_lookup_index_diagnostics(rc11g_lookup_index_diagnostics),
-        "",
-    ]
-    return "\n".join(parts).strip() + "\n"
-
+    return diagnostic_report_engine.build_debug_report_text(
+        line_df,
+        legend_text=legend_text,
+        clean_text=clean_text,
+        raw_text=raw_text,
+        source_mode=source_mode,
+        output_mode=output_mode,
+        area_mode=area_mode,
+        crop_box=crop_box,
+        matches_df=matches_df,
+        unmatched=unmatched,
+        ocr_engine=ocr_engine,
+        image_quality_status=image_quality_status,
+        quality_metrics=quality_metrics,
+        session_diagnostics=session_diagnostics,
+        events=events,
+        timings=timings,
+        ocr_workload_diagnostics=ocr_workload_diagnostics,
+        ocr_box_rows=ocr_box_rows,
+        ocr_call_diagnostics=ocr_call_diagnostics,
+        ocr_call_trace=ocr_call_trace,
+        downscale_diagnostics=downscale_diagnostics,
+        ocr_resize_test=ocr_resize_test,
+        interface_language=interface_language,
+        platform=platform,
+        app_version=APP_VERSION,
+        rc11c_translation_diagnostics=rc11c_translation_diagnostics,
+        rc11d_validation_diagnostics=rc11d_validation_diagnostics,
+        rc11e_normalization_diagnostics=rc11e_normalization_diagnostics,
+        rc11f_cache_diagnostics=rc11f_cache_diagnostics,
+        rc11g_lookup_index_diagnostics=rc11g_lookup_index_diagnostics,
+    )
 
 
 
@@ -5112,7 +1606,7 @@ def make_area_preview(image: Image.Image, box: Tuple[int, int, int, int]) -> Ima
 # -----------------------------
 INTERFACE_LANGUAGES = {
     "English": {
-        "app_title": "🧶 Crochet Translator",
+        "app_title": "Crochet Translator",
         "app_subtitle": "Pattern OCR Translator (Beta)",
         "privacy_expander": "Privacy / storage note",
         "privacy": "Please only upload images you have permission to use, or images used for personal study/reference. This beta does not intentionally store uploaded images or OCR results; files are processed only for the current session. Anonymous usage statistics (such as country, app usage and performance) are collected to help improve the app. No personal information, IP addresses or uploaded images are stored.",
@@ -5127,6 +1621,19 @@ INTERFACE_LANGUAGES = {
         "output_hint_uk": "💡 Choose UK terminology only if you specifically need UK stitch names.",
         "default_mode_info": "Default mode is **Overlay Translation**. Select a smaller area for faster and more accurate results.",
         "upload_prompt": "Upload pattern image",
+        "upload_instruction": "Choose a pattern image",
+        "upload_choose": "Choose image",
+        "upload_drop_hint": "Or drag and drop an image here",
+        "upload_drop_active": "Drop the image here",
+        "upload_reading": "Reading image…",
+        "upload_selected": "Selected image",
+        "upload_replace": "Replace",
+        "upload_remove": "Remove",
+        "upload_error_unsupported": "This file cannot be used. Please choose a JPG, JPEG, PNG or WebP image from your Camera, Photos or Files.",
+        "upload_error_empty": "This file is empty. Please choose another image.",
+        "upload_error_too_large": "This image is too large. Please choose an image smaller than 25 MB.",
+        "upload_error_unreadable": "This file could not be read. Please choose another image.",
+        "upload_error_invalid": "This file is not a valid image. Please choose a JPG, JPEG, PNG or WebP image.",
         "original_image": "Original image",
         "translation_area": "Translation area",
         "translation_area_tip": "💡 Select Area is optional and experimental. Use it when you need to translate only part of an image.",
@@ -5136,7 +1643,7 @@ INTERFACE_LANGUAGES = {
         "area_right": "Right Column",
         "area_whole": "Whole Pattern",
         "cropper_missing": "Direct drag selection needs the optional package `streamlit-cropper`. Until installed, this version falls back to presets or sliders.",
-        "cropper_drag": "Drag the rectangle around the text you want translated.",
+        "cropper_drag": "Drag the rectangle around the text you want translated.\n\nUse the Precision Pad to fine-tune the highlighted border.",
         "cropper_failed": "Drag cropper could not load. Falling back to boundary sliders.",
         "boundary_instruction": "Move the boundary lines. No percentages needed — just keep the red box around the text you want translated.",
         "left_boundary": "Left boundary",
@@ -5150,6 +1657,26 @@ INTERFACE_LANGUAGES = {
         "select_area_edit": "Edit Selection",
         "select_area_use": "Use This Area",
         "select_area_cancel": "Start Over",
+        "select_area_reset": "Reset",
+        "select_area_image_alt": "Crochet pattern image for area selection",
+        "select_area_selection_label": "Selected translation area",
+        "select_area_move_controller": "Move precision controls",
+        "select_area_move_up": "Adjust top edge upward",
+        "select_area_move_down": "Adjust bottom edge downward",
+        "select_area_move_left": "Adjust left edge outward",
+        "select_area_move_right": "Adjust right edge outward",
+        "select_area_adjust_top_up": "Move top edge upward",
+        "select_area_adjust_top_down": "Move top edge downward",
+        "select_area_adjust_bottom_up": "Move bottom edge upward",
+        "select_area_adjust_bottom_down": "Move bottom edge downward",
+        "select_area_adjust_left_left": "Move left edge left",
+        "select_area_adjust_left_right": "Move left edge right",
+        "select_area_adjust_right_left": "Move right edge left",
+        "select_area_adjust_right_right": "Move right edge right",
+        "select_area_resize_top": "Resize top edge",
+        "select_area_resize_bottom": "Resize bottom edge",
+        "select_area_resize_left": "Resize left edge",
+        "select_area_resize_right": "Resize right edge",
         "select_area_scroll_hint": "Preview is scrollable. Tap Select Area when you are ready to adjust the crop.",
         "select_area_confirmed_hint": "This selected area will be used for OCR. Tap Edit Selection to change it.",
         "select_area_required": "Please select an area before running OCR, or switch back to Whole Pattern.",
@@ -5177,7 +1704,8 @@ INTERFACE_LANGUAGES = {
         "overlay_translation": "Overlay translation",
         "overlay_caption": "Smart overlay: short translations are shown directly; long/colliding translations use numbered markers.",
         "download_overlay": "Download Overlay Image PNG",
-        "no_overlay": "No translated overlay labels were generated. The OCR may have found text, but no CSV-backed crochet translation changed the lines.",
+        "no_crochet_pattern_title": "No crochet pattern was detected.",
+        "no_crochet_pattern_body": "The text in this image was recognised successfully, but no crochet terms were found. Please upload a crochet pattern instead of a general photo or document.",
         "line_translation": "Line-by-line Translation",
         "translated_lines": "Translated OCR lines",
         "download_translation": "Download Translation TXT",
@@ -5207,7 +1735,7 @@ INTERFACE_LANGUAGES = {
         "privacy": "請只上載你有權使用的圖片，或只作個人學習／參考用途的圖片。本測試版不會刻意儲存上載圖片或文字辨識結果；檔案只在本次使用期間中處理。系統會收集匿名使用統計資料（例如國家／地區、應用程式使用情況和效能），以協助改善應用程式。不會儲存個人資料、IP 位址或上載圖片。",
         "privacy_expander": "私隱／儲存說明",
         "intro": "上載鈎織圖樣圖片，取得圖片標示翻譯及逐行翻譯。",
-        "app_title": "🧶 鈎織翻譯器",
+        "app_title": "鈎織翻譯器",
         "app_subtitle": "圖樣文字辨識翻譯器（測試版）",
         "source_label": "圖樣語言／術語",
         "source_help": "如果英文圖樣沒有標明美式或英式，請先選「英文－美式」。大部分網上 amigurumi 圖樣使用美式術語。",
@@ -5219,6 +1747,19 @@ INTERFACE_LANGUAGES = {
         "output_hint_uk": "💡 只有在你特別需要英式針法名稱時，才建議選擇英式術語。",
         "default_mode_info": "預設會在圖片上顯示翻譯。選取較小範圍通常更快、更準確。",
         "upload_prompt": "上載圖樣圖片",
+        "upload_instruction": "選擇要翻譯的圖樣圖片",
+        "upload_choose": "選擇圖片",
+        "upload_drop_hint": "或將圖片拖放到這裡",
+        "upload_drop_active": "將圖片放到這裡",
+        "upload_reading": "正在讀取圖片……",
+        "upload_selected": "已選圖片",
+        "upload_replace": "更換",
+        "upload_remove": "移除",
+        "upload_error_unsupported": "這個檔案無法使用。請從相機、相片或檔案選擇 JPG、JPEG、PNG 或 WebP 圖片。",
+        "upload_error_empty": "這個檔案沒有內容。請選擇另一張圖片。",
+        "upload_error_too_large": "圖片太大。請選擇小於 25 MB 的圖片。",
+        "upload_error_unreadable": "無法讀取這個檔案。請選擇另一張圖片。",
+        "upload_error_invalid": "這個檔案不是有效的圖片。請選擇 JPG、JPEG、PNG 或 WebP 圖片。",
         "original_image": "原始圖片",
         "translation_area": "翻譯範圍",
         "translation_area_tip": "💡 選取範圍是選用的實驗功能。需要只翻譯圖片的一部分時可以使用。",
@@ -5228,7 +1769,7 @@ INTERFACE_LANGUAGES = {
         "area_right": "右欄",
         "area_whole": "整個圖樣",
         "cropper_missing": "拖拉選取範圍需要額外套件 `streamlit-cropper`。未安裝時，會改用預設範圍或滑桿。",
-        "cropper_drag": "請拖拉方框，框住要翻譯的文字。",
+        "cropper_drag": "請拖拉方框，框住要翻譯的文字。\n\n使用精細調整控制器微調反白顯示的邊界。",
         "cropper_failed": "拖拉裁剪工具未能載入，將改用邊界滑桿。",
         "boundary_instruction": "移動邊界線即可。不需要輸入百分比，只要讓紅框包住要翻譯的文字。",
         "left_boundary": "左邊界",
@@ -5242,6 +1783,26 @@ INTERFACE_LANGUAGES = {
         "select_area_edit": "編輯範圍",
         "select_area_use": "使用此範圍",
         "select_area_cancel": "重新選取",
+        "select_area_reset": "重設",
+        "select_area_image_alt": "用於選取範圍的鈎織圖樣圖片",
+        "select_area_selection_label": "已選翻譯範圍",
+        "select_area_move_controller": "移動精細調整控制器",
+        "select_area_move_up": "向上微調上邊界",
+        "select_area_move_down": "向下微調下邊界",
+        "select_area_move_left": "向外微調左邊界",
+        "select_area_move_right": "向外微調右邊界",
+        "select_area_adjust_top_up": "向上移動上邊界",
+        "select_area_adjust_top_down": "向下移動上邊界",
+        "select_area_adjust_bottom_up": "向上移動下邊界",
+        "select_area_adjust_bottom_down": "向下移動下邊界",
+        "select_area_adjust_left_left": "向左移動左邊界",
+        "select_area_adjust_left_right": "向右移動左邊界",
+        "select_area_adjust_right_left": "向左移動右邊界",
+        "select_area_adjust_right_right": "向右移動右邊界",
+        "select_area_resize_top": "調整上邊界",
+        "select_area_resize_bottom": "調整下邊界",
+        "select_area_resize_left": "調整左邊界",
+        "select_area_resize_right": "調整右邊界",
         "select_area_scroll_hint": "預覽可以正常捲動。準備調整裁剪範圍時，請點選「選取範圍」。",
         "select_area_confirmed_hint": "文字辨識會使用這個已選範圍。如需修改，請點選「編輯範圍」。",
         "select_area_required": "請先選取要翻譯的範圍，或切換回整個圖樣。",
@@ -5269,7 +1830,8 @@ INTERFACE_LANGUAGES = {
         "overlay_translation": "圖片翻譯結果",
         "overlay_caption": "短翻譯會直接顯示在圖片上；較長或重疊的翻譯會用編號標記。",
         "download_overlay": "下載翻譯圖片 PNG",
-        "no_overlay": "未產生圖片標示翻譯。文字辨識可能找到文字，但沒有產生可用字典翻譯。",
+        "no_crochet_pattern_title": "未找到可翻譯的鈎織術語。",
+        "no_crochet_pattern_body": "圖片中的文字已成功辨識，但沒有找到可翻譯的鈎織圖樣內容。請確認你上傳的是鈎織圖樣，而不是一般圖片或其他文件。",
         "line_translation": "逐行翻譯",
         "translated_lines": "已翻譯的文字辨識行",
         "download_translation": "下載文字翻譯 TXT",
@@ -5299,7 +1861,7 @@ INTERFACE_LANGUAGES = {
         "privacy": "请只上传你有权使用的图片，或只作个人学习／参考用途的图片。本测试版不会刻意储存上传图片或文字识别结果；文件只在本次使用期间中处理。系统会收集匿名使用统计资料（例如国家／地区、应用程序使用情况和性能），以帮助改善应用程序。不会储存个人资料、IP 地址或上传图片。",
         "privacy_expander": "隐私／存储说明",
         "intro": "上传钩织图样图片，获得图片标示翻译和逐行翻译。",
-        "app_title": "🧶 钩织翻译器",
+        "app_title": "钩织翻译器",
         "app_subtitle": "图样文字识别翻译器（测试版）",
         "source_label": "图样语言／术语",
         "source_help": "如果英文图样没有标明美式或英式，请先选“英文－美式”。大部分网上 amigurumi 图样使用美式术语。",
@@ -5311,6 +1873,19 @@ INTERFACE_LANGUAGES = {
         "output_hint_uk": "💡 只有在你特别需要英式针法名称时，才建议选择英式术语。",
         "default_mode_info": "默认会在图片上显示翻译。选取较小范围通常更快、更准确。",
         "upload_prompt": "上传图样图片",
+        "upload_instruction": "选择要翻译的图样图片",
+        "upload_choose": "选择图片",
+        "upload_drop_hint": "或将图片拖放到这里",
+        "upload_drop_active": "将图片放到这里",
+        "upload_reading": "正在读取图片……",
+        "upload_selected": "已选图片",
+        "upload_replace": "更换",
+        "upload_remove": "移除",
+        "upload_error_unsupported": "这个文件无法使用。请从相机、照片或文件选择 JPG、JPEG、PNG 或 WebP 图片。",
+        "upload_error_empty": "这个文件没有内容。请选择另一张图片。",
+        "upload_error_too_large": "图片太大。请选择小于 25 MB 的图片。",
+        "upload_error_unreadable": "无法读取这个文件。请选择另一张图片。",
+        "upload_error_invalid": "这个文件不是有效的图片。请选择 JPG、JPEG、PNG 或 WebP 图片。",
         "original_image": "原始图片",
         "translation_area": "翻译范围",
         "translation_area_tip": "💡 选取范围是选用的实验功能。需要只翻译图片的一部分时可以使用。",
@@ -5320,7 +1895,7 @@ INTERFACE_LANGUAGES = {
         "area_right": "右栏",
         "area_whole": "整个图样",
         "cropper_missing": "拖拉选取范围需要额外套件 `streamlit-cropper`。未安装时，会改用默认范围或滑杆。",
-        "cropper_drag": "请拖拉方框，框住要翻译的文字。",
+        "cropper_drag": "请拖拉方框，框住要翻译的文字。\n\n使用精细调整控制器微调高亮显示的边界。",
         "cropper_failed": "拖拉裁剪工具未能加载，将改用边界滑杆。",
         "boundary_instruction": "移动边界线即可。不需要输入百分比，只要让红框包住要翻译的文字。",
         "left_boundary": "左边界",
@@ -5334,6 +1909,26 @@ INTERFACE_LANGUAGES = {
         "select_area_edit": "编辑范围",
         "select_area_use": "使用此范围",
         "select_area_cancel": "重新选择",
+        "select_area_reset": "重置",
+        "select_area_image_alt": "用于选取范围的钩织图样图片",
+        "select_area_selection_label": "已选翻译范围",
+        "select_area_move_controller": "移动精细调整控制器",
+        "select_area_move_up": "向上微调上边界",
+        "select_area_move_down": "向下微调下边界",
+        "select_area_move_left": "向外微调左边界",
+        "select_area_move_right": "向外微调右边界",
+        "select_area_adjust_top_up": "向上移动上边界",
+        "select_area_adjust_top_down": "向下移动上边界",
+        "select_area_adjust_bottom_up": "向上移动下边界",
+        "select_area_adjust_bottom_down": "向下移动下边界",
+        "select_area_adjust_left_left": "向左移动左边界",
+        "select_area_adjust_left_right": "向右移动左边界",
+        "select_area_adjust_right_left": "向左移动右边界",
+        "select_area_adjust_right_right": "向右移动右边界",
+        "select_area_resize_top": "调整上边界",
+        "select_area_resize_bottom": "调整下边界",
+        "select_area_resize_left": "调整左边界",
+        "select_area_resize_right": "调整右边界",
         "select_area_scroll_hint": "预览可以正常滚动。准备调整裁剪范围时，请点选“选取范围”。",
         "select_area_confirmed_hint": "文字识别会使用这个已选范围。如需修改，请点选“编辑范围”。",
         "select_area_required": "请先选取要翻译的范围，或切换回整个图样。",
@@ -5361,7 +1956,8 @@ INTERFACE_LANGUAGES = {
         "overlay_translation": "图片翻译结果",
         "overlay_caption": "短翻译会直接显示在图片上；较长或重叠的翻译会用编号标记。",
         "download_overlay": "下载翻译图片 PNG",
-        "no_overlay": "未生成图片标示翻译。文字识别可能找到文字，但没有生成可用字典翻译。",
+        "no_crochet_pattern_title": "未找到可翻译的钩织术语。",
+        "no_crochet_pattern_body": "图片中的文字已成功识别，但没有找到可翻译的钩织图样内容。请确认你上传的是钩织图样，而不是一般图片或其他文件。",
         "line_translation": "逐行翻译",
         "translated_lines": "已翻译的文字识别行",
         "download_translation": "下载文字翻译 TXT",
@@ -5391,7 +1987,7 @@ INTERFACE_LANGUAGES = {
         "privacy": "使用許可のある画像、または個人学習・参考用の画像のみアップロードしてください。このベータ版はアップロード画像やOCR結果を意図的に保存しません。ファイルは現在の利用中のみ処理されます。アプリ改善のため、国、アプリ利用状況、パフォーマンスなどの匿名使用統計を収集します。個人情報、IPアドレス、アップロード画像は保存されません。",
         "privacy_expander": "プライバシー／保存について",
         "intro": "かぎ針編みパターン画像をアップロードして、画像上の翻訳と行ごとの翻訳を確認できます。",
-        "app_title": "🧶 かぎ針編み翻訳",
+        "app_title": "かぎ針編み翻訳",
         "app_subtitle": "パターンOCR翻訳（ベータ版）",
         "source_label": "パターンの言語／用語",
         "source_help": "英語パターンに米式／英式の記載がない場合は、まず「英語 — 米国式」を選んでください。オンラインの amigurumi パターンは米式が多いです。",
@@ -5403,6 +1999,19 @@ INTERFACE_LANGUAGES = {
         "output_hint_uk": "💡 英国式の針目名が特に必要な場合だけ、英国式用語を選んでください。",
         "default_mode_info": "初期設定では画像上に翻訳を表示します。範囲を小さくすると、より速く正確になりやすいです。",
         "upload_prompt": "パターン画像をアップロード",
+        "upload_instruction": "翻訳するパターン画像を選んでください",
+        "upload_choose": "画像を選択",
+        "upload_drop_hint": "または画像をここにドラッグ＆ドロップ",
+        "upload_drop_active": "画像をここにドロップ",
+        "upload_reading": "画像を読み込んでいます……",
+        "upload_selected": "選択した画像",
+        "upload_replace": "変更",
+        "upload_remove": "削除",
+        "upload_error_unsupported": "このファイルは使用できません。カメラ、写真、またはファイルから JPG、JPEG、PNG、WebP の画像を選んでください。",
+        "upload_error_empty": "このファイルは空です。別の画像を選んでください。",
+        "upload_error_too_large": "画像が大きすぎます。25 MB 未満の画像を選んでください。",
+        "upload_error_unreadable": "このファイルを読み込めませんでした。別の画像を選んでください。",
+        "upload_error_invalid": "このファイルは有効な画像ではありません。JPG、JPEG、PNG、WebP の画像を選んでください。",
         "original_image": "元の画像",
         "translation_area": "翻訳する範囲",
         "translation_area_tip": "💡 範囲選択は任意の実験的な機能です。画像の一部だけを翻訳したい場合に使用してください。",
@@ -5412,7 +2021,7 @@ INTERFACE_LANGUAGES = {
         "area_right": "右の列",
         "area_whole": "パターン全体",
         "cropper_missing": "ドラッグ選択には追加パッケージ `streamlit-cropper` が必要です。未導入の場合は、プリセットまたはスライダーを使用します。",
-        "cropper_drag": "翻訳したい文字を囲むように四角をドラッグしてください。",
+        "cropper_drag": "翻訳したい文字を囲むように四角をドラッグしてください。\n\n微調整コントローラーを使って、強調表示された境界線を細かく調整してください。",
         "cropper_failed": "ドラッグ選択を読み込めませんでした。境界スライダーに切り替えます。",
         "boundary_instruction": "境界線を動かしてください。パーセント指定は不要です。赤い枠で翻訳したい文字を囲んでください。",
         "left_boundary": "左の境界",
@@ -5426,6 +2035,26 @@ INTERFACE_LANGUAGES = {
         "select_area_edit": "選択範囲を編集",
         "select_area_use": "この範囲を使う",
         "select_area_cancel": "選び直す",
+        "select_area_reset": "リセット",
+        "select_area_image_alt": "範囲選択用のかぎ針編みパターン画像",
+        "select_area_selection_label": "選択した翻訳範囲",
+        "select_area_move_controller": "微調整コントローラーを移動",
+        "select_area_move_up": "上端を上へ微調整",
+        "select_area_move_down": "下端を下へ微調整",
+        "select_area_move_left": "左端を外側へ微調整",
+        "select_area_move_right": "右端を外側へ微調整",
+        "select_area_adjust_top_up": "上端を上へ移動",
+        "select_area_adjust_top_down": "上端を下へ移動",
+        "select_area_adjust_bottom_up": "下端を上へ移動",
+        "select_area_adjust_bottom_down": "下端を下へ移動",
+        "select_area_adjust_left_left": "左端を左へ移動",
+        "select_area_adjust_left_right": "左端を右へ移動",
+        "select_area_adjust_right_left": "右端を左へ移動",
+        "select_area_adjust_right_right": "右端を右へ移動",
+        "select_area_resize_top": "上端を調整",
+        "select_area_resize_bottom": "下端を調整",
+        "select_area_resize_left": "左端を調整",
+        "select_area_resize_right": "右端を調整",
         "select_area_scroll_hint": "プレビューは通常どおりスクロールできます。範囲を調整する場合は「範囲を選択」をタップしてください。",
         "select_area_confirmed_hint": "この選択範囲が文字認識に使われます。変更する場合は「選択範囲を編集」をタップしてください。",
         "select_area_required": "OCRを実行する前に範囲を選択するか、パターン全体に戻してください。",
@@ -5453,7 +2082,8 @@ INTERFACE_LANGUAGES = {
         "overlay_translation": "画像上の翻訳",
         "overlay_caption": "短い翻訳は画像上に直接表示されます。長い翻訳や重なる翻訳は番号で表示されます。",
         "download_overlay": "翻訳画像PNGをダウンロード",
-        "no_overlay": "画像上の翻訳ラベルは生成されませんでした。OCRで文字は検出されましたが、辞書に基づく翻訳が生成されなかった可能性があります。",
+        "no_crochet_pattern_title": "翻訳できるかぎ針編み用語が見つかりませんでした。",
+        "no_crochet_pattern_body": "画像内の文字は認識されましたが、翻訳可能なかぎ針編みパターンの内容は見つかりませんでした。一般的な写真やその他の文書ではなく、かぎ針編みパターンをアップロードしていることをご確認ください。",
         "line_translation": "行ごとの翻訳",
         "translated_lines": "翻訳されたOCR行",
         "download_translation": "翻訳テキストをダウンロード",
@@ -5535,6 +2165,7 @@ def download_button_rc3(
     key: str,
     success_message: Optional[str] = None,
     analytics_event_type: Optional[str] = None,
+    plausible_event_name: Optional[str] = None,
     prevent_rerun: bool = False,
 ):
     """Render a download button and show a shared public confirmation after click."""
@@ -5545,6 +2176,8 @@ def download_button_rc3(
                 track_analytics_event(analytics_event_type)
             except Exception as exc:
                 print(f"[analytics] download event failed: {exc}")
+        if plausible_event_name:
+            queue_plausible_event(plausible_event_name)
 
     try:
         clicked = st.download_button(
@@ -5584,6 +2217,10 @@ def init_rc3_state():
     st.session_state.setdefault("select_area_editing", False)
     st.session_state.setdefault("select_area_draft_crop_box", None)
     st.session_state.setdefault("select_area_display_proxy_diagnostics", {})
+    st.session_state.setdefault("select_area_last_component_action_id", None)
+    st.session_state.setdefault("select_area_edit_session_no", 0)
+    st.session_state.setdefault("select_area_last_area_mode", None)
+    st.session_state.setdefault("select_area_start_over_pending", False)
     st.session_state.setdefault("ocr_running", False)
     st.session_state.setdefault("ocr_started_at", None)
     st.session_state.setdefault("ocr_finished_at", None)
@@ -5591,6 +2228,9 @@ def init_rc3_state():
     st.session_state.setdefault("duplicate_ocr_run_ignored_count", 0)
     st.session_state.setdefault("debug_report_ready", False)
     st.session_state.setdefault("last_successful_download_key", None)
+    st.session_state.setdefault("pending_plausible_events", [])
+    st.session_state.setdefault("plausible_event_counter", 0)
+    st.session_state.setdefault("pending_plausible_v2_event", None)
     st.session_state.setdefault("rc10b_diagnostic_events", [])
     st.session_state.setdefault("rc10b_image_signature_history", [])
     st.session_state.setdefault("rc10b_last_image_present", False)
@@ -5603,7 +2243,7 @@ def init_rc3_state():
 
 
 def request_ocr_run():
-    if st.session_state.get("ocr_running"):
+    if st.session_state.get("pending_ocr_run") or st.session_state.get("ocr_running"):
         st.session_state["duplicate_ocr_run_ignored_count"] = st.session_state.get("duplicate_ocr_run_ignored_count", 0) + 1
         rc10b_log_event(
             "Run OCR request ignored because OCR already running",
@@ -5791,6 +2431,7 @@ def build_ocr_image_pipeline_diagnostics(
 # UI
 # -----------------------------
 init_rc3_state()
+mount_plausible_bridge(st.session_state.pop("pending_plausible_v2_event", None))
 st.session_state["rc10b_rerun_count"] = st.session_state.get("rc10b_rerun_count", 0) + 1
 
 INTERFACE_LANGUAGE_DISPLAY_LABELS = {
@@ -5873,9 +2514,40 @@ def track_analytics_event(event_type: str, **fields) -> None:
     )
 
 
+def next_plausible_event_id(event_name: str) -> str:
+    st.session_state["plausible_event_counter"] = st.session_state.get("plausible_event_counter", 0) + 1
+    counter = st.session_state["plausible_event_counter"]
+    return f"{event_name}:{counter}:{time.time_ns()}"
+
+
+def queue_plausible_event(event_name: str) -> None:
+    if not event_name:
+        return
+    pending_events = st.session_state.setdefault("pending_plausible_events", [])
+    pending_events.append({
+        "event_name": event_name,
+        "event_id": next_plausible_event_id(event_name),
+    })
+
+
+def emit_pending_plausible_events() -> None:
+    pending_events = list(st.session_state.get("pending_plausible_events") or [])
+    if not pending_events:
+        return
+    for index, event in enumerate(pending_events):
+        emit_plausible_event(
+            str(event.get("event_name") or ""),
+            str(event.get("event_id") or ""),
+            key=f"plausible_event_{index}",
+        )
+    st.session_state["pending_plausible_events"] = []
+
+
 if not st.session_state.get("analytics_app_open_logged"):
     track_analytics_event("app_open")
     st.session_state["analytics_app_open_logged"] = True
+
+emit_pending_plausible_events()
 
 
 LANGUAGE_OPTION_LABEL_KEYS = {
@@ -5899,17 +2571,66 @@ st.caption(t("app_subtitle"))
 
 LANGUAGE_OPTIONS = ["English — US", "English — UK", "Traditional Chinese", "Simplified Chinese", "Japanese"]
 
-image_file = st.file_uploader(
-    t("upload_prompt"),
-    type=["png", "jpg", "jpeg", "webp"],
-    label_visibility="collapsed",
+upload_strings = {
+    "html_lang": {
+        "English": "en",
+        "Traditional Chinese": "zh-Hant",
+        "Simplified Chinese": "zh-Hans",
+        "Japanese": "ja",
+    }.get(interface_language, "en"),
+    "instruction": t("upload_instruction"),
+    "choose": t("upload_choose"),
+    "drop_hint": t("upload_drop_hint"),
+    "drop_active": t("upload_drop_active"),
+    "reading": t("upload_reading"),
+    "selected": t("upload_selected"),
+    "replace": t("upload_replace"),
+    "remove": t("upload_remove"),
+    "error_unsupported": t("upload_error_unsupported"),
+    "error_empty": t("upload_error_empty"),
+    "error_too_large": t("upload_error_too_large"),
+    "error_unreadable": t("upload_error_unreadable"),
+    "error_invalid": t("upload_error_invalid"),
+}
+
+image_file, upload_error, upload_removed = custom_image_uploader(
+    upload_strings,
+    key="pattern_image_uploader",
 )
+if upload_error:
+    st.error(upload_error)
+
+def reset_uploaded_image_derived_state(image_signature: Optional[str]) -> None:
+    st.session_state["rc3_ocr_result"] = None
+    st.session_state["rc3_ocr_result_signature"] = None
+    st.session_state["pending_ocr_run"] = False
+    st.session_state["ocr_running"] = False
+    st.session_state["ocr_started_at"] = None
+    st.session_state["ocr_finished_at"] = None
+    st.session_state["ocr_duration_seconds"] = None
+    st.session_state["latest_crop_box"] = None
+    st.session_state["select_area_confirmed_crop_box"] = None
+    st.session_state["select_area_editing"] = False
+    st.session_state["select_area_draft_crop_box"] = None
+    st.session_state["select_area_display_proxy_diagnostics"] = {}
+    st.session_state["select_area_last_component_action_id"] = None
+    st.session_state["select_area_edit_session_no"] = 0
+    st.session_state["select_area_last_area_mode"] = None
+    st.session_state["select_area_start_over_pending"] = False
+    st.session_state["rc10b_last_cropper_box"] = None
+    st.session_state["debug_report_ready"] = False
+    st.session_state["last_successful_download_key"] = None
+    st.session_state["rc3_image_signature"] = image_signature
+
+
+if upload_removed and st.session_state.get("rc3_image_signature") is not None:
+    reset_uploaded_image_derived_state(None)
 
 if image_file is None:
     rc10b_note_image_absent()
     with st.expander(t("privacy_expander"), expanded=False):
         st.markdown(
-            f"<div class='warning-box'>{ui_text['privacy']}</div>",
+            f"<div class='privacy-box'>{ui_text['privacy']}</div>",
             unsafe_allow_html=True,
         )
 
@@ -5917,19 +2638,13 @@ if image_file is not None:
     current_signature = image_upload_signature(image_file)
     rc10b_note_image_present(current_signature)
     if st.session_state.get("rc3_image_signature") != current_signature:
-        st.session_state["rc3_ocr_result"] = None
-        st.session_state["rc3_ocr_result_signature"] = None
-        st.session_state["pending_ocr_run"] = False
-        st.session_state["latest_crop_box"] = None
-        st.session_state["select_area_confirmed_crop_box"] = None
-        st.session_state["select_area_editing"] = False
-        st.session_state["select_area_draft_crop_box"] = None
-        st.session_state["select_area_display_proxy_diagnostics"] = {}
-        st.session_state["rc10b_last_cropper_box"] = None
-        st.session_state["debug_report_ready"] = False
-        st.session_state["last_successful_download_key"] = None
-        st.session_state["rc3_image_signature"] = current_signature
+        reset_uploaded_image_derived_state(current_signature)
         track_analytics_event("image_uploaded")
+        emit_plausible_event(
+            "pattern_image_uploaded",
+            str(getattr(image_file, "action_id", "")),
+            key="pattern_image_uploaded_transport",
+        )
 
     image_load_start = time.perf_counter()
     image = Image.open(image_file).convert("RGB")
@@ -5964,6 +2679,9 @@ if image_file is not None:
     st.subheader(t("translation_area"))
 
     area_options = ["Whole Pattern", "Select Area"]
+    if st.session_state.pop("select_area_start_over_pending", False):
+        st.session_state["translation_area_mode_radio"] = "Whole Pattern"
+        st.session_state["select_area_last_area_mode"] = "Whole Pattern"
     if st.session_state.get("translation_area_mode_radio") not in area_options:
         st.session_state["translation_area_mode_radio"] = "Whole Pattern"
     area_mode = st.radio(
@@ -5974,6 +2692,9 @@ if image_file is not None:
         index=area_options.index(st.session_state["translation_area_mode_radio"]),
         format_func=lambda value: t(AREA_LABEL_KEYS.get(value, value)),
     )
+    previous_area_mode = st.session_state.get("select_area_last_area_mode")
+    entered_select_area = area_mode == "Select Area" and previous_area_mode != "Select Area"
+    st.session_state["select_area_last_area_mode"] = area_mode
     if area_mode == "Select Area":
         st.caption(t("translation_area_tip"))
 
@@ -5987,6 +2708,22 @@ if image_file is not None:
     area_mode_for_box = area_map.get(area_mode, "Whole image")
     preset_box = get_preset_crop_box(image, area_mode_for_box)
 
+    def start_over_select_area() -> None:
+        st.session_state["select_area_start_over_pending"] = True
+        st.session_state["select_area_confirmed_crop_box"] = None
+        st.session_state["select_area_editing"] = False
+        st.session_state["select_area_draft_crop_box"] = None
+        st.session_state["select_area_display_proxy_diagnostics"] = {}
+        st.session_state["select_area_last_component_action_id"] = None
+        st.session_state["latest_crop_box"] = get_preset_crop_box(image, "Whole image")
+        st.session_state["rc3_ocr_result"] = None
+        st.session_state["rc3_ocr_result_signature"] = None
+        st.session_state["pending_ocr_run"] = False
+        st.session_state["ocr_running"] = False
+        st.session_state["ocr_started_at"] = None
+        st.session_state["ocr_finished_at"] = None
+        st.session_state["ocr_duration_seconds"] = None
+
     if area_mode == "Whole Pattern":
         crop_box = preset_box
         st.session_state["latest_crop_box"] = crop_box
@@ -5994,15 +2731,22 @@ if image_file is not None:
         st.session_state["select_area_draft_crop_box"] = None
         st.session_state["select_area_display_proxy_diagnostics"] = {}
     else:
-        cropper_ok = streamlit_cropper_available()
         confirmed_crop_box = st.session_state.get("select_area_confirmed_crop_box")
         is_editing_area = bool(st.session_state.get("select_area_editing"))
+        if confirmed_crop_box is None and not is_editing_area and entered_select_area:
+            track_analytics_event("select_area_started", workflow_mode=area_mode)
+            st.session_state["select_area_editing"] = True
+            st.session_state["select_area_draft_crop_box"] = get_default_select_area_crop_box(image)
+            st.session_state["select_area_edit_session_no"] = int(
+                st.session_state.get("select_area_edit_session_no", 0)
+            ) + 1
+            is_editing_area = True
         crop_box = clamp_crop_box(confirmed_crop_box, image) if confirmed_crop_box is not None else (0, 0, image.size[0], image.size[1])
 
         if is_editing_area:
             draft_crop_box = st.session_state.get("select_area_draft_crop_box") or confirmed_crop_box or get_default_select_area_crop_box(image)
             draft_crop_box = clamp_crop_box(draft_crop_box, image)
-            adjust_mode = "Drag rectangle on image" if cropper_ok else "Use boundary sliders"
+            adjust_mode = "Custom crop workspace"
 
             def confirm_select_area_crop(button_key: str) -> None:
                 if st.button(t("select_area_use"), key=button_key, type="primary"):
@@ -6026,83 +2770,117 @@ if image_file is not None:
 
             def cancel_select_area_crop(button_key: str) -> None:
                 if st.button(t("select_area_cancel"), key=button_key):
-                    st.session_state["select_area_editing"] = False
-                    st.session_state["select_area_draft_crop_box"] = None
+                    start_over_select_area()
                     try:
                         st.rerun()
                     except Exception:
                         pass
 
-            if not cropper_ok:
-                st.caption(t("cropper_missing"))
-
-            if cropper_ok:
-                st.caption(t("cropper_drag"))
-                col_cancel, col_use = st.columns(2)
-                with col_cancel:
-                    cancel_select_area_crop("select_area_cancel_button")
-                with col_use:
-                    confirm_select_area_crop("select_area_use_button")
-                try:
-                    from streamlit_cropper import st_cropper
-                    safe_area_mode = re.sub(r"\W+", "_", area_mode_for_box.lower())
-                    image_key_fragment = current_signature[:12]
-                    cropper_key = f"cropper_{image_key_fragment}_{safe_area_mode}_{image.size[0]}x{image.size[1]}"
-                    display_image, display_scale_x, display_scale_y, display_diag = prepare_cropper_display_image(image)
-                    st.session_state["select_area_display_proxy_diagnostics"] = display_diag
-                    display_crop_box = crop_box_original_to_display(
-                        draft_crop_box,
-                        display_scale_x,
-                        display_scale_y,
-                        display_image,
-                    )
-                    left0, top0, right0, bottom0 = display_crop_box
-                    rc10b_log_event(
-                        "cropper widget created",
-                        cropper_key=cropper_key,
-                        image_signature=current_signature,
-                        area_mode=area_mode,
-                        display_proxy=display_diag,
-                    )
-
-                    cropper_result = st_cropper(
-                        display_image,
-                        realtime_update=True,
-                        default_coords=(left0, right0, top0, bottom0),
-                        box_color="#ff4b4b",
-                        aspect_ratio=None,
-                        return_type="box",
-                        should_resize_image=False,
-                        stroke_width=SELECT_AREA_CROPPER_STROKE_WIDTH,
-                        key=cropper_key,
-                    )
-                    display_cropper_box = crop_box_from_cropper_result(cropper_result, display_image)
-                    if display_cropper_box is not None:
+            st.caption(t("cropper_drag"))
+            rerun_after_component_action = False
+            try:
+                safe_area_mode = re.sub(r"\W+", "_", area_mode_for_box.lower())
+                image_key_fragment = current_signature[:12]
+                edit_session_no = int(st.session_state.get("select_area_edit_session_no", 0))
+                cropper_key = (
+                    f"custom_cropper_{image_key_fragment}_{safe_area_mode}_"
+                    f"{image.size[0]}x{image.size[1]}_{edit_session_no}"
+                )
+                display_image, display_scale_x, display_scale_y, display_diag = prepare_cropper_display_image(image)
+                st.session_state["select_area_display_proxy_diagnostics"] = display_diag
+                display_crop_box = crop_box_original_to_display(
+                    draft_crop_box,
+                    display_scale_x,
+                    display_scale_y,
+                    display_image,
+                )
+                cropper_strings = {
+                    "html_lang": {
+                        "Traditional Chinese": "zh-Hant",
+                        "Simplified Chinese": "zh-Hans",
+                        "Japanese": "ja",
+                    }.get(interface_language, "en"),
+                    "image_alt": t("select_area_image_alt"),
+                    "selection_label": t("select_area_selection_label"),
+                    "confirm": t("select_area_use"),
+                    "reset": t("select_area_reset"),
+                    "cancel": t("select_area_cancel"),
+                    "move_controller": t("select_area_move_controller"),
+                    "move_up": t("select_area_move_up"),
+                    "move_down": t("select_area_move_down"),
+                    "move_left": t("select_area_move_left"),
+                    "move_right": t("select_area_move_right"),
+                    "adjust_top_up": t("select_area_adjust_top_up"),
+                    "adjust_top_down": t("select_area_adjust_top_down"),
+                    "adjust_bottom_up": t("select_area_adjust_bottom_up"),
+                    "adjust_bottom_down": t("select_area_adjust_bottom_down"),
+                    "adjust_left_left": t("select_area_adjust_left_left"),
+                    "adjust_left_right": t("select_area_adjust_left_right"),
+                    "adjust_right_left": t("select_area_adjust_right_left"),
+                    "adjust_right_right": t("select_area_adjust_right_right"),
+                    "resize_top": t("select_area_resize_top"),
+                    "resize_bottom": t("select_area_resize_bottom"),
+                    "resize_left": t("select_area_resize_left"),
+                    "resize_right": t("select_area_resize_right"),
+                }
+                rc10b_log_event(
+                    "custom cropper workspace created",
+                    cropper_key=cropper_key,
+                    image_signature=current_signature,
+                    area_mode=area_mode,
+                    display_proxy=display_diag,
+                )
+                cropper_result = custom_select_area(
+                    display_image,
+                    display_crop_box,
+                    cropper_strings,
+                    image_signature=current_signature,
+                    key=cropper_key,
+                )
+                action_id = str((cropper_result or {}).get("action_id") or "")
+                is_new_action = bool(
+                    action_id
+                    and action_id != st.session_state.get("select_area_last_component_action_id")
+                )
+                if is_new_action:
+                    st.session_state["select_area_last_component_action_id"] = action_id
+                    if cropper_result.get("action") == "confirm":
+                        display_cropper_box = crop_box_from_cropper_result(
+                            cropper_result.get("box"),
+                            display_image,
+                        )
+                        if display_cropper_box is None:
+                            raise ValueError("Custom cropper returned an invalid crop box")
                         cropper_box = crop_box_display_to_original(
                             display_cropper_box,
                             display_scale_x,
                             display_scale_y,
                             image,
                         )
-                        previous_cropper_box = st.session_state.get("rc10b_last_cropper_box")
-                        if previous_cropper_box != cropper_box:
-                            rc10b_log_event(
-                                "cropper box updated",
-                                previous_cropper_box=previous_cropper_box,
-                                cropper_box=cropper_box,
-                                display_cropper_box=display_cropper_box,
-                                image_signature=current_signature,
-                                area_mode=area_mode,
-                            )
-                            st.session_state["rc10b_last_cropper_box"] = cropper_box
-                        draft_crop_box = cropper_box
-                        st.session_state["select_area_draft_crop_box"] = cropper_box
-                except Exception as e:
-                    st.warning(t("cropper_failed"))
-                    st.caption(str(e))
-                    adjust_mode = "Use boundary sliders"
+                        st.session_state["select_area_confirmed_crop_box"] = cropper_box
+                        st.session_state["latest_crop_box"] = cropper_box
+                        st.session_state["rc10b_last_cropper_box"] = cropper_box
+                        st.session_state["select_area_editing"] = False
+                        st.session_state["select_area_draft_crop_box"] = None
+                        rc10b_log_event(
+                            "custom cropper box confirmed",
+                            crop_box=cropper_box,
+                            display_cropper_box=display_cropper_box,
+                            image_signature=current_signature,
+                            area_mode=area_mode,
+                        )
+                        track_analytics_event("select_area_confirmed", workflow_mode=area_mode)
+                    elif cropper_result.get("action") == "cancel":
+                        start_over_select_area()
+                    rerun_after_component_action = True
+            except Exception as e:
+                st.warning(t("cropper_failed"))
+                st.caption(str(e))
+                adjust_mode = "Use boundary sliders"
+            if rerun_after_component_action:
+                st.rerun()
 
-            if adjust_mode != "Drag rectangle on image":
+            if adjust_mode == "Use boundary sliders":
                 w, h = image.size
                 left0, top0, right0, bottom0 = draft_crop_box
                 st.caption(t("boundary_instruction"))
@@ -6118,7 +2896,7 @@ if image_file is not None:
                 draft_crop_box = clamp_crop_box((left, top, right, bottom), image)
                 st.session_state["select_area_draft_crop_box"] = draft_crop_box
 
-            if adjust_mode != "Drag rectangle on image":
+            if adjust_mode == "Use boundary sliders":
                 col_cancel, col_use = st.columns(2)
                 with col_cancel:
                     cancel_select_area_crop("select_area_cancel_fallback_button")
@@ -6133,21 +2911,15 @@ if image_file is not None:
                     track_analytics_event("select_area_started", workflow_mode=area_mode)
                     st.session_state["select_area_editing"] = True
                     st.session_state["select_area_draft_crop_box"] = crop_box
+                    st.session_state["select_area_edit_session_no"] = int(
+                        st.session_state.get("select_area_edit_session_no", 0)
+                    ) + 1
                     try:
                         st.rerun()
                     except Exception:
                         pass
             else:
-                st.image(image, caption=t("original_image"), use_container_width=True)
-                st.caption(t("select_area_scroll_hint"))
-                if st.button(t("select_area_start"), key="select_area_start_button", type="primary"):
-                    track_analytics_event("select_area_started", workflow_mode=area_mode)
-                    st.session_state["select_area_editing"] = True
-                    st.session_state["select_area_draft_crop_box"] = get_default_select_area_crop_box(image)
-                    try:
-                        st.rerun()
-                    except Exception:
-                        pass
+                crop_box = (0, 0, image.size[0], image.size[1])
 
         if st.session_state.get("select_area_editing"):
             st.stop()
@@ -6223,26 +2995,27 @@ if image_file is not None:
         st.warning(t("settings_changed_rerun"))
 
     full_df = load_database()
-    df = get_active_search_df(full_df)
+    df = terminology_engine.get_active_search_df(full_df)
     index = build_term_index(df, source_mode)
     all_term_index = build_all_term_index(df)
     df.attrs["all_term_index"] = all_term_index
     try:
-        df.attrs["normalized_lookup_index"] = build_normalized_lookup_index(index, all_term_index, source_mode)
+        df.attrs["normalized_lookup_index"] = terminology_engine.build_normalized_lookup_index(index, all_term_index, source_mode)
     except Exception as e:
         NORMALIZED_LOOKUP_INDEX_STATS["index_error"] = str(e)
         df.attrs["normalized_lookup_index"] = {}
 
     ocr_running = bool(st.session_state.get("ocr_running"))
-    run_button_label = "⏳ OCR Running..." if ocr_running else t("run_ocr")
+    ocr_busy = bool(st.session_state.get("pending_ocr_run")) or ocr_running
+    run_button_label = "⏳ OCR Running..." if ocr_busy else t("run_ocr")
+    ocr_status_placeholder = st.empty()
     st.button(
         run_button_label,
         key="run_ocr_overlay_translation_button",
         type="primary",
-        disabled=ocr_running or select_area_needs_confirmation or (bool(quality_errors) and not force_run),
+        disabled=ocr_busy or select_area_needs_confirmation or (bool(quality_errors) and not force_run),
         on_click=request_ocr_run,
     )
-    ocr_status_placeholder = st.empty()
 
     if st.session_state.get("pending_ocr_run"):
         last_click_rerun = st.session_state.get("rc10b_last_button_click_rerun")
@@ -6331,9 +3104,9 @@ if image_file is not None:
                 raw_ocr_text = candidate_result["selected_text"]
                 ocr_rows = candidate_result["selected_rows"]
                 detected_ocr_rows = ocr_rows.copy() if ocr_rows is not None else pd.DataFrame()
-                ocr_rows, removed_noise_df = filter_noise_and_watermarks(ocr_rows)
+                ocr_rows, removed_noise_df = pattern_document_engine.filter_noise_and_watermarks(ocr_rows)
                 raw_ocr_text = "\n".join(ocr_rows["text"].astype(str).tolist()) if ocr_rows is not None and not ocr_rows.empty else ""
-                clean_text = clean_ocr_text(raw_ocr_text)
+                clean_text = ocr_cleanup_engine.clean_ocr_text(raw_ocr_text)
                 cleanup_seconds = time.perf_counter() - cleanup_start
                 runtime_profile["ocr_cleanup"] = cleanup_seconds
                 timings["OCR cleanup"] = cleanup_seconds
@@ -6343,24 +3116,24 @@ if image_file is not None:
                 TRANSLATION_PROFILE = translation_profile
                 try:
                     translation_start = time.perf_counter()
-                    line_df = build_ocr_line_translations(ocr_rows, index, df, output_mode)
+                    line_df = ocr_lines_engine.build_ocr_line_translations(ocr_rows, index, df, output_mode)
                     translation_seconds = time.perf_counter() - translation_start
 
                     overlay_start = time.perf_counter()
-                    overlay_image, overlay_legend, overlay_legend_df = make_line_translation_overlay(working_image, line_df, output_mode)
+                    overlay_image, overlay_legend, overlay_legend_df = overlay_engine.make_line_translation_overlay(working_image, line_df, output_mode)
                     overlay_seconds = time.perf_counter() - overlay_start
 
                     translation_start = time.perf_counter()
                     matches_df, unmatched = find_matches(clean_text, df, index)
-                    readable_translation = build_readable_line_translation(line_df) if line_df is not None and not line_df.empty else ""
+                    readable_translation = line_translation_engine.build_readable_line_translation(line_df) if line_df is not None and not line_df.empty else ""
                     translation_seconds += time.perf_counter() - translation_start
 
                     png_start = time.perf_counter()
-                    overlay_png = image_to_png_bytes(overlay_image) if overlay_image is not None else None
+                    overlay_png = overlay_engine.image_to_png_bytes(overlay_image) if overlay_image is not None else None
                     png_seconds = time.perf_counter() - png_start
 
                     txt_start = time.perf_counter()
-                    translation_txt = build_overlay_export_text(line_df)
+                    translation_txt = line_translation_engine.build_overlay_export_text(line_df)
                     txt_seconds = time.perf_counter() - txt_start
                 finally:
                     TRANSLATION_PROFILE = previous_translation_profile
@@ -6373,18 +3146,18 @@ if image_file is not None:
                 timings["PNG encoding"] = png_seconds
                 timings["Translation TXT generation"] = txt_seconds
                 timings["Total runtime"] = image_load_seconds + crop_extraction_seconds + (time.perf_counter() - total_start)
-                rc11c_translation_diagnostics = build_rc11c_translation_diagnostics(
+                rc11c_translation_diagnostics = diagnostic_report_engine.build_rc11c_translation_diagnostics(
                     translation_profile,
                     timings,
                     ocr_rows,
                     line_df,
                     overlay_legend_df,
                 )
-                rc11d_validation_diagnostics = build_rc11d_validation_diagnostics(
+                rc11d_validation_diagnostics = diagnostic_report_engine.build_rc11d_validation_diagnostics(
                     translation_profile,
                     rc11c_translation_diagnostics,
                 )
-                rc11e_normalization_diagnostics = build_rc11e_normalization_diagnostics(
+                rc11e_normalization_diagnostics = diagnostic_report_engine.build_rc11e_normalization_diagnostics(
                     translation_profile,
                     df,
                 )
@@ -6458,7 +3231,7 @@ if image_file is not None:
                     debug_report_txt.rstrip(),
                     "",
                     "=== Performance: Runtime Profile ===",
-                    format_runtime_profile(runtime_profile),
+                    diagnostic_report_engine.format_runtime_profile(runtime_profile),
                     "",
                 ])
                 st.session_state["rc3_ocr_result"] = {
@@ -6503,7 +3276,10 @@ if image_file is not None:
                     translation_time_sec=round(float(translation_seconds), 3),
                     session_translation_no=translation_no,
                 )
+                stage_plausible_event(st.session_state, "pattern_translation_completed")
                 increment_session_translation_no(st.session_state)
+                # Redraw the button from the cleared busy state after storing the result.
+                st.rerun()
             except Exception as e:
                 st.session_state["ocr_finished_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
                 st.session_state["ocr_duration_seconds"] = round(time.perf_counter() - ocr_execution_start, 3) if "ocr_execution_start" in locals() else None
@@ -6562,9 +3338,10 @@ if image_file is not None:
                 mime="image/png",
                 key="download_overlay_png",
                 analytics_event_type="download_png",
+                plausible_event_name="pattern_png_downloaded",
             )
-        else:
-            st.info(t("no_overlay"))
+        elif raw_ocr_text.strip():
+            st.info(f"**{t('no_crochet_pattern_title')}**\n\n{t('no_crochet_pattern_body')}")
 
         st.subheader(t("line_translation"))
         if line_df is not None and not line_df.empty:
@@ -6576,6 +3353,7 @@ if image_file is not None:
                 mime="text/plain",
                 key="download_overlay_translation_txt",
                 analytics_event_type="download_txt",
+                plausible_event_name="pattern_txt_downloaded",
             )
         else:
             st.warning(t("no_ocr_lines"))
@@ -6595,7 +3373,14 @@ if image_file is not None:
         )
         st.markdown(f"<div class='report-action'>{html.escape(t('report_feedback_action'))}</div>", unsafe_allow_html=True)
         st.markdown(f"<div class='report-helper'>{html.escape(t('report_feedback_helper'))}</div>", unsafe_allow_html=True)
-        st.link_button(t("send_feedback"), FEEDBACK_FORM_URL)
+        feedback_link_rendered = plausible_link_button(
+            t("send_feedback"),
+            FEEDBACK_FORM_URL,
+            "pattern_feedback_clicked",
+            key="pattern_feedback_clicked_link",
+        )
+        if not feedback_link_rendered:
+            st.link_button(t("send_feedback"), FEEDBACK_FORM_URL)
 
         if DEBUG_MODE and timings:
             with st.expander("Debug timings", expanded=False):
