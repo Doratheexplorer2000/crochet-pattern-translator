@@ -984,4 +984,3 @@ def build_overlay_export_text(line_df: pd.DataFrame, legend_text: str = "", clea
     """User-facing TXT export: line-by-line translation only."""
     readable = build_readable_line_translation(line_df) if line_df is not None and not line_df.empty else ""
     return readable.strip() + "\n" if readable.strip() else ""
-

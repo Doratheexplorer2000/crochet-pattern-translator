@@ -1088,8 +1088,3 @@ def build_debug_report_text(
         "",
     ]
     return "\n".join(parts).strip() + "\n"
-
-
-
-
-
