@@ -46,6 +46,9 @@ Key validated behavior:
 - `stitches_1_8e.csv` is archived as the accepted source snapshot.
 - Chinese foundation-chain and turning-chain semantics are separated.
 - Anonymous Google Sheets Usage Analytics records app events and performance metrics without storing personal information, IP addresses, uploaded images, OCR text, or translations.
+- RC54A upgraded Pattern Translator to Streamlit 1.51.0 and introduced a frameless Components V2 Plausible bridge. The bridge loads the shared `PUBLIC_PLAUSIBLE_SCRIPT_URL` once in the main browser page and currently transports only `pattern_translation_completed`.
+- RC54A local validation confirmed one tracker script across Streamlit reruns and no duplicate event dispatch during an unrelated rerun. Production Network inspection and Plausible Human UAT remain required before the transport is approved.
+- RC54B remains future work for migrating the approved upload, PNG download, TXT download, and feedback events. Their existing Components V1 transport remains available during the RC54A rollback period.
 - Translation lookup performance was improved in RC24c by replacing repeated pandas row retrieval with a lightweight row lookup cache.
 - RC42 completed the first local Engine Extraction by moving the CSV terminology / lookup engine into `pattern_translator/engine/terminology.py`.
 - Streamlit cache behavior was intentionally preserved through app-level wrappers.

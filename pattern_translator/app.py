@@ -32,6 +32,10 @@ from crochet_intelligence.analytics import (
     increment_session_translation_no,
     track_event as analytics_track_event,
 )
+from crochet_intelligence.plausible_bridge import (
+    mount_plausible_bridge,
+    stage_plausible_event,
+)
 from pattern_translator.components.custom_upload import custom_image_uploader
 from pattern_translator.components.custom_cropper import custom_select_area
 from pattern_translator.components.plausible_event import emit_plausible_event, plausible_link_button
@@ -2226,6 +2230,7 @@ def init_rc3_state():
     st.session_state.setdefault("last_successful_download_key", None)
     st.session_state.setdefault("pending_plausible_events", [])
     st.session_state.setdefault("plausible_event_counter", 0)
+    st.session_state.setdefault("pending_plausible_v2_event", None)
     st.session_state.setdefault("rc10b_diagnostic_events", [])
     st.session_state.setdefault("rc10b_image_signature_history", [])
     st.session_state.setdefault("rc10b_last_image_present", False)
@@ -2426,6 +2431,7 @@ def build_ocr_image_pipeline_diagnostics(
 # UI
 # -----------------------------
 init_rc3_state()
+mount_plausible_bridge(st.session_state.pop("pending_plausible_v2_event", None))
 st.session_state["rc10b_rerun_count"] = st.session_state.get("rc10b_rerun_count", 0) + 1
 
 INTERFACE_LANGUAGE_DISPLAY_LABELS = {
@@ -3270,7 +3276,7 @@ if image_file is not None:
                     translation_time_sec=round(float(translation_seconds), 3),
                     session_translation_no=translation_no,
                 )
-                queue_plausible_event("pattern_translation_completed")
+                stage_plausible_event(st.session_state, "pattern_translation_completed")
                 increment_session_translation_no(st.session_state)
                 # Redraw the button from the cleared busy state after storing the result.
                 st.rerun()

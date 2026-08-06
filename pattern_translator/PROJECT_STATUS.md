@@ -63,7 +63,8 @@ Purpose:
 
 - Preserve the approved RC51 Pattern Translator Home Screen and frozen RC52 custom-component baseline.
 - Complete RC54 Phase 2 by implementing the remaining approved analytics events for Pattern Translator and Stitch Translator.
-- Reuse the browser-side analytics transport validated during RC54 Phase 1.
+- Complete RC54A production Human UAT for the new Pattern Translator Components V2 analytics bridge before beginning RC54B.
+- Reuse the browser-side analytics approach validated in the Portal while keeping translator analytics observational and non-blocking.
 - Keep Google Sheets Product Facts as a later RC54 milestone.
 - Defer Portal visual refinement until after analytics.
 
@@ -100,6 +101,16 @@ The Portal Skeleton is functionally complete and frozen. It is an independent As
 - JellyCat 元寶 overlay placement has a minor cosmetic placement difference. Translation correctness, anchor position, readability, and functionality are unaffected; this is future overlay placement tuning rather than an RC47 regression.
 
 ## Current Release Notes
+
+### RC54A (implemented locally; production Human UAT pending)
+
+- Runtime: upgraded Pattern Translator from Streamlit 1.50.0 to the minimum Components V2 release, Streamlit 1.51.0.
+- Architecture: added one frameless Components V2 Plausible bridge that mounts near the start of `app.py`, reads the shared `PUBLIC_PLAUSIBLE_SCRIPT_URL`, and injects the personalized tracker once into the main browser page.
+- Scope: migrated only `pattern_translation_completed`. Upload, PNG download, TXT download, and feedback remain on the existing Components V1 transport for rollback and are reserved for RC54B.
+- Rerun handoff: one pending event slot carries a completed translation across the required `st.rerun()`; the previous V1 list/counter queue is not used for the migrated event.
+- Local validation: Python compilation passed; Streamlit 1.51 startup passed; the bridge rendered without an analytics iframe; one tracker script remained after a Streamlit rerun; one completed-translation probe dispatched once and an unrelated rerun produced no duplicate; `git diff --check` passed.
+- Remaining validation: deploy separately, confirm the personalized script and `/api/event` request in the main browser Network panel, verify the event in the existing Portal Plausible dashboard, and confirm exactly one event per successful translation.
+- Boundary: OCR, translation, overlay, diagnostics, exports, upload, cropper, and existing non-migrated analytics behavior are unchanged.
 
 ### RC52 (completed locally)
 
