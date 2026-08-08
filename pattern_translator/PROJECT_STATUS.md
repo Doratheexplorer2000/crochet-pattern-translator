@@ -1,10 +1,12 @@
 # Crochet Pattern Translator Project Status
 
-Last updated: 2026-08-04
+Last updated: 2026-08-08
 
 ## Current Version
 
-Production baseline: `RC28`
+Current production release: `RC54A`
+
+Validated rollback baseline: `RC28`
 
 Application version string: `Pattern OCR Translator (Beta RC26)`
 
@@ -16,9 +18,9 @@ pattern_translator/app.py
 
 ## Current Production Status
 
-Crochet Pattern OCR Translator is the current OCR-based pattern translation app. RC28 is the current production baseline. The first External UAT phase has concluded with positive results from real crochet users. Railway is now the primary production deployment platform.
+Crochet Pattern OCR Translator is the current OCR-based pattern translation app. RC54A is deployed to Railway from GitHub `main` and has passed Production Human UAT. RC28 remains the final fully validated Streamlit production architecture and rollback baseline. The first External UAT phase concluded with positive results from real crochet users.
 
-RC42 completed the first local Engine Extraction by moving the CSV terminology / lookup engine into `pattern_translator/engine/terminology.py`. RC43 extracted pure line-translation logic into `pattern_translator/engine/line_translation.py`. RC44 extracted Diagnostic Report construction and formatting into `pattern_translator/engine/diagnostic_report.py`. RC45 completed Boundary Cleanup. RC46 extracted overlay rendering into `pattern_translator/engine/overlay.py`. RC47 extracted Pattern Document responsibilities into `pattern_translator/engine/pattern_document.py`. RC48 extracted OCR line assembly into `pattern_translator/engine/ocr_lines.py`. RC49 extracted deterministic OCR cleanup into `pattern_translator/engine/ocr_cleanup.py`, completing Engine Migration and Domain Layer extraction. Regression and Human UAT passed with no user-visible behavior changes. Engine migration remains local only with no production deployment and no GitHub push.
+RC42 completed the first Engine Extraction by moving the CSV terminology / lookup engine into `pattern_translator/engine/terminology.py`. RC43 extracted pure line-translation logic into `pattern_translator/engine/line_translation.py`. RC44 extracted Diagnostic Report construction and formatting into `pattern_translator/engine/diagnostic_report.py`. RC45 completed Boundary Cleanup. RC46 extracted overlay rendering into `pattern_translator/engine/overlay.py`. RC47 extracted Pattern Document responsibilities into `pattern_translator/engine/pattern_document.py`. RC48 extracted OCR line assembly into `pattern_translator/engine/ocr_lines.py`. RC49 extracted deterministic OCR cleanup into `pattern_translator/engine/ocr_cleanup.py`, completing Engine Migration and Domain Layer extraction. Regression and Human UAT passed with no user-visible behavior changes, and the completed engine layer is included in the current production release.
 
 RC50A completed the custom uploader technical spike. RC50B replaced the native Streamlit file uploader with a production Streamlit Components V1 uploader while preserving the existing Python and domain-engine boundary. Physical iPhone Safari and Android Chrome Human UAT passed with no functional regression. RC50 remains local only; RC28 remains the production baseline.
 
@@ -62,17 +64,17 @@ Current Phase: Platform Analytics
 Purpose:
 
 - Preserve the approved RC51 Pattern Translator Home Screen and frozen RC52 custom-component baseline.
-- Complete RC54 Phase 2 by implementing the remaining approved analytics events for Pattern Translator and Stitch Translator.
-- Complete RC54A production Human UAT for the new Pattern Translator Components V2 analytics bridge before beginning RC54B.
+- Preserve the production-validated RC54A Components V2 analytics bridge baseline.
+- Plan RC54B separately to migrate the remaining Pattern Translator V1 analytics transport to the validated V2 bridge; RC54B has not started.
 - Reuse the browser-side analytics approach validated in the Portal while keeping translator analytics observational and non-blocking.
 - Keep Google Sheets Product Facts as a later RC54 milestone.
 - Defer Portal visual refinement until after analytics.
 
 Roadmap decisions:
 
-- Preserve RC28 as the current Railway production baseline and rollback target.
-- Keep the completed Engine Migration and Domain Layer extraction local until further approval.
-- The existing Pattern Translator analytics remains unchanged while the separate platform analytics model is implemented.
+- Preserve RC28 as the validated Railway rollback target.
+- Preserve the completed Engine Migration and Domain Layer extraction now included in the production release.
+- Preserve the RC54A analytics baseline while RC54B remains unstarted.
 - Do not use the unreliable `app_open` event as the basis of platform visitor analytics.
 - Plausible Starter is integrated into the Portal. Human UAT confirmed Portal pageview tracking and the `portal_pattern_selected` custom event.
 - Browser-side analytics transport has been validated and will be reused by the translators.
@@ -102,14 +104,18 @@ The Portal Skeleton is functionally complete and frozen. It is an independent As
 
 ## Current Release Notes
 
-### RC54A (implemented locally; production Human UAT pending)
+### RC54A (completed; Production Human UAT PASS)
 
 - Runtime: upgraded Pattern Translator from Streamlit 1.50.0 to the minimum Components V2 release, Streamlit 1.51.0.
 - Architecture: added one frameless Components V2 Plausible bridge that mounts near the start of `app.py`, reads the shared `PUBLIC_PLAUSIBLE_SCRIPT_URL`, and injects the personalized tracker once into the main browser page.
-- Scope: migrated only `pattern_translation_completed`. Upload, PNG download, TXT download, and feedback remain on the existing Components V1 transport for rollback and are reserved for RC54B.
+- Scope: migrated only `pattern_translation_completed`. Upload, PNG download, TXT download, and feedback remain on the existing Components V1 transport and are reserved for RC54B.
 - Rerun handoff: one pending event slot carries a completed translation across the required `st.rerun()`; the previous V1 list/counter queue is not used for the migrated event.
 - Local validation: Python compilation passed; Streamlit 1.51 startup passed; the bridge rendered without an analytics iframe; one tracker script remained after a Streamlit rerun; one completed-translation probe dispatched once and an unrelated rerun produced no duplicate; `git diff --check` passed.
-- Remaining validation: deploy separately, confirm the personalized script and `/api/event` request in the main browser Network panel, verify the event in the existing Portal Plausible dashboard, and confirm exactly one event per successful translation.
+- Production validation: Railway production tracks GitHub `main`; Chrome on macOS confirmed the personalized script and accepted Plausible event request in the main page. One completed translation generated exactly one `pattern_translation_completed` event, ordinary Streamlit reruns generated no duplicate, and the event appeared in the existing Portal Plausible dashboard.
+- Single-site architecture: production uses one Plausible Starter site, `crochet-intelligence-portal-production.up.railway.app`. Pattern Translator uses the same personalized script/site while preserving its production URL in the event URL.
+- Production event baseline: `pattern_image_uploaded`, `pattern_translation_completed`, `pattern_png_downloaded`, `pattern_txt_downloaded`, and `pattern_feedback_clicked` each appeared once during the smoke test. The four non-translation events remain on the V1 transport pending RC54B. Plausible `/` and `Outbound Link: Click` entries are platform page/outbound-link tracking, not Pattern Translator custom product goals.
+- Regression smoke test: Streamlit 1.51 production testing passed for Whole Pattern, Select Area/cropper, overlay, PNG download, TXT download, and Feedback in Chrome on macOS, with no functional regression observed.
+- Next step: RC54B is not started. Its purpose is to migrate the remaining V1 Pattern analytics transport to the production-validated V2 bridge.
 - Boundary: OCR, translation, overlay, diagnostics, exports, upload, cropper, and existing non-migrated analytics behavior are unchanged.
 
 ### RC52 (completed locally)

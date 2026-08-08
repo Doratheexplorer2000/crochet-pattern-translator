@@ -2,7 +2,9 @@
 
 Mobile-first OCR translation for crochet pattern images.
 
-Current production baseline: **RC28**
+Current production release: **RC54A**
+
+Validated rollback baseline: **RC28**
 
 Application entry point:
 
@@ -22,7 +24,7 @@ pattern_translator/app.py
 
 ## Current Product Status
 
-RC28 is the current Pattern Translator production baseline. The first External UAT phase has concluded with positive results from real crochet users. RC27 validated Railway as the preferred production deployment platform, and RC28 completed the Railway production release.
+RC54A is the current Pattern Translator production release, deployed from GitHub `main`. RC28 remains the final fully validated Streamlit production architecture and rollback baseline. The first External UAT phase concluded with positive results from real crochet users, and Railway remains the production deployment platform.
 
 Key validated behavior:
 
@@ -46,9 +48,11 @@ Key validated behavior:
 - `stitches_1_8e.csv` is archived as the accepted source snapshot.
 - Chinese foundation-chain and turning-chain semantics are separated.
 - Anonymous Google Sheets Usage Analytics records app events and performance metrics without storing personal information, IP addresses, uploaded images, OCR text, or translations.
-- RC54A upgraded Pattern Translator to Streamlit 1.51.0 and introduced a frameless Components V2 Plausible bridge. The bridge loads the shared `PUBLIC_PLAUSIBLE_SCRIPT_URL` once in the main browser page and currently transports only `pattern_translation_completed`.
-- RC54A local validation confirmed one tracker script across Streamlit reruns and no duplicate event dispatch during an unrelated rerun. Production Network inspection and Plausible Human UAT remain required before the transport is approved.
-- RC54B remains future work for migrating the approved upload, PNG download, TXT download, and feedback events. Their existing Components V1 transport remains available during the RC54A rollback period.
+- RC54A upgraded Pattern Translator to Streamlit 1.51.0 and introduced a frameless Components V2 Plausible bridge. Production Human UAT confirmed that the bridge loads the shared `PUBLIC_PLAUSIBLE_SCRIPT_URL` in the main browser page and sends exactly one `pattern_translation_completed` event per completed translation without rerun duplicates.
+- RC54A production smoke testing passed in Chrome on macOS for Whole Pattern, Select Area/cropper, overlay, PNG and TXT downloads, and Feedback, with no functional regression observed.
+- The production analytics baseline contains `pattern_image_uploaded`, `pattern_translation_completed`, `pattern_png_downloaded`, `pattern_txt_downloaded`, and `pattern_feedback_clicked`. The four non-translation events remain on the existing Components V1 transport.
+- The single Plausible Starter site architecture is production-validated: Pattern Translator uses the Portal's personalized Plausible script/site while preserving the Pattern Translator production URL in event data.
+- RC54B has not started. Its next purpose is to migrate the remaining V1 Pattern analytics transport to the validated Components V2 bridge.
 - Translation lookup performance was improved in RC24c by replacing repeated pandas row retrieval with a lightweight row lookup cache.
 - RC42 completed the first local Engine Extraction by moving the CSV terminology / lookup engine into `pattern_translator/engine/terminology.py`.
 - Streamlit cache behavior was intentionally preserved through app-level wrappers.
@@ -83,7 +87,7 @@ Key validated behavior:
 - Engine Migration is complete. The Streamlit-independent Pattern Translator engines are `terminology`, `line_translation`, `diagnostic_report`, `overlay`, `pattern_document`, `ocr_lines`, and `ocr_cleanup`.
 - Remaining `app.py` responsibilities are intentionally application, framework, and runtime concerns: Streamlit UI, application orchestration, OCR runtime/provider lifecycle, session state, downloads, analytics, localization, Cropper / Select Area, and runtime infrastructure.
 - Domain Layer extraction is complete. Application Layer separation is deferred until it provides clear product value.
-- Engine extraction remains local only: no production deployment and no GitHub push. RC28 remains the current production baseline.
+- Engine Migration and Domain Layer extraction are included in the current production release. RC28 remains the validated rollback baseline.
 - RC50A completed the custom uploader technical spike, and RC50B completed the production Streamlit Components V1 custom uploader.
 - The native Streamlit file uploader was replaced while preserving the boundary `custom uploader -> BytesIO -> image_upload_signature() -> Image.open()` and all downstream OCR, translation, overlay, diagnostics, exports, and analytics-schema behavior.
 - Supported formats are JPG, JPEG, PNG, and WebP. The uploader supports all four interface languages, native mobile image selection, desktop drag-and-drop, Replace and Remove, and light and dark modes.
@@ -98,12 +102,13 @@ Key validated behavior:
 
 ## Current Project Status
 
-- Official production baseline: `RC28`
+- Current production release: `RC54A`
+- Validated rollback baseline: `RC28`
 - Current app version string: `Pattern OCR Translator (Beta RC26)`
-- Current phase: Streamlit constraint removal planning
-- Latest local product step: `RC51` completed locally; the Home Screen baseline passed physical-iPhone Human Visual UAT, and Engine Migration remains complete.
+- Current phase: Platform Analytics
+- Latest production milestone: `RC54A` completed with Production Human UAT PASS.
 - Current production database: `knowledge_base/data/master_stitches.csv`
-- Current focus: plan the next major Streamlit-constraint investigation, beginning with Select Area / Cropper architecture. Broader UI standardisation is deferred until pre-Landing Page integration; RC52 implementation has not started.
+- Current focus: preserve the RC54A production baseline and plan RC54B separately; RC54B has not started.
 - Future testing: continue with occasional trusted-user testing and incremental fixes based on production evidence. Plan for a Soft Launch after Landing Page completion instead of another formal External UAT cycle.
 
 Known non-blocking polish items:
