@@ -190,11 +190,16 @@ class LlmFallbackTests(unittest.TestCase):
         self.assertEqual(captured["payload"]["reasoning"], {"effort": "minimal"})
         self.assertEqual(captured["payload"]["max_output_tokens"], 180)
         prompt = captured["payload"]["input"]
-        self.assertIn("ordinary_descriptive_noun", prompt)
-        self.assertIn("brand_or_proper_name", prompt)
-        self.assertIn("translated_or_preserved_text", prompt)
-        self.assertIn("SUBJECT: Otter", prompt)
-        self.assertNotIn("PREVIOUS:", prompt)
+        self.assertEqual(
+            prompt,
+            "You are translating the subject of a crochet pattern title into Traditional Chinese. "
+            "Classify the supplied subject as either an ordinary descriptive noun or a genuine brand/proper name. "
+            "Translate an ordinary descriptive noun; preserve a genuine brand/proper name unchanged. "
+            "Title Case alone does not make a word a proper name. "
+            "Return JSON only with exactly these keys: classification, translated_or_preserved_text. "
+            "Use classification ordinary_descriptive_noun or brand_or_proper_name.\n"
+            "SUBJECT: Otter",
+        )
         for forbidden in (
             "Capybara", "Penguin", "Rabbit", "Pumpkin", "Sunflower", "Jellycat"
         ):

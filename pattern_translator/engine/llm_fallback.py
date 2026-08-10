@@ -267,11 +267,12 @@ def create_openai_provider(api_key: str, timeout_seconds: float = DEFAULT_TIMEOU
         following_context = following or "[none]"
         if isinstance(current, TitleTranslationRequest):
             prompt = (
-                f"Translate the subject of a crochet pattern title into {target}. "
-                "Classify it as ordinary_descriptive_noun or brand_or_proper_name. "
+                f"You are translating the subject of a crochet pattern title into {target}. "
+                "Classify the supplied subject as either an ordinary descriptive noun or a genuine brand/proper name. "
                 "Translate an ordinary descriptive noun; preserve a genuine brand/proper name unchanged. "
                 "Title Case alone does not make a word a proper name. "
-                "Return JSON only with exactly these keys: classification, translated_or_preserved_text.\n"
+                "Return JSON only with exactly these keys: classification, translated_or_preserved_text. "
+                "Use classification ordinary_descriptive_noun or brand_or_proper_name.\n"
                 f"SUBJECT: {current.subject}"
             )
         else:
