@@ -100,6 +100,14 @@ Key validated behavior:
 - UI development now follows the Product-driven approval workflow in `ENGINEERING_RULES.md`. `UI_SPEC.md` is updated only after Human Visual UAT and explicit Product Owner approval. Logo work and GIF/onboarding guidance remain deferred.
 - Regression evidence is stored under `regression/regression_test/Reports/`.
 
+## Hybrid LLM Fallback
+
+The Hybrid LLM fallback is implemented locally and has passed Human UAT. Pattern Translator always runs the deterministic translation engine first. Only eligible unresolved instruction prose is sent to `gpt-5-nano`; protected crochet terminology and structure are then validated before the result is accepted. Any missing key, timeout, network, model, malformed-response, or validation failure returns the deterministic translation without interrupting the workflow.
+
+Uploaded images are never sent to OpenAI. Requests contain only the minimum extracted current-line text and adjacent visual-line context required for translation assistance, without user identity or analytics identifiers.
+
+Production integration requires `PATTERN_LLM_FALLBACK_ENABLED=1` and an `OPENAI_API_KEY` Railway secret. `PATTERN_LLM_DEBUG` is diagnostic-only, is disabled by default, and should remain disabled in production. Future translation edge cases will be addressed only when observed through real testing. Cross-column OCR/visual-line merging remains a separate existing issue and is not part of this capability.
+
 ## Current Project Status
 
 - Current production release: `RC54A`

@@ -14,6 +14,7 @@ from typing import Callable, Dict, List, Optional, Tuple
 import pandas as pd
 
 from pattern_translator.engine import terminology
+from pattern_translator.engine import section_headings
 
 
 ProfileGetter = Callable[[], object]
@@ -495,6 +496,26 @@ def translate_group_part(part: str, index: Dict[str, int], df: pd.DataFrame, out
     translated = translate_expression(part_text, index, df, output_mode)
     return translated if translated else translate_piece(part_text, index, df, output_mode)
 
+
+def split_compact_group_part(part: str, index: Dict[str, int], df: pd.DataFrame) -> List[str]:
+    """Split known X/V/A components only inside an established crochet group."""
+    raw = unicodedata.normalize("NFKC", str(part or "")).strip()
+    compact = re.sub(r"\s+", "", raw)
+    if not compact or lookup_row(compact, index, df) is not None:
+        return [raw]
+    tokens = re.findall(r"\d*[XxVvAa]", compact)
+    if len(tokens) >= 2 and "".join(tokens).lower() == compact.lower():
+        return tokens
+    return [raw]
+
+
+def translate_group_parts(inner: str, index: Dict[str, int], df: pd.DataFrame, output_mode: str) -> List[str]:
+    translated_parts: List[str] = []
+    for part in split_expression_parts(inner):
+        for token in split_compact_group_part(part, index, df):
+            translated_parts.append(translate_group_part(token, index, df, output_mode))
+    return translated_parts
+
 @profile_function("translate_piece()", "translate_piece calls")
 def translate_piece(piece: str, index: Dict[str, int], df: pd.DataFrame, output_mode: str = "Traditional Chinese") -> str:
     p = normalize_decimal_mm(unicodedata.normalize("NFKC", piece).strip())
@@ -521,13 +542,13 @@ def translate_piece(piece: str, index: Dict[str, int], df: pd.DataFrame, output_
     m = re.fullmatch(r"\((.*?)\)\s*(?:[xX×]|\*)\s*(\d+)\s*[（(]\s*(\d+)\s*[)）]", p)
     if m:
         inside, repeat, total = m.groups()
-        parts = [translate_group_part(part, index, df, output_mode) for part in split_expression_parts(inside)]
+        parts = translate_group_parts(inside, index, df, output_mode)
         return f"{repeat_phrase(join_parts(parts, output_mode), repeat, output_mode)} ({total})"
 
     m = re.fullmatch(r"\((.*?)\)\s*(?:[xX×]|\*)\s*(\d+)", p)
     if m:
         inside, repeat = m.groups()
-        parts = [translate_group_part(part, index, df, output_mode) for part in split_expression_parts(inside)]
+        parts = translate_group_parts(inside, index, df, output_mode)
         return repeat_phrase(join_parts(parts, output_mode), repeat, output_mode)
 
     m = re.fullmatch(r"\((.*?)\)\s*[（(]\s*(\d+)\s*[針针]\s*[)）]", p)
@@ -538,7 +559,7 @@ def translate_piece(piece: str, index: Dict[str, int], df: pd.DataFrame, output_
     # Bare bracketed group without explicit repeat, e.g. (10X,V).
     m = re.fullmatch(r"\((.*?)\)", p)
     if m:
-        parts = [translate_group_part(part, index, df, output_mode) for part in split_expression_parts(m.group(1))]
+        parts = translate_group_parts(m.group(1), index, df, output_mode)
         return f"（{join_parts(parts, output_mode)}）" if output_mode in ["Traditional Chinese", "Simplified Chinese", "Japanese"] else f"({join_parts(parts, output_mode)})"
 
     # Term with total count note, e.g. slst (24) / turn (6). Keep the count.
@@ -678,20 +699,20 @@ def translate_expression(expr: str, index: Dict[str, int], df: pd.DataFrame, out
     m = re.search(r"^(\d+)\s*\((.*?)\)$", expr_no_total, flags=re.I)
     if m:
         repeat, inside = m.groups()
-        parts = [translate_group_part(p, index, df, output_mode) for p in split_expression_parts(inside)]
+        parts = translate_group_parts(inside, index, df, output_mode)
         return with_total(repeat_phrase(join_parts(parts, output_mode), repeat, output_mode))
 
     # English/general repeat: (2SC, 1DEC)x6 / (1INC, 1SC)x6 / (10X,V)
     m = re.fullmatch(r"\((.*?)\)\s*(?:[xX×]|\*)\s*(\d+)\s*[（(]\s*(\d+)\s*[)）]", expr_no_total)
     if m:
         inside, repeat, total = m.groups()
-        parts = [translate_group_part(p, index, df, output_mode) for p in split_expression_parts(inside)]
+        parts = translate_group_parts(inside, index, df, output_mode)
         return with_total(f"{repeat_phrase(join_parts(parts, output_mode), repeat, output_mode)} ({total})")
 
     m = re.fullmatch(r"\((.*?)\)\s*(?:[xX×]|\*)\s*(\d+)", expr_no_total)
     if m:
         inside, repeat = m.groups()
-        parts = [translate_group_part(p, index, df, output_mode) for p in split_expression_parts(inside)]
+        parts = translate_group_parts(inside, index, df, output_mode)
         return with_total(repeat_phrase(join_parts(parts, output_mode), repeat, output_mode))
 
     m = re.fullmatch(r"\((.*?)\)\s*[（(]\s*(\d+)\s*[針针]\s*[)）]", expr_no_total)
@@ -702,7 +723,7 @@ def translate_expression(expr: str, index: Dict[str, int], df: pd.DataFrame, out
     # A bracketed group without explicit repeat, e.g. (10X,V)
     m = re.fullmatch(r"\((.*?)\)", expr_no_total)
     if m:
-        parts = [translate_group_part(p, index, df, output_mode) for p in split_expression_parts(m.group(1))]
+        parts = translate_group_parts(m.group(1), index, df, output_mode)
         return with_total(f"（{join_parts(parts, output_mode)}）" if output_mode in ["Traditional Chinese", "Simplified Chinese", "Japanese"] else f"({join_parts(parts, output_mode)})")
 
     if re.search(r"\bin\s+MR\b", expr_no_total, flags=re.I) or re.search(r"環起|环起|環狀起針|环状起针|環形起針|环形起针|圈起|起圈|環\s*\d|环\s*\d", expr_no_total):
@@ -744,6 +765,12 @@ def repair_ocr_round_token(token: str) -> str:
     t = re.sub(r"^Rl1", "R11", t)
     t = re.sub(r"^RI1", "R11", t)
     return t
+
+
+def format_round_label(label_core: str) -> str:
+    label = "R" + repair_ocr_round_token(label_core).replace(" ", "")
+    label = re.sub(r"^RR", "R", label, flags=re.I)
+    return re.sub(r"[-–—~～〜－]", "-", label)
 
 
 
@@ -916,29 +943,52 @@ def translate_ocr_line(original: str, index: Dict[str, int], df: pd.DataFrame, o
     csv_replaced = replace_csv_terms_in_line(s, index, df, output_mode)
 
     # Section headers / ordinary structural labels.
-    section_map = {
-        "上半部分": {"Traditional Chinese": "上半部分", "Simplified Chinese": "上半部分", "English — US": "Upper section", "English — UK": "Upper section", "Japanese": "上半分"},
-        "上半部份": {"Traditional Chinese": "上半部分", "Simplified Chinese": "上半部分", "English — US": "Upper section", "English — UK": "Upper section", "Japanese": "上半分"},
-        "下半部分": {"Traditional Chinese": "下半部分", "Simplified Chinese": "下半部分", "English — US": "Lower section", "English — UK": "Lower section", "Japanese": "下半分"},
-        "下半部份": {"Traditional Chinese": "下半部分", "Simplified Chinese": "下半部分", "English — US": "Lower section", "English — UK": "Lower section", "Japanese": "下半分"},
-        "腳丫": {"Traditional Chinese": "腳丫", "Simplified Chinese": "脚丫", "English — US": "Feet", "English — UK": "Feet", "Japanese": "足"},
-        "脚丫": {"Traditional Chinese": "腳丫", "Simplified Chinese": "脚丫", "English — US": "Feet", "English — UK": "Feet", "Japanese": "足"},
-    }
-    for key, outputs in section_map.items():
-        if key in s:
-            return outputs.get(output_mode, outputs.get("Traditional Chinese", key))
+    translated_heading = section_headings.detect_section_header(s, output_mode)
+    if translated_heading is not None:
+        return translated_heading
+
+    # Retain a narrow recovery path for OCR that dropped an explicit R. A bare
+    # clock-like value is not a round unless its right-hand side is crochet syntax.
+    bare_round = re.match(r"^(\d{1,3})\s*[:：]\s*(.+)$", s)
+    if bare_round and re.search(
+        r"(?:\b(?:sc|inc|dec|hdc|dc|tr|sl\s*st|slst|ch|sts?|mr|blo|flo)\b|[xvXaA]\s*\d|\[[0-9]+\])",
+        bare_round.group(2),
+        flags=re.I,
+    ):
+        s = "R" + s
 
     # Round label plus expression: R1: 环6x / R3: 6(X,V) / Rnd 1: sc 6
-    m = re.match(r"^(?:Rnd\s*)?R?\s*([lI]?[0-9gq]+(?:\s*[-–—~～〜－]\s*R?\d+)?)\s*[:：]\s*(.*)$", s, flags=re.I)
+    m = re.match(r"^R(?:nd|ound)?\s*([lI]?[0-9gq]+(?:\s*[-–—~～〜－]\s*R?\d+)?)\s*[:：]\s*(.*)$", s, flags=re.I)
     if m:
         label_core, expr = m.groups()
-        label = "R" + repair_ocr_round_token(label_core).replace(" ", "")
-        label = re.sub(r"^RR", "R", label, flags=re.I)
-        label = re.sub(r"[-–—~～〜－]", "-", label)
+        label = format_round_label(label_core)
         expr = expr.strip()
         if not expr:
             return label
-        translated = translate_expression(expr, index, df, output_mode)
+
+        # OCR can merge multiple explicit rounds into one visual line. Translate
+        # each proven R/Rnd/Round segment independently so a lone X/V/A at the
+        # start of a later round still enters the crochet expression parser.
+        embedded_rounds = list(re.finditer(
+            r"(?<!\S)R(?:nd|ound)?\s*([lI]?[0-9gq]+(?:\s*[-–—~～〜－]\s*R?\d+)?)\s*[:：]\s*",
+            expr,
+            flags=re.I,
+        ))
+        if embedded_rounds:
+            translated_segments = [
+                translate_expression(expr[:embedded_rounds[0].start()].strip(), index, df, output_mode)
+            ]
+            for position, embedded in enumerate(embedded_rounds):
+                end = embedded_rounds[position + 1].start() if position + 1 < len(embedded_rounds) else len(expr)
+                nested_expr = expr[embedded.end():end].strip()
+                nested_label = format_round_label(embedded.group(1))
+                nested_translation = translate_expression(nested_expr, index, df, output_mode)
+                translated_segments.append(
+                    f"{nested_label}: {nested_translation}" if nested_translation else nested_label
+                )
+            translated = " ".join(segment for segment in translated_segments if segment)
+        else:
+            translated = translate_expression(expr, index, df, output_mode)
         # If no useful change, keep original expression.
         return f"{label}: {translated}"
 

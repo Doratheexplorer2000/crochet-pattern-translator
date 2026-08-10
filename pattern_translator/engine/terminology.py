@@ -64,7 +64,7 @@ SIMP_MAP = str.maketrans({
     "針": "针", "鎖": "锁", "長": "长", "環": "环", "編": "编", "織": "织",
     "線": "线", "減": "减", "鈎": "钩", "鉤": "钩", "雙": "双", "單": "单",
     "組": "组", "記": "记", "裡": "里", "辮": "辫", "結": "结", "狀": "状",
-    "內": "内", "後": "后",
+    "內": "内", "後": "后", "圖": "图", "點": "点", "兒": "儿", "繡": "绣",
 })
 
 
@@ -479,10 +479,32 @@ def replace_csv_terms_in_line(
         return marker
 
     def restore_generated_terms(value: str) -> str:
-        out_value = str(value)
-        for i, original_value in enumerate(generated_terms):
-            out_value = out_value.replace(f"@@RC9D_TERM_{i}@@", original_value)
-        return out_value
+        if output_mode not in {"English — US", "English — UK", "English US terms", "English UK terms"}:
+            out_value = str(value)
+            for i, original_value in enumerate(generated_terms):
+                out_value = out_value.replace(f"@@RC9D_TERM_{i}@@", original_value)
+            return out_value
+
+        parts: List[str] = []
+
+        def append_with_boundary(piece: str) -> None:
+            if not piece:
+                return
+            previous = next((part[-1] for part in reversed(parts) if part), "")
+            if previous and previous.isalnum() and piece[0].isalnum():
+                parts.append(" ")
+            parts.append(piece)
+
+        marker_pattern = re.compile(r"@@RC9D_TERM_(\d+)@@")
+        cursor = 0
+        for marker_match in marker_pattern.finditer(str(value)):
+            append_with_boundary(str(value)[cursor:marker_match.start()])
+            marker_index = int(marker_match.group(1))
+            if marker_index < len(generated_terms):
+                append_with_boundary(generated_terms[marker_index])
+            cursor = marker_match.end()
+        append_with_boundary(str(value)[cursor:])
+        return "".join(parts)
 
     s = replace_turning_chain_instructions_func(s, index, df, output_mode, protect=protect_generated_term)
     s = replace_foundation_chain_instructions_func(s, output_mode, protect=protect_generated_term)
@@ -495,7 +517,7 @@ def replace_csv_terms_in_line(
     s = re.sub(r"(?<![A-Za-z0-9.])(\d+)\s*[針针](?![A-Za-z0-9])", stitch_count_repl, s)
 
     counted_pat = re.compile(
-        rf"(?<![A-Za-z0-9])(\d+)\s*({counted_token_term_pattern})\b",
+        rf"(?<![A-Za-z0-9])(\d+)\s*({counted_token_term_pattern})(?![A-Za-z0-9])",
     )
 
     def counted_repl(m: re.Match) -> str:
@@ -553,15 +575,16 @@ def replace_csv_terms_in_line(
         replacement = lookup_term(term, index, df, output_mode, prefer_abbrev=(output_mode in ["English — US", "English — UK", "English US terms", "English UK terms"]))
         if not replacement:
             continue
+        protected_replacement = protect_generated_term(replacement)
         if re.fullmatch(r"[A-Za-z0-9 ]+", term):
             _profile_count("regex passes estimated")
             if norm_text(replacement) == key:
                 continue
             pat = re.compile(_ascii_term_regex(term), flags=re.I)
             _profile_count("regex passes estimated")
-            out = pat.sub(replacement, out)
+            out = pat.sub(protected_replacement, out)
         else:
-            out = out.replace(term, replacement)
+            out = out.replace(term, protected_replacement)
             cjk_variants = {
                 "針": "[針针]", "內": "[內内]", "後": "[後后]", "環": "[環环]",
                 "鎖": "[鎖锁]", "長": "[長长]", "減": "[減减]", "線": "[線线]",
@@ -569,7 +592,7 @@ def replace_csv_terms_in_line(
             }
             variant_pat = "".join(cjk_variants.get(ch, re.escape(ch)) for ch in term)
             _profile_count("regex passes estimated")
-            out = re.sub(variant_pat, replacement, out)
+            out = re.sub(variant_pat, protected_replacement, out)
 
     _profile_count("regex passes estimated")
     has_crochet_context = bool(re.search(

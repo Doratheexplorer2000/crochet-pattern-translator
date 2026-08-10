@@ -104,6 +104,17 @@ The Portal Skeleton is functionally complete and frozen. It is an independent As
 
 ## Current Release Notes
 
+### Hybrid LLM fallback (integrated into main; production activation pending)
+
+- Architecture: deterministic translation first, then `gpt-5-nano` only for eligible unresolved prose, followed by protected-structure validation and deterministic fail-open on any failure.
+- Privacy boundary: uploaded images are never sent to OpenAI. Only the minimum extracted current-line text and adjacent visual-line context required for translation assistance are sent, without user identity or analytics identifiers.
+- Production activation: code integration into `main` is complete with production activation pending. Activation requires `PATTERN_LLM_FALLBACK_ENABLED=1` and `OPENAI_API_KEY` as a Railway secret; neither variable has been configured as part of this integration.
+- Diagnostics: `PATTERN_LLM_DEBUG` is disabled by default, is diagnostic-only, and should remain disabled in production.
+- Validation: automated deterministic and mocked-provider tests passed, the historical deterministic corpus remained unchanged with the feature flag off, and Capybara, Mushroom, and Jellycat Human UAT passed sufficiently for this release.
+- Maintenance direction: freeze the approved implementation and address future translation edge cases only when encountered through real testing.
+- Separate known issue: cross-column OCR/visual-line merging is outside this release.
+- Analytics boundary: RC54B remains not started.
+
 ### RC54A (completed; Production Human UAT PASS)
 
 - Runtime: upgraded Pattern Translator from Streamlit 1.50.0 to the minimum Components V2 release, Streamlit 1.51.0.

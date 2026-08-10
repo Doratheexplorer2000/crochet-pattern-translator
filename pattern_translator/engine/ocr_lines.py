@@ -7,11 +7,12 @@ Streamlit state, render overlays, or perform downloads.
 
 import re
 import time
-from typing import Callable, Dict
+from typing import Callable, Dict, Optional
 
 import pandas as pd
 
 from pattern_translator.engine import line_translation
+from pattern_translator.engine import llm_fallback
 from pattern_translator.engine import terminology
 
 
@@ -167,6 +168,7 @@ def build_ocr_line_translations(
     index: Dict[str, int],
     df: pd.DataFrame,
     output_mode: str,
+    llm_provider: Optional[llm_fallback.Provider] = None,
 ) -> pd.DataFrame:
     if ocr_rows is None or ocr_rows.empty:
         return pd.DataFrame()
@@ -175,7 +177,7 @@ def build_ocr_line_translations(
     rows["confidence"] = pd.to_numeric(rows.get("confidence", 0), errors="coerce").fillna(0)
     rows = rows.sort_values(["min_y", "min_x"]).reset_index(drop=True)
     _profile_count("merged OCR lines", len(rows))
-    out = []
+    prepared = []
     for _, row in rows.iterrows():
         original = str(row.get("text", "")).strip()
         if not original:
@@ -183,6 +185,21 @@ def build_ocr_line_translations(
         _profile_count("OCR lines processed")
         cleaned = line_translation.clean_single_ocr_line(original)
         translated = line_translation.translate_ocr_line(cleaned, index, df, output_mode)
+        prepared.append((row, cleaned, translated))
+
+    out = []
+    for position, (row, cleaned, translated) in enumerate(prepared):
+        previous = prepared[position - 1][1] if position > 0 else ""
+        following = prepared[position + 1][1] if position + 1 < len(prepared) else ""
+        translated = llm_fallback.apply_llm_fallback(
+            source=cleaned,
+            deterministic=translated,
+            previous=previous,
+            following=following,
+            output_mode=output_mode,
+            df=df,
+            provider=llm_provider,
+        )
         changed = terminology.norm_text(cleaned) != terminology.norm_text(translated)
         out.append({
             "Original": cleaned,

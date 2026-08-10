@@ -46,6 +46,7 @@ from pattern_translator.engine import overlay as overlay_engine
 from pattern_translator.engine import pattern_document as pattern_document_engine
 from pattern_translator.engine import ocr_lines as ocr_lines_engine
 from pattern_translator.engine import ocr_cleanup as ocr_cleanup_engine
+from pattern_translator.engine import llm_fallback as llm_fallback_engine
 
 APP_VERSION = "Pattern OCR Translator (Beta RC26)"
 APP_DIR = Path(__file__).resolve().parent
@@ -1609,7 +1610,8 @@ INTERFACE_LANGUAGES = {
         "app_title": "Crochet Translator",
         "app_subtitle": "Pattern OCR Translator (Beta)",
         "privacy_expander": "Privacy / storage note",
-        "privacy": "Please only upload images you have permission to use, or images used for personal study/reference. This beta does not intentionally store uploaded images or OCR results; files are processed only for the current session. Anonymous usage statistics (such as country, app usage and performance) are collected to help improve the app. No personal information, IP addresses or uploaded images are stored.",
+        "privacy": "Please only upload images you have permission to use, or images used for personal study/reference. This beta does not intentionally store uploaded images or OCR results; files are processed only for the current session. Anonymous usage statistics (such as country, app usage and performance) are collected to help improve the app. No personal information, IP addresses or uploaded images are stored. When AI assistance is enabled, extracted text—not uploaded images—may be sent to OpenAI only to translate unresolved pattern instructions. No user identity or analytics identifier is included in that request.",
+        "ai_translation_note": "AI may assist with unresolved instruction text. Crochet terminology and pattern structure are handled conservatively. Designer shorthand varies; check results against the original pattern and the designer's stitch key.",
         "intro": "Translate crochet pattern images with OCR overlay and line-by-line translation.",
         "source_label": "Pattern language / terminology",
         "source_help": "If your English pattern does not say US or UK, choose English — US first. Most online amigurumi patterns use US terms.",
@@ -1732,7 +1734,8 @@ INTERFACE_LANGUAGES = {
         "language_japanese": "Japanese",
     },
     "繁體中文": {
-        "privacy": "請只上載你有權使用的圖片，或只作個人學習／參考用途的圖片。本測試版不會刻意儲存上載圖片或文字辨識結果；檔案只在本次使用期間中處理。系統會收集匿名使用統計資料（例如國家／地區、應用程式使用情況和效能），以協助改善應用程式。不會儲存個人資料、IP 位址或上載圖片。",
+        "privacy": "請只上載你有權使用的圖片，或只作個人學習／參考用途的圖片。本測試版不會刻意儲存上載圖片或文字辨識結果；檔案只在本次使用期間中處理。系統會收集匿名使用統計資料（例如國家／地區、應用程式使用情況和效能），以協助改善應用程式。不會儲存個人資料、IP 位址或上載圖片。啟用 AI 輔助時，系統可能只把擷取出的文字（不包括上載圖片）傳送至 OpenAI，以協助翻譯尚未解決的圖樣指示；請求不會包含使用者身分或分析識別資料。",
+        "ai_translation_note": "AI 可能協助翻譯尚未解決的指示文字。鈎織術語及圖樣結構會以保守方式處理。不同設計師的簡寫可能不同，請對照原圖樣及設計師的針法說明。",
         "privacy_expander": "私隱／儲存說明",
         "intro": "上載鈎織圖樣圖片，取得圖片標示翻譯及逐行翻譯。",
         "app_title": "鈎織翻譯器",
@@ -1858,7 +1861,8 @@ INTERFACE_LANGUAGES = {
         "language_japanese": "日文",
     },
     "简体中文": {
-        "privacy": "请只上传你有权使用的图片，或只作个人学习／参考用途的图片。本测试版不会刻意储存上传图片或文字识别结果；文件只在本次使用期间中处理。系统会收集匿名使用统计资料（例如国家／地区、应用程序使用情况和性能），以帮助改善应用程序。不会储存个人资料、IP 地址或上传图片。",
+        "privacy": "请只上传你有权使用的图片，或只作个人学习／参考用途的图片。本测试版不会刻意储存上传图片或文字识别结果；文件只在本次使用期间中处理。系统会收集匿名使用统计资料（例如国家／地区、应用程序使用情况和性能），以帮助改善应用程序。不会储存个人资料、IP 地址或上传图片。启用 AI 辅助时，系统可能只把提取出的文字（不包括上传图片）发送至 OpenAI，以协助翻译尚未解决的图样指示；请求不会包含用户身份或分析标识资料。",
+        "ai_translation_note": "AI 可能协助翻译尚未解决的指示文字。钩织术语及图样结构会以保守方式处理。不同设计师的简写可能不同，请对照原图样及设计师的针法说明。",
         "privacy_expander": "隐私／存储说明",
         "intro": "上传钩织图样图片，获得图片标示翻译和逐行翻译。",
         "app_title": "钩织翻译器",
@@ -1984,7 +1988,8 @@ INTERFACE_LANGUAGES = {
         "language_japanese": "日文",
     },
     "日本語": {
-        "privacy": "使用許可のある画像、または個人学習・参考用の画像のみアップロードしてください。このベータ版はアップロード画像やOCR結果を意図的に保存しません。ファイルは現在の利用中のみ処理されます。アプリ改善のため、国、アプリ利用状況、パフォーマンスなどの匿名使用統計を収集します。個人情報、IPアドレス、アップロード画像は保存されません。",
+        "privacy": "使用許可のある画像、または個人学習・参考用の画像のみアップロードしてください。このベータ版はアップロード画像やOCR結果を意図的に保存しません。ファイルは現在の利用中のみ処理されます。アプリ改善のため、国、アプリ利用状況、パフォーマンスなどの匿名使用統計を収集します。個人情報、IPアドレス、アップロード画像は保存されません。AI補助が有効な場合、未解決のパターン指示を翻訳する目的で、抽出されたテキストのみ（アップロード画像は含みません）がOpenAIへ送信されることがあります。リクエストにはユーザーの身元情報や分析用識別子を含めません。",
+        "ai_translation_note": "AIが未解決の指示文の翻訳を補助する場合があります。かぎ針編み用語とパターン構造は慎重に保持されます。デザイナー独自の略語は異なるため、元のパターンとデザイナーのステッチキーをご確認ください。",
         "privacy_expander": "プライバシー／保存について",
         "intro": "かぎ針編みパターン画像をアップロードして、画像上の翻訳と行ごとの翻訳を確認できます。",
         "app_title": "かぎ針編み翻訳",
@@ -2675,6 +2680,8 @@ if image_file is not None:
         st.caption(t("output_hint_us"))
     elif output_mode == "English — UK":
         st.caption(t("output_hint_uk"))
+    if llm_fallback_engine.is_fallback_enabled():
+        st.caption(t("ai_translation_note"))
 
     st.subheader(t("translation_area"))
 
@@ -3116,7 +3123,13 @@ if image_file is not None:
                 TRANSLATION_PROFILE = translation_profile
                 try:
                     translation_start = time.perf_counter()
-                    line_df = ocr_lines_engine.build_ocr_line_translations(ocr_rows, index, df, output_mode)
+                    line_df = ocr_lines_engine.build_ocr_line_translations(
+                        ocr_rows,
+                        index,
+                        df,
+                        output_mode,
+                        llm_provider=llm_fallback_engine.get_openai_provider_from_env(),
+                    )
                     translation_seconds = time.perf_counter() - translation_start
 
                     overlay_start = time.perf_counter()

@@ -11,6 +11,7 @@ from typing import Dict, List, Optional, Tuple
 import pandas as pd
 
 from pattern_translator.engine import line_translation as line_translation_engine
+from pattern_translator.engine import section_headings
 from pattern_translator.engine import terminology as terminology_engine
 
 # -----------------------------
@@ -127,32 +128,11 @@ def filter_noise_and_watermarks(ocr_rows: pd.DataFrame) -> Tuple[pd.DataFrame, p
 # -----------------------------
 # Section detection / section-aware output
 # -----------------------------
-SECTION_TRANSLATIONS = {
-    "上半部分": {"Traditional Chinese": "上半部分", "Simplified Chinese": "上半部分", "English — US": "Upper section", "English — UK": "Upper section", "Japanese": "上半分"},
-    "上半部份": {"Traditional Chinese": "上半部分", "Simplified Chinese": "上半部分", "English — US": "Upper section", "English — UK": "Upper section", "Japanese": "上半分"},
-    "下半部分": {"Traditional Chinese": "下半部分", "Simplified Chinese": "下半部分", "English — US": "Lower section", "English — UK": "Lower section", "Japanese": "下半分"},
-    "下半部份": {"Traditional Chinese": "下半部分", "Simplified Chinese": "下半部分", "English — US": "Lower section", "English — UK": "Lower section", "Japanese": "下半分"},
-    "腳丫": {"Traditional Chinese": "腳丫", "Simplified Chinese": "脚丫", "English — US": "Feet", "English — UK": "Feet", "Japanese": "足"},
-    "脚丫": {"Traditional Chinese": "腳丫", "Simplified Chinese": "脚丫", "English — US": "Feet", "English — UK": "Feet", "Japanese": "足"},
-    "腳Y": {"Traditional Chinese": "腳丫", "Simplified Chinese": "脚丫", "English — US": "Feet", "English — UK": "Feet", "Japanese": "足"},
-    "脚Y": {"Traditional Chinese": "腳丫", "Simplified Chinese": "脚丫", "English — US": "Feet", "English — UK": "Feet", "Japanese": "足"},
-    "頭": {"Traditional Chinese": "頭", "Simplified Chinese": "头", "English — US": "Head", "English — UK": "Head", "Japanese": "頭"},
-    "头": {"Traditional Chinese": "頭", "Simplified Chinese": "头", "English — US": "Head", "English — UK": "Head", "Japanese": "頭"},
-    "身體": {"Traditional Chinese": "身體", "Simplified Chinese": "身体", "English — US": "Body", "English — UK": "Body", "Japanese": "体"},
-    "身体": {"Traditional Chinese": "身體", "Simplified Chinese": "身体", "English — US": "Body", "English — UK": "Body", "Japanese": "体"},
-    "耳朵": {"Traditional Chinese": "耳朵", "Simplified Chinese": "耳朵", "English — US": "Ears", "English — UK": "Ears", "Japanese": "耳"},
-    "尾巴": {"Traditional Chinese": "尾巴", "Simplified Chinese": "尾巴", "English — US": "Tail", "English — UK": "Tail", "Japanese": "しっぽ"},
-    "手臂": {"Traditional Chinese": "手臂", "Simplified Chinese": "手臂", "English — US": "Arms", "English — UK": "Arms", "Japanese": "腕"},
-    "腿": {"Traditional Chinese": "腿", "Simplified Chinese": "腿", "English — US": "Legs", "English — UK": "Legs", "Japanese": "脚"},
-}
+SECTION_TRANSLATIONS = section_headings.SECTION_TRANSLATIONS
 
 
 def _clean_section_candidate(text: str) -> str:
-    s = unicodedata.normalize("NFKC", str(text or "")).strip()
-    s = s.replace("（", "(").replace("）", ")")
-    s = re.sub(r"^[\s\-~:：;；,，、.。()]+|[\s\-~:：;；,，、.。()]+$", "", s)
-    s = re.sub(r"\s+", "", s)
-    return s
+    return section_headings.clean_section_candidate(text)
 
 
 def detect_section_header(original: str, output_mode: str) -> Optional[str]:
@@ -161,35 +141,7 @@ def detect_section_header(original: str, output_mode: str) -> Optional[str]:
     Be conservative. A line containing 手 in a note like 靠近自己手半针 should NOT
     become a section. Short standalone labels such as （上半部分） or 脚丫: should.
     """
-    raw = str(original or "").strip()
-    s = _clean_section_candidate(raw)
-    if not s:
-        return None
-
-    # Direct known headers. Allow titles plus a colon, but avoid long instruction notes.
-    for key, outputs in SECTION_TRANSLATIONS.items():
-        if s == key or s.startswith(key + ":") or s.startswith(key + "："):
-            return outputs.get(output_mode, outputs.get("Traditional Chinese", key))
-        if key in ["上半部分", "上半部份", "下半部分", "下半部份"] and key in s and len(s) <= 12:
-            return outputs.get(output_mode, outputs.get("Traditional Chinese", key))
-
-    # Common OCR: 脚丫 can appear as 脚Y / 腳Y and may include colon.
-    if re.fullmatch(r"[腳脚][丫Yy]", s):
-        return SECTION_TRANSLATIONS["腳丫"].get(output_mode, "腳丫")
-
-    # Very short part headers only. Do not classify longer notes.
-    short_part_map = {
-        "耳": "Ears", "耳朵": "Ears", "尾": "Tail", "尾巴": "Tail",
-        "花瓣": "Petals", "葉子": "Leaves", "叶子": "Leaves", "翅膀": "Wings",
-    }
-    if len(s) <= 4 and s in short_part_map:
-        if output_mode == "Traditional Chinese":
-            return {"叶子":"葉子"}.get(s, s)
-        if output_mode == "Simplified Chinese":
-            return {"葉子":"叶子"}.get(s, s)
-        return short_part_map[s]
-
-    return None
+    return section_headings.detect_section_header(original, output_mode)
 
 
 def extract_round_label_from_line(original: str) -> Optional[str]:
