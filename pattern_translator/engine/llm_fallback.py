@@ -14,7 +14,8 @@ import pandas as pd
 from pattern_translator.engine import terminology
 
 
-MODEL = "gpt-5-nano"
+GENERAL_MODEL = "gpt-5-nano"
+TITLE_MODEL = "gpt-5.6-luna"
 DEFAULT_TIMEOUT_SECONDS = 8.0
 
 
@@ -265,7 +266,8 @@ def create_openai_provider(api_key: str, timeout_seconds: float = DEFAULT_TIMEOU
     def translate(previous: str, current: ProviderInput, following: str, target: str) -> str:
         previous_context = previous or "[none]"
         following_context = following or "[none]"
-        if isinstance(current, TitleTranslationRequest):
+        is_title_request = isinstance(current, TitleTranslationRequest)
+        if is_title_request:
             prompt = (
                 f"You are translating the subject of a crochet pattern title into {target}. "
                 "Classify the supplied subject as either an ordinary descriptive noun or a genuine brand/proper name. "
@@ -292,8 +294,8 @@ def create_openai_provider(api_key: str, timeout_seconds: float = DEFAULT_TIMEOU
             request = urllib.request.Request(
                 "https://api.openai.com/v1/responses",
                 data=json.dumps({
-                    "model": MODEL,
-                    "reasoning": {"effort": "minimal"},
+                    "model": TITLE_MODEL if is_title_request else GENERAL_MODEL,
+                    "reasoning": {"effort": "low" if is_title_request else "minimal"},
                     "input": prompt,
                     "max_output_tokens": 180,
                 }).encode("utf-8"),

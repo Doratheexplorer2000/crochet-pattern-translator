@@ -127,7 +127,7 @@ class LlmFallbackTests(unittest.TestCase):
 
         self.assertEqual(result, "translated __ciqa__")
         self.assertEqual(captured["timeout"], llm_fallback.DEFAULT_TIMEOUT_SECONDS)
-        self.assertEqual(captured["payload"]["model"], "gpt-5-nano")
+        self.assertEqual(captured["payload"]["model"], llm_fallback.GENERAL_MODEL)
         self.assertEqual(captured["payload"]["reasoning"], {"effort": "minimal"})
         self.assertEqual(captured["payload"]["max_output_tokens"], 180)
         prompt = captured["payload"]["input"]
@@ -186,8 +186,8 @@ class LlmFallbackTests(unittest.TestCase):
 
         self.assertEqual(result, model_result)
         self.assertEqual(captured["timeout"], llm_fallback.DEFAULT_TIMEOUT_SECONDS)
-        self.assertEqual(captured["payload"]["model"], "gpt-5-nano")
-        self.assertEqual(captured["payload"]["reasoning"], {"effort": "minimal"})
+        self.assertEqual(captured["payload"]["model"], llm_fallback.TITLE_MODEL)
+        self.assertEqual(captured["payload"]["reasoning"], {"effort": "low"})
         self.assertEqual(captured["payload"]["max_output_tokens"], 180)
         prompt = captured["payload"]["input"]
         self.assertEqual(
