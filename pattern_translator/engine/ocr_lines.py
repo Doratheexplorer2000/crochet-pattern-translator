@@ -188,15 +188,38 @@ def build_ocr_line_translations(
         translated = line_translation.translate_ocr_line(cleaned, index, df, output_mode)
         prepared.append((row, cleaned, translated))
 
+    title_contexts = []
+    for position, (_row, cleaned, _translated) in enumerate(prepared):
+        nearby_lines = [
+            prepared[nearby_position][1]
+            for nearby_position in range(max(0, position - 2), min(len(prepared), position + 3))
+            if nearby_position != position
+        ]
+        title_contexts.append(
+            pattern_document.is_title_heading_context(cleaned, nearby_lines)
+        )
+
+    llm_df = df
+    llm_inputs = [translated for _row, _cleaned, translated in prepared]
+    semantic_context = ""
+    if llm_provider is not None:
+        llm_index, llm_df = llm_fallback.structural_terminology_view(index, df)
+        structural_inputs = [
+            line_translation.translate_ocr_line(cleaned, llm_index, llm_df, output_mode)
+            for _row, cleaned, _translated in prepared
+        ]
+        llm_inputs = [
+            translated if title_contexts[position] else structural_inputs[position]
+            for position, (_row, _cleaned, translated) in enumerate(prepared)
+        ]
+        semantic_context = llm_fallback.build_translation_scope_context(
+            structural_inputs, llm_df, output_mode
+        )
+
     out = []
     for position, (row, cleaned, translated) in enumerate(prepared):
         previous = prepared[position - 1][1] if position > 0 else ""
         following = prepared[position + 1][1] if position + 1 < len(prepared) else ""
-        nearby_lines = [
-            prepared[index][1]
-            for index in range(max(0, position - 2), min(len(prepared), position + 3))
-            if index != position
-        ]
         translated = llm_fallback.apply_llm_fallback(
             source=cleaned,
             deterministic=translated,
@@ -205,9 +228,10 @@ def build_ocr_line_translations(
             output_mode=output_mode,
             df=df,
             provider=llm_provider,
-            title_context=pattern_document.is_title_heading_context(
-                cleaned, nearby_lines
-            ),
+            title_context=title_contexts[position],
+            semantic_context=semantic_context,
+            llm_input_text=llm_inputs[position],
+            llm_df=df if title_contexts[position] else llm_df,
         )
         changed = terminology.norm_text(cleaned) != terminology.norm_text(translated)
         out.append({

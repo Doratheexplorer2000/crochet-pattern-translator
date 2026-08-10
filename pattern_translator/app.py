@@ -2289,6 +2289,7 @@ def download_button_rc3(
 def init_rc3_state():
     st.session_state.setdefault("rc3_ocr_result", None)
     st.session_state.setdefault("rc3_image_signature", None)
+    st.session_state.setdefault("rc3_uploaded_image_name", "")
     st.session_state.setdefault("rc3_ocr_result_signature", None)
     st.session_state.setdefault("pending_ocr_run", False)
     st.session_state.setdefault("latest_crop_box", None)
@@ -2675,11 +2676,15 @@ upload_strings = {
 image_file, upload_error, upload_removed = custom_image_uploader(
     upload_strings,
     key="pattern_image_uploader",
+    active_image_present=st.session_state.get("rc3_image_signature") is not None,
+    active_image_name=st.session_state.get("rc3_uploaded_image_name", ""),
 )
 if upload_error:
     st.error(upload_error)
 
-def reset_uploaded_image_derived_state(image_signature: Optional[str]) -> None:
+def reset_uploaded_image_derived_state(
+    image_signature: Optional[str], image_name: str = ""
+) -> None:
     st.session_state["rc3_ocr_result"] = None
     st.session_state["rc3_ocr_result_signature"] = None
     st.session_state["pending_ocr_run"] = False
@@ -2700,10 +2705,14 @@ def reset_uploaded_image_derived_state(image_signature: Optional[str]) -> None:
     st.session_state["debug_report_ready"] = False
     st.session_state["last_successful_download_key"] = None
     st.session_state["rc3_image_signature"] = image_signature
+    st.session_state["rc3_uploaded_image_name"] = (
+        str(image_name or "") if image_signature is not None else ""
+    )
 
 
 if upload_removed and st.session_state.get("rc3_image_signature") is not None:
     reset_uploaded_image_derived_state(None)
+    st.rerun()
 
 if image_file is None:
     rc10b_note_image_absent()
@@ -2717,7 +2726,9 @@ if image_file is not None:
     current_signature = image_upload_signature(image_file)
     rc10b_note_image_present(current_signature)
     if st.session_state.get("rc3_image_signature") != current_signature:
-        reset_uploaded_image_derived_state(current_signature)
+        reset_uploaded_image_derived_state(
+            current_signature, str(getattr(image_file, "name", ""))
+        )
         track_analytics_event("image_uploaded")
         emit_plausible_event(
             "pattern_image_uploaded",

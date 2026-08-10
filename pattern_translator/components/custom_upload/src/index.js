@@ -22,6 +22,8 @@ let strings = {};
 let selectedFile = null;
 let selectedPayload = null;
 let reading = false;
+let backendImagePresent = false;
+let backendImageName = "";
 
 function text(key) {
   return String(strings[key] || "");
@@ -46,6 +48,14 @@ function setState(state) {
   Streamlit.setFrameHeight();
 }
 
+function hasActiveImage() {
+  return Boolean(selectedFile || selectedPayload || backendImagePresent);
+}
+
+function renderActiveFileName() {
+  fileName.textContent = selectedFile ? selectedFile.name : backendImageName;
+}
+
 function renderStrings() {
   document.documentElement.lang = text("html_lang") || "en";
   instruction.textContent = text("instruction");
@@ -66,7 +76,8 @@ function showError(errorCode) {
       ? { ...selectedPayload, frontend_error_code: errorCode }
       : { error_code: errorCode },
   );
-  setState(selectedFile ? "selected" : "empty");
+  renderActiveFileName();
+  setState(hasActiveImage() ? "selected" : "empty");
 }
 
 function clearError() {
@@ -91,7 +102,8 @@ function validateFile(file) {
 
 function finishReading() {
   reading = false;
-  setState(selectedFile ? "selected" : "empty");
+  renderActiveFileName();
+  setState(hasActiveImage() ? "selected" : "empty");
 }
 
 function processFile(file) {
@@ -114,7 +126,7 @@ function processFile(file) {
   reader.onerror = () => {
     selectedFile = previousFile;
     selectedPayload = previousPayload;
-    fileName.textContent = selectedFile ? selectedFile.name : "";
+    renderActiveFileName();
     input.value = "";
     finishReading();
     showError("error_unreadable");
@@ -125,7 +137,7 @@ function processFile(file) {
     if (commaIndex < 0) {
       selectedFile = previousFile;
       selectedPayload = previousPayload;
-      fileName.textContent = selectedFile ? selectedFile.name : "";
+      renderActiveFileName();
       input.value = "";
       finishReading();
       showError("error_unreadable");
@@ -176,9 +188,12 @@ function onRender(event) {
   allowedExtensions = args.allowed_extensions || allowedExtensions;
   allowedMimeTypes = args.allowed_mime_types || allowedMimeTypes;
   maxUploadBytes = args.max_upload_bytes || maxUploadBytes;
+  backendImagePresent = Boolean(args.active_image_present);
+  backendImageName = String(args.active_image_name || "");
   applyTheme(event.detail.theme);
   renderStrings();
-  setState(reading ? "reading" : selectedFile ? "selected" : "empty");
+  renderActiveFileName();
+  setState(reading ? "reading" : hasActiveImage() ? "selected" : "empty");
 }
 
 chooseButton.addEventListener("click", openPicker);
@@ -190,6 +205,8 @@ removeButton.addEventListener("click", () => {
   }
   selectedFile = null;
   selectedPayload = null;
+  backendImagePresent = false;
+  backendImageName = "";
   input.value = "";
   fileName.textContent = "";
   clearError();

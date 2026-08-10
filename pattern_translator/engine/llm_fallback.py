@@ -14,8 +14,12 @@ import pandas as pd
 from pattern_translator.engine import terminology
 
 
-GENERAL_MODEL = "gpt-5-nano"
+GENERAL_MODEL = "gpt-5.6-luna"
 TITLE_MODEL = "gpt-5.6-luna"
+GENERAL_REASONING = "low"
+TITLE_REASONING = "low"
+GENERAL_MAX_OUTPUT_TOKENS = 400
+TITLE_MAX_OUTPUT_TOKENS = 180
 DEFAULT_TIMEOUT_SECONDS = 8.0
 
 
@@ -49,6 +53,9 @@ _BRACKET_RE = re.compile(r"[()（）\[\]{}]")
 _ABBREVIATION_RE = re.compile(r"\b(?:sl\s*st|slst|sc|dc|hdc|tr|inc|dec|mr|blo|flo|ch|sts?|fo)\b", re.IGNORECASE)
 _UNKNOWN_TOKEN_RE = re.compile(r"\b[A-Z][A-Z0-9]{1,7}\b")
 _PLACEHOLDER_RE = re.compile(r"__ciq[a-z]+__")
+_LATIN_TOKEN_RE = re.compile(
+    r"(?<![A-Za-z0-9])([A-Za-z][A-Za-z0-9]*(?:[-'’][A-Za-z0-9]+)*)(?![A-Za-z0-9])"
+)
 _DEBUG_OUTCOMES = {
     "not_eligible",
     "no_api_key",
@@ -166,6 +173,51 @@ def _target_terms(df: pd.DataFrame, output_mode: str) -> List[str]:
     return sorted(set(terms), key=len, reverse=True)
 
 
+def structural_terminology_view(
+    index: Dict[str, int], df: pd.DataFrame
+) -> Tuple[Dict[str, int], pd.DataFrame]:
+    """Exclude historical ordinary-prose rows from the Luna-facing terminology view."""
+    if df is None or df.empty or "category" not in df.columns:
+        return dict(index), df
+    categories = df["category"].fillna("").astype(str).map(terminology.norm_text)
+    structural_df = df[categories != "pattern_instruction"].copy()
+    retained_rows = set(structural_df.index)
+    structural_index = {
+        term: row_index for term, row_index in index.items() if row_index in retained_rows
+    }
+    return structural_index, structural_df
+
+
+def build_translation_scope_context(
+    lines: List[str], df: pd.DataFrame, output_mode: str
+) -> str:
+    """Build compact semantic clues once from the OCR lines in the requested scope."""
+    fragments: List[str] = []
+    seen = set()
+    for line in lines:
+        protected, _ = protect_authoritative_content(line, df, output_mode)
+        remainder = _PLACEHOLDER_RE.sub(" ", protected)
+        remainder = re.sub(r"\b(?:R|Rnd|Round|Row)\s*[:：]?", " ", remainder, flags=re.I)
+        remainder = re.sub(r"\b(?:sc|dc|hdc|tr|inc|dec|mr|blo|flo|ch|sts?|fo|slst)\b", " ", remainder, flags=re.I)
+        remainder = re.sub(r"[\d×*]+", " ", remainder)
+        remainder = re.sub(r"(?:重複|重复|針|针|次)", " ", remainder)
+        for fragment in re.split(r"[|,，;；:：/\\]+", remainder):
+            compact = re.sub(r"[()（）\[\]{}<>]", " ", fragment)
+            compact = re.sub(r"\s+", " ", compact).strip(" .。-_~")
+            if not compact:
+                continue
+            english_words = re.findall(r"[A-Za-z]{3,}", compact)
+            cjk_runs = re.findall(r"[\u3400-\u9fff]{2,}", compact)
+            if not english_words and not cjk_runs:
+                continue
+            key = compact.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            fragments.append(compact)
+    return " | ".join(fragments)
+
+
 def protect_authoritative_content(text: str, df: pd.DataFrame, output_mode: str) -> Tuple[str, Dict[str, str]]:
     replacements: Dict[str, str] = {}
 
@@ -263,9 +315,7 @@ def _debug_response_structure(
 
 def create_openai_provider(api_key: str, timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS) -> Provider:
     """Create a one-attempt Responses API provider without exposing its key."""
-    def translate(previous: str, current: ProviderInput, following: str, target: str) -> str:
-        previous_context = previous or "[none]"
-        following_context = following or "[none]"
+    def translate(semantic_context: str, current: ProviderInput, _following: str, target: str) -> str:
         is_title_request = isinstance(current, TitleTranslationRequest)
         if is_title_request:
             prompt = (
@@ -279,14 +329,16 @@ def create_openai_provider(api_key: str, timeout_seconds: float = DEFAULT_TIMEOU
             )
         else:
             prompt = (
-                f"Translate only CURRENT into {target}. This is crochet pattern text. "
-                "Opaque __ciq...__ tokens are authoritative: copy each exactly once and unchanged. "
-                "Translate ordinary prose, including descriptive nouns in pattern titles and headings. "
-                "Title Case alone does not make a word a proper name; normally translate title subjects such as animals, plants, foods, objects, body parts, colours, and materials. "
-                "Preserve genuine brand names, designer names, usernames, product names, and contextually clear proper names. "
-                "Do not repair OCR, invent meanings for unknown crochet abbreviations or designer shorthand, change crochet terminology, or add instructions. "
-                "PREVIOUS and NEXT are context only. Return only the translated CURRENT line.\n"
-                f"PREVIOUS: {previous_context}\nCURRENT: {current}\nNEXT: {following_context}"
+                "DOMAIN: crochet pattern\n"
+                "INSTRUCTION: Interpret ordinary words according to crochet-pattern context. "
+                "When context supports it, interpret object, part, and material words as components "
+                f"of the item being crocheted. Translate only CURRENT LINE into {target}. "
+                "PATTERN CONTEXT contains semantic clues only: do not copy context words into the output "
+                "unless they belong to CURRENT LINE. Preserve every opaque __ciq...__ placeholder exactly "
+                "once and unchanged. Do not repair OCR, invent crochet terminology, or reinterpret designer "
+                "shorthand. Return only the translated CURRENT LINE.\n"
+                f"PATTERN CONTEXT: {semantic_context or '[none]'}\n"
+                f"CURRENT LINE: {current}"
             )
         failure_stage = "request_build"
         http_status = None
@@ -295,9 +347,9 @@ def create_openai_provider(api_key: str, timeout_seconds: float = DEFAULT_TIMEOU
                 "https://api.openai.com/v1/responses",
                 data=json.dumps({
                     "model": TITLE_MODEL if is_title_request else GENERAL_MODEL,
-                    "reasoning": {"effort": "low" if is_title_request else "minimal"},
+                    "reasoning": {"effort": TITLE_REASONING if is_title_request else GENERAL_REASONING},
                     "input": prompt,
-                    "max_output_tokens": 180,
+                    "max_output_tokens": TITLE_MAX_OUTPUT_TOKENS if is_title_request else GENERAL_MAX_OUTPUT_TOKENS,
                 }).encode("utf-8"),
                 headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
                 method="POST",
@@ -357,11 +409,80 @@ def _restore_if_valid(raw: str, protected: str, deterministic: str, replacements
     return restored
 
 
+def _has_unsupported_latin_output(
+    candidate: str, source: str, deterministic: str, output_mode: str
+) -> bool:
+    """Reject new Latin/alphanumeric tokens when Latin is not the target script."""
+    if output_mode in _ENGLISH_OUTPUTS:
+        return False
+    if output_mode not in _CHINESE_OUTPUTS and output_mode != "Japanese":
+        return False
+
+    def tokens(text: str) -> set:
+        return {match.group(1).casefold() for match in _LATIN_TOKEN_RE.finditer(text)}
+
+    authorised = tokens(source) | tokens(deterministic)
+    authorised.update(term.replace(" ", "").casefold() for term in _KNOWN_ABBREVIATIONS)
+    return bool(tokens(candidate) - authorised)
+
+
 def _extract_title_subject(protected: str) -> Optional[str]:
     subject = _PLACEHOLDER_RE.sub("", str(protected or "")).strip()
     if not subject or not re.fullmatch(r"[A-Za-z][A-Za-z' -]{0,79}", subject):
         return None
     return subject
+
+
+def _single_embedded_prose_span(
+    protected: str, output_mode: str
+) -> Optional[Tuple[int, int, str]]:
+    """Return one unresolved prose span surrounded by protected structure."""
+    placeholder_matches = list(_PLACEHOLDER_RE.finditer(protected))
+    if not placeholder_matches:
+        return None
+
+    spans: List[Tuple[int, int, str]] = []
+    boundaries = [(0, placeholder_matches[0].start())]
+    boundaries.extend(
+        (left.end(), right.start())
+        for left, right in zip(placeholder_matches, placeholder_matches[1:])
+    )
+    boundaries.append((placeholder_matches[-1].end(), len(protected)))
+
+    for start, end in boundaries:
+        raw = protected[start:end]
+        leading = len(raw) - len(raw.lstrip(" \t\r\n,，;；:："))
+        trailing = len(raw) - len(raw.rstrip(" \t\r\n,，;；:："))
+        prose_start = start + leading
+        prose_end = end - trailing
+        if prose_start >= prose_end:
+            continue
+        prose = protected[prose_start:prose_end]
+        if output_mode in _ENGLISH_OUTPUTS:
+            cjk_matches = list(_CJK_RE.finditer(prose))
+            unresolved = len(cjk_matches) >= 2
+            if unresolved:
+                prose_start += cjk_matches[0].start()
+                prose_end = prose_start + cjk_matches[-1].end() - cjk_matches[0].start()
+                prose = protected[prose_start:prose_end]
+        elif output_mode in _CHINESE_OUTPUTS:
+            ignored = {term.replace(" ", "") for term in _KNOWN_ABBREVIATIONS}
+            word_matches = [
+                match
+                for match in _ENGLISH_WORD_RE.finditer(prose)
+                if match.group(0).lower().replace(" ", "") not in ignored
+            ]
+            unresolved = bool(word_matches)
+            if unresolved:
+                prose_start += word_matches[0].start()
+                prose_end = prose_start + word_matches[-1].end() - word_matches[0].start()
+                prose = protected[prose_start:prose_end]
+        else:
+            unresolved = False
+        if unresolved:
+            spans.append((prose_start, prose_end, prose))
+
+    return spans[0] if len(spans) == 1 else None
 
 
 def _parse_title_result(raw: str, subject: str) -> Optional[str]:
@@ -420,24 +541,36 @@ def apply_llm_fallback(
     df: pd.DataFrame,
     provider: Optional[Provider],
     title_context: bool = False,
+    semantic_context: Optional[str] = None,
+    llm_input_text: Optional[str] = None,
+    llm_df: Optional[pd.DataFrame] = None,
 ) -> str:
     """Return a validated improvement or the unchanged deterministic result."""
-    if not should_use_llm(source, deterministic, output_mode):
-        _debug_outcome(_skip_outcome(source, deterministic, output_mode))
+    candidate_input = deterministic if llm_input_text is None else llm_input_text
+    if not should_use_llm(source, candidate_input, output_mode):
+        _debug_outcome(_skip_outcome(source, candidate_input, output_mode))
         return deterministic
     if provider is None:
         outcome = "no_api_key" if is_fallback_enabled() else "not_eligible"
         _debug_outcome(outcome)
         return deterministic
-    llm_input, outer_parentheses = _unwrap_outer_parentheses(deterministic)
-    protected, replacements = protect_authoritative_content(llm_input, df, output_mode)
+    llm_input, outer_parentheses = _unwrap_outer_parentheses(candidate_input)
+    protection_df = df if llm_df is None else llm_df
+    protected, replacements = protect_authoritative_content(llm_input, protection_df, output_mode)
     title_subject = _extract_title_subject(protected) if title_context else None
+    embedded_prose = (
+        None if title_subject else _single_embedded_prose_span(protected, output_mode)
+    )
     failure_stage = "provider_call"
     try:
         provider_input: ProviderInput = (
-            TitleTranslationRequest(title_subject) if title_subject else protected
+            TitleTranslationRequest(title_subject)
+            if title_subject
+            else embedded_prose[2] if embedded_prose else protected
         )
-        raw = provider(previous, provider_input, following, output_mode)
+        provider_context = previous if semantic_context is None else semantic_context
+        provider_following = following if semantic_context is None else ""
+        raw = provider(provider_context, provider_input, provider_following, output_mode)
         if not raw or not raw.strip():
             _debug_response_structure(
                 None,
@@ -454,8 +587,19 @@ def apply_llm_fallback(
                 _debug_outcome("validation_rejected")
                 return deterministic
             candidate = protected.replace(title_subject, translated_subject, 1)
+        elif embedded_prose:
+            candidate = (
+                protected[:embedded_prose[0]]
+                + raw.strip()
+                + protected[embedded_prose[1]:]
+            )
         restored = _restore_if_valid(candidate, protected, llm_input, replacements)
         if restored is None:
+            _debug_outcome("validation_rejected")
+            return deterministic
+        if _has_unsupported_latin_output(
+            restored, source, deterministic, output_mode
+        ):
             _debug_outcome("validation_rejected")
             return deterministic
         if outer_parentheses is not None:

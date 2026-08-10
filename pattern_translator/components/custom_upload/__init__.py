@@ -91,12 +91,16 @@ def custom_image_uploader(
     strings: Mapping[str, str],
     *,
     key: str,
+    active_image_present: bool = False,
+    active_image_name: str = "",
 ) -> Tuple[Optional[UploadedImageBytes], Optional[str], bool]:
     payload = _custom_upload_component(
         strings=dict(strings),
         allowed_extensions=sorted(extension.lstrip(".") for extension in _ALLOWED_EXTENSIONS),
         allowed_mime_types=sorted(_ALLOWED_MIME_TYPES),
         max_upload_bytes=_MAX_UPLOAD_BYTES,
+        active_image_present=bool(active_image_present),
+        active_image_name=str(active_image_name or ""),
         key=key,
         default=None,
     )
