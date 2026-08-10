@@ -1,5 +1,6 @@
 import contextlib
 import io
+import json
 import os
 import unittest
 import urllib.error
@@ -125,7 +126,11 @@ class LlmDebugOutcomeTests(unittest.TestCase):
         for outcome, source, deterministic, target, provider in cases:
             with self.subTest(outcome=outcome):
                 _result, debug = self.capture(source, deterministic, target, provider)
-                self.assertEqual(debug, f"[pattern_llm] outcome={outcome}")
+                if outcome == "malformed_response":
+                    self.assertIn("failure_stage=provider_empty_result", debug)
+                    self.assertTrue(debug.endswith(f"[pattern_llm] outcome={outcome}"))
+                else:
+                    self.assertEqual(debug, f"[pattern_llm] outcome={outcome}")
                 self.assertNotIn(source, debug)
                 self.assertNotIn("private response detail", debug)
 
@@ -155,6 +160,7 @@ class LlmDebugOutcomeTests(unittest.TestCase):
                 self.assertEqual(llm_fallback._extract_output_text(response), "")
         debug = output.getvalue()
         self.assertIn("response_status=incomplete", debug)
+        self.assertIn("failure_stage=parsed_no_output_text", debug)
         self.assertIn("incomplete_reason=max_output_tokens", debug)
         self.assertIn("output_item_types=reasoning", debug)
         self.assertIn("content_types=summary_text", debug)
@@ -179,6 +185,69 @@ class LlmDebugOutcomeTests(unittest.TestCase):
         self.assertIn("output_text_present=true", debug)
         self.assertIn("output_text_nonempty=false", debug)
 
+    def test_pre_response_value_error_is_safely_diagnosed(self):
+        provider = llm_fallback.create_openai_provider("not-a-real-key")
+        with mock.patch.object(
+            llm_fallback.urllib.request,
+            "urlopen",
+            side_effect=ValueError("private transport detail"),
+        ):
+            result, debug = self.capture(
+                "剪出两只眼睛", "剪出两只眼睛", "English — US", provider
+            )
+        self.assertEqual(result, "剪出两只眼睛")
+        self.assertIn("failure_stage=http_open_value_error", debug)
+        self.assertIn("json_parsed=unavailable", debug)
+        self.assertTrue(debug.endswith("[pattern_llm] outcome=malformed_response"))
+        self.assertNotIn("private transport detail", debug)
+
+    def test_invalid_json_is_safely_diagnosed(self):
+        response = self.fake_http_response(b"not json")
+        provider = llm_fallback.create_openai_provider("not-a-real-key")
+        with mock.patch.object(llm_fallback.urllib.request, "urlopen", return_value=response):
+            result, debug = self.capture(
+                "剪出两只眼睛", "剪出两只眼睛", "English — US", provider
+            )
+        self.assertEqual(result, "剪出两只眼睛")
+        self.assertIn("failure_stage=json_parse_value_error", debug)
+        self.assertIn("json_parsed=false", debug)
+        self.assertIn("http_status=200", debug)
+        self.assertTrue(debug.endswith("[pattern_llm] outcome=malformed_response"))
+        self.assertNotIn("not json", debug)
+
+    def test_parsed_response_without_text_is_safely_diagnosed(self):
+        payload = {
+            "status": "incomplete",
+            "incomplete_details": {"reason": "max_output_tokens"},
+            "output": [{"type": "reasoning", "content": []}],
+        }
+        response = self.fake_http_response(json.dumps(payload).encode("utf-8"))
+        provider = llm_fallback.create_openai_provider("not-a-real-key")
+        with mock.patch.object(llm_fallback.urllib.request, "urlopen", return_value=response):
+            result, debug = self.capture(
+                "剪出两只眼睛", "剪出两只眼睛", "English — US", provider
+            )
+        self.assertEqual(result, "剪出两只眼睛")
+        self.assertIn("failure_stage=parsed_no_output_text", debug)
+        self.assertIn("response_status=incomplete", debug)
+        self.assertIn("incomplete_reason=max_output_tokens", debug)
+        self.assertTrue(debug.endswith("[pattern_llm] outcome=malformed_response"))
+
+    def test_validation_value_error_is_safely_diagnosed(self):
+        provider = mock.Mock(return_value="translated")
+        with mock.patch.object(
+            llm_fallback,
+            "_restore_if_valid",
+            side_effect=ValueError("private validation detail"),
+        ):
+            result, debug = self.capture(
+                "剪出两只眼睛", "剪出两只眼睛", "English — US", provider
+            )
+        self.assertEqual(result, "剪出两只眼睛")
+        self.assertIn("failure_stage=validation_value_error", debug)
+        self.assertTrue(debug.endswith("[pattern_llm] outcome=malformed_response"))
+        self.assertNotIn("private validation detail", debug)
+
     def test_response_structure_debug_is_silent_by_default(self):
         response = {
             "status": "incomplete",
@@ -190,6 +259,19 @@ class LlmDebugOutcomeTests(unittest.TestCase):
             with contextlib.redirect_stderr(output):
                 self.assertEqual(llm_fallback._extract_output_text(response), "")
         self.assertEqual(output.getvalue(), "")
+
+    @staticmethod
+    def fake_http_response(body: bytes):
+        class FakeHttpResponse(io.BytesIO):
+            status = 200
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                self.close()
+
+        return FakeHttpResponse(body)
 
 
 if __name__ == "__main__":

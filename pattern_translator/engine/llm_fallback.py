@@ -17,6 +17,10 @@ MODEL = "gpt-5-nano"
 DEFAULT_TIMEOUT_SECONDS = 8.0
 Provider = Callable[[str, str, str, str], str]
 
+
+class _DiagnosedMalformedResponse(ValueError):
+    """Internal marker for a malformed provider result already safely diagnosed."""
+
 _TRUE_VALUES = {"1", "true", "yes", "on"}
 _ENGLISH_OUTPUTS = {"English — US", "English — UK", "English US terms", "English UK terms"}
 _CHINESE_OUTPUTS = {"Traditional Chinese", "Simplified Chinese"}
@@ -169,6 +173,7 @@ def _extract_output_text(response: dict, http_status: object = None) -> str:
     _debug_response_structure(
         response,
         http_status=http_status,
+        failure_stage="parsed_no_output_text",
         output_text_present=output_text_present,
     )
     return ""
@@ -183,7 +188,8 @@ def _debug_response_structure(
     response: Optional[dict],
     *,
     http_status: object = None,
-    json_parsed: bool = True,
+    json_parsed: Optional[bool] = True,
+    failure_stage: str = "unknown",
     output_text_present: bool = False,
 ) -> None:
     if not is_debug_enabled():
@@ -209,7 +215,8 @@ def _debug_response_structure(
     incomplete = payload.get("incomplete_details")
     incomplete_reason = incomplete.get("reason") if isinstance(incomplete, dict) else None
     fields = {
-        "json_parsed": str(json_parsed).lower(),
+        "failure_stage": _safe_debug_atom(failure_stage),
+        "json_parsed": "unavailable" if json_parsed is None else str(json_parsed).lower(),
         "http_status": _safe_debug_atom(http_status),
         "response_status": _safe_debug_atom(payload.get("status")),
         "incomplete_reason": _safe_debug_atom(incomplete_reason),
@@ -235,28 +242,40 @@ def create_openai_provider(api_key: str, timeout_seconds: float = DEFAULT_TIMEOU
             "PREVIOUS and NEXT are context only. Return only the translated CURRENT line.\n"
             f"PREVIOUS: {previous_context}\nCURRENT: {current}\nNEXT: {following_context}"
         )
-        request = urllib.request.Request(
-            "https://api.openai.com/v1/responses",
-            data=json.dumps({
-                "model": MODEL,
-                "reasoning": {"effort": "minimal"},
-                "input": prompt,
-                "max_output_tokens": 180,
-            }).encode("utf-8"),
-            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-            method="POST",
-        )
-        with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
-            try:
+        failure_stage = "request_build"
+        http_status = None
+        try:
+            request = urllib.request.Request(
+                "https://api.openai.com/v1/responses",
+                data=json.dumps({
+                    "model": MODEL,
+                    "reasoning": {"effort": "minimal"},
+                    "input": prompt,
+                    "max_output_tokens": 180,
+                }).encode("utf-8"),
+                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                method="POST",
+            )
+            failure_stage = "http_open"
+            with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
+                http_status = getattr(response, "status", None)
+                failure_stage = "json_parse"
                 payload = json.load(response)
-            except ValueError:
-                _debug_response_structure(
-                    None,
-                    http_status=getattr(response, "status", None),
-                    json_parsed=False,
-                )
-                raise
-            return _extract_output_text(payload, http_status=getattr(response, "status", None))
+                failure_stage = "extract_output"
+                text = _extract_output_text(payload, http_status=http_status)
+                if not text:
+                    raise _DiagnosedMalformedResponse()
+                return text
+        except _DiagnosedMalformedResponse:
+            raise
+        except ValueError as error:
+            _debug_response_structure(
+                None,
+                http_status=http_status,
+                json_parsed=False if failure_stage == "json_parse" else None,
+                failure_stage=f"{failure_stage}_value_error",
+            )
+            raise _DiagnosedMalformedResponse() from error
 
     return translate
 
@@ -336,11 +355,18 @@ def apply_llm_fallback(
         return deterministic
     llm_input, outer_parentheses = _unwrap_outer_parentheses(deterministic)
     protected, replacements = protect_authoritative_content(llm_input, df, output_mode)
+    failure_stage = "provider_call"
     try:
         raw = provider(previous, protected, following, output_mode)
         if not raw or not raw.strip():
+            _debug_response_structure(
+                None,
+                json_parsed=None,
+                failure_stage="provider_empty_result",
+            )
             _debug_outcome("malformed_response")
             return deterministic
+        failure_stage = "validation"
         restored = _restore_if_valid(raw, protected, llm_input, replacements)
         if restored is None:
             _debug_outcome("validation_rejected")
@@ -356,7 +382,15 @@ def apply_llm_fallback(
     except urllib.error.URLError:
         _debug_outcome("api_error")
         return deterministic
+    except _DiagnosedMalformedResponse:
+        _debug_outcome("malformed_response")
+        return deterministic
     except ValueError:
+        _debug_response_structure(
+            None,
+            json_parsed=None,
+            failure_stage=f"{failure_stage}_value_error",
+        )
         _debug_outcome("malformed_response")
         return deterministic
     except OSError:
