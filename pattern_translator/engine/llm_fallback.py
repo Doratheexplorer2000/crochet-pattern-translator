@@ -259,7 +259,10 @@ def create_openai_provider(api_key: str, timeout_seconds: float = DEFAULT_TIMEOU
         prompt = (
             f"Translate only CURRENT into {target}. This is crochet pattern text. "
             "Opaque __ciq...__ tokens are authoritative: copy each exactly once and unchanged. "
-            "Translate ordinary prose only. Do not repair OCR, redefine shorthand, change crochet terminology, or add instructions. "
+            "Translate ordinary prose, including descriptive nouns in pattern titles and headings. "
+            "Title Case alone does not make a word a proper name; normally translate title subjects such as animals, plants, foods, objects, body parts, colours, and materials. "
+            "Preserve genuine brand names, designer names, usernames, product names, and contextually clear proper names. "
+            "Do not repair OCR, invent meanings for unknown crochet abbreviations or designer shorthand, change crochet terminology, or add instructions. "
             "PREVIOUS and NEXT are context only. Return only the translated CURRENT line.\n"
             f"PREVIOUS: {previous_context}\nCURRENT: {current}\nNEXT: {following_context}"
         )

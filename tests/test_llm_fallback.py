@@ -1,3 +1,5 @@
+import io
+import json
 import os
 import unittest
 import urllib.error
@@ -77,6 +79,85 @@ class LlmFallbackTests(unittest.TestCase):
                     "Traditional Chinese",
                 )
                 self.assertEqual(deterministic, expected)
+                self.assertTrue(
+                    llm_fallback.should_use_llm(
+                        source, deterministic, "Traditional Chinese"
+                    )
+                )
+
+    def test_title_prompt_translates_descriptions_but_preserves_genuine_names(self):
+        captured = {}
+
+        class FakeResponse(io.BytesIO):
+            status = 200
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                self.close()
+
+        response = FakeResponse(json.dumps({
+            "output": [{
+                "content": [{"type": "output_text", "text": "translated __ciqa__"}]
+            }]
+        }).encode("utf-8"))
+
+        def urlopen(request, timeout):
+            captured["payload"] = json.loads(request.data.decode("utf-8"))
+            captured["timeout"] = timeout
+            return response
+
+        provider = llm_fallback.create_openai_provider("synthetic-test-key")
+        with mock.patch.object(llm_fallback.urllib.request, "urlopen", side_effect=urlopen):
+            result = provider(
+                "previous context",
+                "Capybara __ciqa__",
+                "next context",
+                "Traditional Chinese",
+            )
+
+        self.assertEqual(result, "translated __ciqa__")
+        self.assertEqual(captured["timeout"], llm_fallback.DEFAULT_TIMEOUT_SECONDS)
+        self.assertEqual(captured["payload"]["model"], "gpt-5-nano")
+        self.assertEqual(captured["payload"]["reasoning"], {"effort": "minimal"})
+        self.assertEqual(captured["payload"]["max_output_tokens"], 180)
+        prompt = captured["payload"]["input"]
+        instruction = prompt.split("\nPREVIOUS:", 1)[0]
+        self.assertIn("descriptive nouns in pattern titles and headings", instruction)
+        self.assertIn("Title Case alone does not make a word a proper name", instruction)
+        for category in (
+            "animals", "plants", "foods", "objects", "body parts", "colours", "materials"
+        ):
+            self.assertIn(category, instruction)
+        for name_type in (
+            "brand names", "designer names", "usernames", "product names",
+            "contextually clear proper names",
+        ):
+            self.assertIn(name_type, instruction)
+        self.assertIn("unknown crochet abbreviations or designer shorthand", instruction)
+        self.assertIn("copy each exactly once and unchanged", instruction)
+        self.assertIn("PREVIOUS and NEXT are context only", instruction)
+        self.assertNotIn("Capybara", instruction)
+
+    def test_general_title_examples_remain_provider_candidates(self):
+        for source in (
+            "Capybara pattern",
+            "Penguin pattern",
+            "Rabbit pattern",
+            "Pumpkin pattern",
+            "Sunflower pattern",
+            "Little brown bear pattern",
+            "Jellycat pattern",
+            "Mabel designer pattern",
+        ):
+            with self.subTest(source=source):
+                deterministic = line_translation.translate_ocr_line(
+                    source,
+                    self.english_index,
+                    self.df,
+                    "Traditional Chinese",
+                )
                 self.assertTrue(
                     llm_fallback.should_use_llm(
                         source, deterministic, "Traditional Chinese"
