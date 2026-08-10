@@ -11,9 +11,10 @@ import streamlit as st
 
 _BRIDGE_JS = r"""
 export default function(component) {
-const { data } = component;
+const { data, parentElement } = component;
 const scriptUrl = String(data?.script_url || "").trim();
 const event = data?.event || null;
+const link = data?.link || null;
 const debug = Boolean(data?.debug);
 
 const debugLog = (...args) => {
@@ -104,8 +105,12 @@ function wasSent(key) {
 }
 
 async function sendEvent() {
-  const eventName = String(event?.name || "").trim();
-  const eventId = String(event?.id || "").trim();
+  await dispatchEvent(event);
+}
+
+async function dispatchEvent(eventData) {
+  const eventName = String(eventData?.name || "").trim();
+  const eventId = String(eventData?.id || "").trim();
   if (!eventName || !eventId) return;
 
   const key = eventStorageKey(eventName, eventId);
@@ -135,15 +140,122 @@ async function sendEvent() {
   }
 }
 
+function newLinkEventId(eventName) {
+  try {
+    return `${eventName}:${crypto.randomUUID()}`;
+  } catch {
+    return `${eventName}:${Date.now()}:${Math.random().toString(16).slice(2)}`;
+  }
+}
+
+function renderTrackedLink() {
+  const label = String(link?.label || "").trim();
+  const href = String(link?.href || "").trim();
+  const eventName = String(link?.event_name || "").trim();
+  if (!label || !href || !eventName || !parentElement) return;
+
+  let root = parentElement.querySelector("[data-ci-plausible-link-root]");
+  if (!root) {
+    root = document.createElement("div");
+    root.dataset.ciPlausibleLinkRoot = "true";
+    parentElement.appendChild(root);
+  }
+
+  const anchor = document.createElement("a");
+  anchor.className = "ci-plausible-link-button";
+  anchor.href = href;
+  anchor.target = "_blank";
+  anchor.rel = "noopener noreferrer";
+  anchor.textContent = label;
+  anchor.addEventListener("click", () => {
+    void dispatchEvent({
+      name: eventName,
+      id: newLinkEventId(eventName),
+    });
+  });
+  root.replaceChildren(anchor);
+}
+
 void ensureTracker().catch(() => {});
 void sendEvent();
+renderTrackedLink();
+}
+"""
+
+_BRIDGE_CSS = r"""
+.ci-plausible-link-button {
+  align-items: center;
+  border: 1px solid rgba(49, 51, 63, 0.2);
+  border-radius: 0.5rem;
+  box-sizing: border-box;
+  color: rgb(49, 51, 63);
+  display: inline-flex;
+  font-size: 1rem;
+  font-weight: 400;
+  justify-content: center;
+  line-height: 1.6;
+  min-height: 2.5rem;
+  padding: 0.375rem 0.75rem;
+  text-decoration: none;
+  user-select: none;
+}
+
+.ci-plausible-link-button:hover {
+  border-color: #0f766e;
+  color: #0f766e;
+}
+
+.ci-plausible-link-button:focus-visible {
+  outline: 3px solid rgba(15, 118, 110, 0.28);
+  outline-offset: 2px;
+}
+
+@media (prefers-color-scheme: dark) {
+  .ci-plausible-link-button {
+    border-color: rgba(250, 250, 250, 0.2);
+    color: rgb(250, 250, 250);
+  }
+
+  .ci-plausible-link-button:hover {
+    border-color: #2f928a;
+    color: #2f928a;
+  }
 }
 """
 
 _plausible_bridge = st.components.v2.component(
     "crochet_intelligence_plausible_bridge",
+    css=_BRIDGE_CSS,
     js=_BRIDGE_JS,
 )
+
+
+def _tracking_config() -> tuple[str, bool]:
+    return (
+        os.getenv("PUBLIC_PLAUSIBLE_SCRIPT_URL", "").strip(),
+        os.getenv("PLAUSIBLE_DEBUG", "").strip().lower()
+        in {"1", "true", "yes", "on"},
+    )
+
+
+def _mount_bridge(*, key: str, event: object = None, link: object = None) -> bool:
+    script_url, debug = _tracking_config()
+    try:
+        _plausible_bridge(
+            key=key,
+            data={
+                "script_url": script_url,
+                "event": event,
+                "link": link,
+                "debug": debug,
+            },
+            height="content",
+        )
+        return True
+    except Exception as exc:
+        if debug:
+            print(f"[Plausible] bridge mount failed: {exc}")
+        return False
 
 
 def stage_plausible_event(
@@ -163,23 +275,35 @@ def mount_plausible_bridge(
     pending_event: Optional[dict[str, object]],
 ) -> None:
     """Mount the main-page tracker once and optionally dispatch one event."""
-    script_url = os.getenv("PUBLIC_PLAUSIBLE_SCRIPT_URL", "").strip()
-    debug = os.getenv("PLAUSIBLE_DEBUG", "").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
-    try:
-        _plausible_bridge(
-            key="crochet_intelligence_plausible_bridge",
-            data={
-                "script_url": script_url,
-                "event": pending_event,
-                "debug": debug,
-            },
-            height="content",
-        )
-    except Exception as exc:
-        if debug:
-            print(f"[Plausible] bridge mount failed: {exc}")
+    _mount_bridge(
+        key="crochet_intelligence_plausible_bridge",
+        event=pending_event,
+    )
+
+
+def emit_plausible_event(event_name: str, event_id: str, *, key: str) -> None:
+    """Dispatch one browser event through the main-page V2 bridge."""
+    if not event_name:
+        return
+    _mount_bridge(
+        key=key,
+        event={
+            "name": event_name,
+            "id": event_id or uuid.uuid4().hex,
+        },
+    )
+
+
+def plausible_link_button(label: str, url: str, event_name: str, *, key: str) -> bool:
+    """Render a tracked main-page link through the V2 bridge."""
+    script_url, _debug = _tracking_config()
+    if not script_url or not label or not url or not event_name:
+        return False
+    return _mount_bridge(
+        key=key,
+        link={
+            "label": label,
+            "href": url,
+            "event_name": event_name,
+        },
+    )

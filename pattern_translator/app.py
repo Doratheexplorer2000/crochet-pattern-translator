@@ -36,12 +36,13 @@ from crochet_intelligence.analytics import (
     track_event as analytics_track_event,
 )
 from crochet_intelligence.plausible_bridge import (
+    emit_plausible_event,
     mount_plausible_bridge,
+    plausible_link_button,
     stage_plausible_event,
 )
 from pattern_translator.components.custom_upload import custom_image_uploader
 from pattern_translator.components.custom_cropper import custom_select_area
-from pattern_translator.components.plausible_event import emit_plausible_event, plausible_link_button
 from pattern_translator.engine import terminology as terminology_engine
 from pattern_translator.engine import line_translation as line_translation_engine
 from pattern_translator.engine import diagnostic_report as diagnostic_report_engine
@@ -2256,7 +2257,7 @@ def download_button_rc3(
             except Exception as exc:
                 print(f"[analytics] download event failed: {exc}")
         if plausible_event_name:
-            queue_plausible_event(plausible_event_name)
+            stage_plausible_event(st.session_state, plausible_event_name)
 
     try:
         clicked = st.download_button(
@@ -2308,8 +2309,6 @@ def init_rc3_state():
     st.session_state.setdefault("duplicate_ocr_run_ignored_count", 0)
     st.session_state.setdefault("debug_report_ready", False)
     st.session_state.setdefault("last_successful_download_key", None)
-    st.session_state.setdefault("pending_plausible_events", [])
-    st.session_state.setdefault("plausible_event_counter", 0)
     st.session_state.setdefault("pending_plausible_v2_event", None)
     st.session_state.setdefault("rc10b_diagnostic_events", [])
     st.session_state.setdefault("rc10b_image_signature_history", [])
@@ -2594,41 +2593,9 @@ def track_analytics_event(event_type: str, **fields) -> None:
     )
 
 
-def next_plausible_event_id(event_name: str) -> str:
-    st.session_state["plausible_event_counter"] = st.session_state.get("plausible_event_counter", 0) + 1
-    counter = st.session_state["plausible_event_counter"]
-    return f"{event_name}:{counter}:{time.time_ns()}"
-
-
-def queue_plausible_event(event_name: str) -> None:
-    if not event_name:
-        return
-    pending_events = st.session_state.setdefault("pending_plausible_events", [])
-    pending_events.append({
-        "event_name": event_name,
-        "event_id": next_plausible_event_id(event_name),
-    })
-
-
-def emit_pending_plausible_events() -> None:
-    pending_events = list(st.session_state.get("pending_plausible_events") or [])
-    if not pending_events:
-        return
-    for index, event in enumerate(pending_events):
-        emit_plausible_event(
-            str(event.get("event_name") or ""),
-            str(event.get("event_id") or ""),
-            key=f"plausible_event_{index}",
-        )
-    st.session_state["pending_plausible_events"] = []
-
-
 if not st.session_state.get("analytics_app_open_logged"):
     track_analytics_event("app_open")
     st.session_state["analytics_app_open_logged"] = True
-
-emit_pending_plausible_events()
-
 
 LANGUAGE_OPTION_LABEL_KEYS = {
     "English — US": "language_english_us",
