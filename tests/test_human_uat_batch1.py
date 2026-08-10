@@ -138,6 +138,59 @@ class LlmDebugOutcomeTests(unittest.TestCase):
                 )
         self.assertEqual(output.getvalue(), "")
 
+    def test_incomplete_response_logs_structure_without_content(self):
+        response = {
+            "status": "incomplete",
+            "incomplete_details": {"reason": "max_output_tokens"},
+            "output": [
+                {
+                    "type": "reasoning",
+                    "content": [{"type": "summary_text", "text": "private model content"}],
+                }
+            ],
+        }
+        output = io.StringIO()
+        with mock.patch.dict(os.environ, {"PATTERN_LLM_DEBUG": "1"}, clear=True):
+            with contextlib.redirect_stderr(output):
+                self.assertEqual(llm_fallback._extract_output_text(response), "")
+        debug = output.getvalue()
+        self.assertIn("response_status=incomplete", debug)
+        self.assertIn("incomplete_reason=max_output_tokens", debug)
+        self.assertIn("output_item_types=reasoning", debug)
+        self.assertIn("content_types=summary_text", debug)
+        self.assertIn("output_text_present=false", debug)
+        self.assertNotIn("private model content", debug)
+
+    def test_empty_output_text_is_distinguished_from_missing_output_text(self):
+        response = {
+            "status": "completed",
+            "output": [
+                {
+                    "type": "message",
+                    "content": [{"type": "output_text", "text": ""}],
+                }
+            ],
+        }
+        output = io.StringIO()
+        with mock.patch.dict(os.environ, {"PATTERN_LLM_DEBUG": "1"}, clear=True):
+            with contextlib.redirect_stderr(output):
+                self.assertEqual(llm_fallback._extract_output_text(response), "")
+        debug = output.getvalue()
+        self.assertIn("output_text_present=true", debug)
+        self.assertIn("output_text_nonempty=false", debug)
+
+    def test_response_structure_debug_is_silent_by_default(self):
+        response = {
+            "status": "incomplete",
+            "incomplete_details": {"reason": "private reason"},
+            "output": [],
+        }
+        output = io.StringIO()
+        with mock.patch.dict(os.environ, {}, clear=True):
+            with contextlib.redirect_stderr(output):
+                self.assertEqual(llm_fallback._extract_output_text(response), "")
+        self.assertEqual(output.getvalue(), "")
+
 
 if __name__ == "__main__":
     unittest.main()

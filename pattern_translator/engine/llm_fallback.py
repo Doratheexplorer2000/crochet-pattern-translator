@@ -157,12 +157,70 @@ def protect_authoritative_content(text: str, df: pd.DataFrame, output_mode: str)
     return protected, replacements
 
 
-def _extract_output_text(response: dict) -> str:
+def _extract_output_text(response: dict, http_status: object = None) -> str:
+    output_text_present = False
     for item in response.get("output", []):
         for content in item.get("content", []):
             if content.get("type") == "output_text":
-                return str(content.get("text", "")).strip()
+                output_text_present = True
+                text = str(content.get("text", "")).strip()
+                if text:
+                    return text
+    _debug_response_structure(
+        response,
+        http_status=http_status,
+        output_text_present=output_text_present,
+    )
     return ""
+
+
+def _safe_debug_atom(value: object) -> str:
+    atom = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(value or "").strip())
+    return atom[:64] or "unavailable"
+
+
+def _debug_response_structure(
+    response: Optional[dict],
+    *,
+    http_status: object = None,
+    json_parsed: bool = True,
+    output_text_present: bool = False,
+) -> None:
+    if not is_debug_enabled():
+        return
+    payload = response if isinstance(response, dict) else {}
+    output = payload.get("output", [])
+    output = output if isinstance(output, list) else []
+    output_types: List[str] = []
+    content_types: List[str] = []
+    for item in output:
+        if not isinstance(item, dict):
+            output_types.append("invalid")
+            continue
+        output_types.append(_safe_debug_atom(item.get("type")))
+        content = item.get("content", [])
+        if not isinstance(content, list):
+            content_types.append("invalid")
+            continue
+        for part in content:
+            content_types.append(
+                _safe_debug_atom(part.get("type")) if isinstance(part, dict) else "invalid"
+            )
+    incomplete = payload.get("incomplete_details")
+    incomplete_reason = incomplete.get("reason") if isinstance(incomplete, dict) else None
+    fields = {
+        "json_parsed": str(json_parsed).lower(),
+        "http_status": _safe_debug_atom(http_status),
+        "response_status": _safe_debug_atom(payload.get("status")),
+        "incomplete_reason": _safe_debug_atom(incomplete_reason),
+        "output_item_count": len(output),
+        "output_item_types": ",".join(output_types) or "none",
+        "content_types": ",".join(content_types) or "none",
+        "output_text_present": str(output_text_present).lower(),
+        "output_text_nonempty": "false",
+    }
+    details = " ".join(f"{key}={value}" for key, value in fields.items())
+    print(f"[pattern_llm] response_structure {details}", file=sys.stderr, flush=True)
 
 
 def create_openai_provider(api_key: str, timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS) -> Provider:
@@ -189,7 +247,16 @@ def create_openai_provider(api_key: str, timeout_seconds: float = DEFAULT_TIMEOU
             method="POST",
         )
         with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
-            return _extract_output_text(json.load(response))
+            try:
+                payload = json.load(response)
+            except ValueError:
+                _debug_response_structure(
+                    None,
+                    http_status=getattr(response, "status", None),
+                    json_parsed=False,
+                )
+                raise
+            return _extract_output_text(payload, http_status=getattr(response, "status", None))
 
     return translate
 

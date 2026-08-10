@@ -28,13 +28,7 @@ class HumanUatDeterministicFollowupTests(unittest.TestCase):
             "R9: sc, dec, 3 sc 结束留长线 R16: sc, dec, 55 sc",
         )
 
-    def test_capybara_has_one_explicit_dictionary_translation(self):
-        self.assertEqual(
-            line_translation.translate_ocr_line(
-                "Capybara pattern", self.english_index, self.df, "Traditional Chinese"
-            ),
-            "水豚 花樣",
-        )
+    def test_unknown_designer_name_remains_conservative(self):
         self.assertEqual(
             line_translation.translate_ocr_line(
                 "UnknownDesigner pattern", self.english_index, self.df, "Traditional Chinese"

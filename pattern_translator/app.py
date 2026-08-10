@@ -14,7 +14,10 @@ import io
 import re
 import html
 import hashlib
+import importlib.metadata as importlib_metadata
 import math
+import platform
+import sys
 import tempfile
 import time
 import unicodedata
@@ -757,6 +760,64 @@ def _debug_cell(value: object) -> str:
     return text.replace("\n", " ")
 
 
+def _safe_diagnostic_token(value: object) -> str:
+    token = re.sub(r"[^A-Za-z0-9._-]+", "_", str(value or "").strip())
+    return token[:80] or "unknown"
+
+
+def _installed_package_version(distribution: str) -> str:
+    try:
+        return _safe_diagnostic_token(importlib_metadata.version(distribution))
+    except importlib_metadata.PackageNotFoundError:
+        return "not_installed"
+    except Exception:
+        return "unavailable"
+
+
+def _log_paddle_failure(
+    stage: str,
+    error: Exception,
+    image: Image.Image,
+    image_path: Optional[str] = None,
+    reader: object = None,
+) -> None:
+    """Log content-free runtime facts for otherwise opaque native Paddle failures."""
+    width, height = image.size
+    temp_exists = bool(image_path and os.path.isfile(image_path))
+    temp_size = 0
+    temp_valid = "not_checked"
+    if temp_exists and image_path:
+        try:
+            temp_size = int(os.path.getsize(image_path))
+            with Image.open(image_path) as temp_image:
+                temp_image.verify()
+            temp_valid = "yes"
+        except Exception:
+            temp_valid = "no"
+
+    fields = {
+        "outcome": "runtime_error",
+        "stage": _safe_diagnostic_token(stage),
+        "exception_type": _safe_diagnostic_token(type(error).__name__),
+        "image_width": int(width),
+        "image_height": int(height),
+        "image_mode": _safe_diagnostic_token(image.mode),
+        "temp_exists": str(temp_exists).lower(),
+        "temp_size_bytes": temp_size,
+        "temp_valid_png": temp_valid,
+        "reader_class": _safe_diagnostic_token(type(reader).__name__) if reader is not None else "unavailable",
+        "python": _safe_diagnostic_token(platform.python_version()),
+        "machine": _safe_diagnostic_token(platform.machine()),
+        "paddleocr": _installed_package_version("paddleocr"),
+        "paddlex": _installed_package_version("paddlex"),
+        "paddlepaddle": _installed_package_version("paddlepaddle"),
+        "numpy": _installed_package_version("numpy"),
+        "opencv": _installed_package_version("opencv-python-headless"),
+    }
+    details = " ".join(f"{key}={value}" for key, value in fields.items())
+    print(f"[pattern_ocr] {details}", file=sys.stderr, flush=True)
+
+
 def run_paddle_ocr_single(
     image: Image.Image,
     lang_mode: str,
@@ -768,7 +829,11 @@ def run_paddle_ocr_single(
         diagnostics["run_paddle_ocr_single_input"] = _image_size_dict(image)
     _ocr_trace_event(trace, "run_paddle_ocr_single start")
     lang = paddle_lang_from_mode(lang_mode)
-    ocr = get_paddle_reader(lang)
+    try:
+        ocr = get_paddle_reader(lang)
+    except Exception as error:
+        _log_paddle_failure("reader_init", error, image)
+        raise
     if diagnostics is not None:
         diagnostics["ocr_language_model"] = lang
         diagnostics["ocr_backend"] = "PaddleOCR"
@@ -777,7 +842,11 @@ def run_paddle_ocr_single(
         diagnostics["recognizer_model"] = _debug_cell(getattr(ocr, "rec_model_dir", "")) or "Not exposed by current PaddleOCR object"
         diagnostics["paddle_actual_loaded_image_size"] = "Not exposed by current PaddleOCR API"
     _ocr_trace_event(trace, "save temp PNG")
-    image_path = _save_image_temp(image)
+    try:
+        image_path = _save_image_temp(image)
+    except Exception as error:
+        _log_paddle_failure("temp_png_save", error, image)
+        raise
     _ocr_trace_event(trace, "temp PNG saved")
     if diagnostics is not None:
         try:
@@ -790,6 +859,7 @@ def run_paddle_ocr_single(
         except Exception:
             diagnostics["temp_png_image"] = "Not captured"
     inference_seconds = 0.0
+    inference_stage = "predict"
     try:
         try:
             _ocr_trace_event(trace, "PaddleOCR call start")
@@ -798,11 +868,15 @@ def run_paddle_ocr_single(
             inference_seconds = time.perf_counter() - inference_start
             _ocr_trace_event(trace, "PaddleOCR call end")
         except AttributeError:
+            inference_stage = "legacy_ocr"
             _ocr_trace_event(trace, "PaddleOCR call start")
             inference_start = time.perf_counter()
             raw_result = ocr.ocr(image_path, cls=False)
             inference_seconds = time.perf_counter() - inference_start
             _ocr_trace_event(trace, "PaddleOCR call end")
+    except Exception as error:
+        _log_paddle_failure(inference_stage, error, image, image_path=image_path, reader=ocr)
+        raise
     finally:
         try:
             os.remove(image_path)
