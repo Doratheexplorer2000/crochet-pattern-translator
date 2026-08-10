@@ -6,7 +6,8 @@ import re
 import sys
 import urllib.error
 import urllib.request
-from typing import Callable, Dict, List, Mapping, Optional, Tuple
+from dataclasses import dataclass
+from typing import Callable, Dict, List, Mapping, Optional, Tuple, Union
 
 import pandas as pd
 
@@ -15,7 +16,15 @@ from pattern_translator.engine import terminology
 
 MODEL = "gpt-5-nano"
 DEFAULT_TIMEOUT_SECONDS = 8.0
-Provider = Callable[[str, str, str, str], str]
+
+
+@dataclass(frozen=True)
+class TitleTranslationRequest:
+    subject: str
+
+
+ProviderInput = Union[str, TitleTranslationRequest]
+Provider = Callable[[str, ProviderInput, str, str], str]
 
 
 class _DiagnosedMalformedResponse(ValueError):
@@ -253,19 +262,29 @@ def _debug_response_structure(
 
 def create_openai_provider(api_key: str, timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS) -> Provider:
     """Create a one-attempt Responses API provider without exposing its key."""
-    def translate(previous: str, current: str, following: str, target: str) -> str:
+    def translate(previous: str, current: ProviderInput, following: str, target: str) -> str:
         previous_context = previous or "[none]"
         following_context = following or "[none]"
-        prompt = (
-            f"Translate only CURRENT into {target}. This is crochet pattern text. "
-            "Opaque __ciq...__ tokens are authoritative: copy each exactly once and unchanged. "
-            "Translate ordinary prose, including descriptive nouns in pattern titles and headings. "
-            "Title Case alone does not make a word a proper name; normally translate title subjects such as animals, plants, foods, objects, body parts, colours, and materials. "
-            "Preserve genuine brand names, designer names, usernames, product names, and contextually clear proper names. "
-            "Do not repair OCR, invent meanings for unknown crochet abbreviations or designer shorthand, change crochet terminology, or add instructions. "
-            "PREVIOUS and NEXT are context only. Return only the translated CURRENT line.\n"
-            f"PREVIOUS: {previous_context}\nCURRENT: {current}\nNEXT: {following_context}"
-        )
+        if isinstance(current, TitleTranslationRequest):
+            prompt = (
+                f"Translate the subject of a crochet pattern title into {target}. "
+                "Classify it as ordinary_descriptive_noun or brand_or_proper_name. "
+                "Translate an ordinary descriptive noun; preserve a genuine brand/proper name unchanged. "
+                "Title Case alone does not make a word a proper name. "
+                "Return JSON only with exactly these keys: classification, translated_or_preserved_text.\n"
+                f"SUBJECT: {current.subject}"
+            )
+        else:
+            prompt = (
+                f"Translate only CURRENT into {target}. This is crochet pattern text. "
+                "Opaque __ciq...__ tokens are authoritative: copy each exactly once and unchanged. "
+                "Translate ordinary prose, including descriptive nouns in pattern titles and headings. "
+                "Title Case alone does not make a word a proper name; normally translate title subjects such as animals, plants, foods, objects, body parts, colours, and materials. "
+                "Preserve genuine brand names, designer names, usernames, product names, and contextually clear proper names. "
+                "Do not repair OCR, invent meanings for unknown crochet abbreviations or designer shorthand, change crochet terminology, or add instructions. "
+                "PREVIOUS and NEXT are context only. Return only the translated CURRENT line.\n"
+                f"PREVIOUS: {previous_context}\nCURRENT: {current}\nNEXT: {following_context}"
+            )
         failure_stage = "request_build"
         http_status = None
         try:
@@ -335,6 +354,35 @@ def _restore_if_valid(raw: str, protected: str, deterministic: str, replacements
     return restored
 
 
+def _extract_title_subject(protected: str) -> Optional[str]:
+    subject = _PLACEHOLDER_RE.sub("", str(protected or "")).strip()
+    if not subject or not re.fullmatch(r"[A-Za-z][A-Za-z' -]{0,79}", subject):
+        return None
+    return subject
+
+
+def _parse_title_result(raw: str, subject: str) -> Optional[str]:
+    try:
+        payload = json.loads(raw)
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return None
+    if not isinstance(payload, dict) or set(payload) != {
+        "classification", "translated_or_preserved_text"
+    }:
+        return None
+
+    classification = payload.get("classification")
+    translated = payload.get("translated_or_preserved_text")
+    if classification not in {"ordinary_descriptive_noun", "brand_or_proper_name"}:
+        return None
+    if not isinstance(translated, str) or not translated.strip():
+        return None
+    translated = translated.strip()
+    if classification == "brand_or_proper_name" and translated != subject:
+        return None
+    return translated
+
+
 def _unwrap_outer_parentheses(text: str) -> Tuple[str, Optional[Tuple[str, str]]]:
     value = str(text or "").strip()
     pairs = {"(": ")", "（": "）"}
@@ -368,6 +416,7 @@ def apply_llm_fallback(
     output_mode: str,
     df: pd.DataFrame,
     provider: Optional[Provider],
+    title_context: bool = False,
 ) -> str:
     """Return a validated improvement or the unchanged deterministic result."""
     if not should_use_llm(source, deterministic, output_mode):
@@ -379,9 +428,13 @@ def apply_llm_fallback(
         return deterministic
     llm_input, outer_parentheses = _unwrap_outer_parentheses(deterministic)
     protected, replacements = protect_authoritative_content(llm_input, df, output_mode)
+    title_subject = _extract_title_subject(protected) if title_context else None
     failure_stage = "provider_call"
     try:
-        raw = provider(previous, protected, following, output_mode)
+        provider_input: ProviderInput = (
+            TitleTranslationRequest(title_subject) if title_subject else protected
+        )
+        raw = provider(previous, provider_input, following, output_mode)
         if not raw or not raw.strip():
             _debug_response_structure(
                 None,
@@ -391,7 +444,14 @@ def apply_llm_fallback(
             _debug_outcome("malformed_response")
             return deterministic
         failure_stage = "validation"
-        restored = _restore_if_valid(raw, protected, llm_input, replacements)
+        candidate = raw
+        if title_subject:
+            translated_subject = _parse_title_result(raw, title_subject)
+            if translated_subject is None:
+                _debug_outcome("validation_rejected")
+                return deterministic
+            candidate = protected.replace(title_subject, translated_subject, 1)
+        restored = _restore_if_valid(candidate, protected, llm_input, replacements)
         if restored is None:
             _debug_outcome("validation_rejected")
             return deterministic

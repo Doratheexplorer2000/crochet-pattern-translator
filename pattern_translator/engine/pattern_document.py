@@ -249,6 +249,15 @@ def _looks_like_block_title(original: str) -> bool:
     return False
 
 
+def is_title_heading_context(original: str, nearby_lines: List[str]) -> bool:
+    """Return whether an existing block-title signal is supported by pattern context."""
+    if not _looks_like_block_title(original):
+        return False
+    if re.search(r"\b(?:pattern|pat|patt)\b", str(original or ""), flags=re.I):
+        return True
+    return any(_row_has_pattern_tokens(line) for line in nearby_lines)
+
+
 def _cluster_rows_by_x(rows: pd.DataFrame) -> Dict[int, List[int]]:
     """Cluster rows into rough visual columns using x-start of pattern rows.
 

@@ -10,6 +10,7 @@ import pandas as pd
 from pattern_translator.engine import llm_fallback
 from pattern_translator.engine import line_translation
 from pattern_translator.engine import ocr_lines
+from pattern_translator.engine import pattern_document
 from pattern_translator.engine import terminology
 
 
@@ -19,9 +20,16 @@ class LlmFallbackTests(unittest.TestCase):
         cls.df = pd.read_csv("knowledge_base/data/master_stitches.csv")
         cls.english_index = terminology.build_term_index(cls.df, "English — US")
 
-    def apply(self, source, deterministic, target, provider):
+    def apply(self, source, deterministic, target, provider, *, title_context=False):
         return llm_fallback.apply_llm_fallback(
-            source, deterministic, "previous", "next", target, self.df, provider
+            source,
+            deterministic,
+            "previous",
+            "next",
+            target,
+            self.df,
+            provider,
+            title_context=title_context,
         )
 
     def test_unresolved_chinese_prose_to_english(self):
@@ -140,6 +148,58 @@ class LlmFallbackTests(unittest.TestCase):
         self.assertIn("PREVIOUS and NEXT are context only", instruction)
         self.assertNotIn("Capybara", instruction)
 
+    def test_title_provider_uses_strict_mode_b_contract(self):
+        captured = {}
+
+        class FakeResponse(io.BytesIO):
+            status = 200
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                self.close()
+
+        model_result = json.dumps({
+            "classification": "ordinary_descriptive_noun",
+            "translated_or_preserved_text": "翻譯結果",
+        })
+        response = FakeResponse(json.dumps({
+            "output": [{
+                "content": [{"type": "output_text", "text": model_result}]
+            }]
+        }).encode("utf-8"))
+
+        def urlopen(request, timeout):
+            captured["payload"] = json.loads(request.data.decode("utf-8"))
+            captured["timeout"] = timeout
+            return response
+
+        provider = llm_fallback.create_openai_provider("synthetic-test-key")
+        with mock.patch.object(llm_fallback.urllib.request, "urlopen", side_effect=urlopen):
+            result = provider(
+                "ignored previous",
+                llm_fallback.TitleTranslationRequest("Otter"),
+                "ignored following",
+                "Traditional Chinese",
+            )
+
+        self.assertEqual(result, model_result)
+        self.assertEqual(captured["timeout"], llm_fallback.DEFAULT_TIMEOUT_SECONDS)
+        self.assertEqual(captured["payload"]["model"], "gpt-5-nano")
+        self.assertEqual(captured["payload"]["reasoning"], {"effort": "minimal"})
+        self.assertEqual(captured["payload"]["max_output_tokens"], 180)
+        prompt = captured["payload"]["input"]
+        self.assertIn("ordinary_descriptive_noun", prompt)
+        self.assertIn("brand_or_proper_name", prompt)
+        self.assertIn("translated_or_preserved_text", prompt)
+        self.assertIn("SUBJECT: Otter", prompt)
+        self.assertNotIn("PREVIOUS:", prompt)
+        for forbidden in (
+            "Capybara", "Penguin", "Rabbit", "Pumpkin", "Sunflower", "Jellycat"
+        ):
+            self.assertNotIn(forbidden, prompt)
+
     def test_general_title_examples_remain_provider_candidates(self):
         for source in (
             "Capybara pattern",
@@ -164,6 +224,166 @@ class LlmFallbackTests(unittest.TestCase):
                     )
                 )
 
+    def test_title_route_accepts_arbitrary_single_and_multiword_subjects(self):
+        csv_text = " ".join(self.df.fillna("").astype(str).to_numpy().ravel()).lower()
+        self.assertNotIn("otter", csv_text)
+        self.assertNotIn("badger", csv_text)
+
+        for source, subject in (
+            ("Otter pattern", "Otter"),
+            ("Badger pattern", "Badger"),
+            ("Little brown bear pattern", "Little brown bear"),
+        ):
+            with self.subTest(source=source):
+                deterministic = line_translation.translate_ocr_line(
+                    source, self.english_index, self.df, "Traditional Chinese"
+                )
+
+                def provider(_previous, current, _following, _target):
+                    self.assertIsInstance(
+                        current, llm_fallback.TitleTranslationRequest
+                    )
+                    self.assertEqual(current.subject, subject)
+                    return json.dumps({
+                        "classification": "ordinary_descriptive_noun",
+                        "translated_or_preserved_text": "已翻譯標題",
+                    })
+
+                result = self.apply(
+                    source,
+                    deterministic,
+                    "Traditional Chinese",
+                    provider,
+                    title_context=True,
+                )
+                self.assertEqual(result, "已翻譯標題 花樣")
+
+    def test_title_route_preserves_brand_and_authoritative_pattern_term(self):
+        source = "Jellycat pattern"
+        deterministic = line_translation.translate_ocr_line(
+            source, self.english_index, self.df, "Traditional Chinese"
+        )
+
+        def provider(_previous, current, _following, _target):
+            self.assertIsInstance(current, llm_fallback.TitleTranslationRequest)
+            return json.dumps({
+                "classification": "brand_or_proper_name",
+                "translated_or_preserved_text": current.subject,
+            })
+
+        result = self.apply(
+            source,
+            deterministic,
+            "Traditional Chinese",
+            provider,
+            title_context=True,
+        )
+        self.assertEqual(result, "Jellycat 花樣")
+
+    def test_title_route_rejects_changed_proper_name(self):
+        deterministic = "Jellycat 花樣"
+        result = self.apply(
+            "Jellycat pattern",
+            deterministic,
+            "Traditional Chinese",
+            lambda *_args: json.dumps({
+                "classification": "brand_or_proper_name",
+                "translated_or_preserved_text": "changed brand",
+            }),
+            title_context=True,
+        )
+        self.assertEqual(result, deterministic)
+
+    def test_title_result_contract_rejects_malformed_or_extra_fields(self):
+        cases = (
+            "not json",
+            json.dumps({"classification": "ordinary_descriptive_noun"}),
+            json.dumps({
+                "classification": "unknown",
+                "translated_or_preserved_text": "result",
+            }),
+            json.dumps({
+                "classification": "ordinary_descriptive_noun",
+                "translated_or_preserved_text": "result",
+                "extra": "not allowed",
+            }),
+        )
+        for raw in cases:
+            with self.subTest(raw=raw):
+                self.assertIsNone(
+                    llm_fallback._parse_title_result(raw, "Ordinary subject")
+                )
+
+    def test_existing_block_title_signals_require_real_context(self):
+        self.assertTrue(
+            pattern_document.is_title_heading_context("Otter pattern", [])
+        )
+        self.assertTrue(
+            pattern_document.is_title_heading_context(
+                "Mushroom hat", ["R1: 6 sc"]
+            )
+        )
+        self.assertFalse(
+            pattern_document.is_title_heading_context(
+                "Mushroom hat", ["ordinary prose"]
+            )
+        )
+        for value in ("x", "A", "sc", "24x", "R16:x", "xyl0ph0ne"):
+            with self.subTest(value=value):
+                self.assertFalse(
+                    pattern_document.is_title_heading_context(
+                        value, ["R1: 6 sc"]
+                    )
+                )
+
+    def test_general_fallback_still_receives_plain_text(self):
+        provider = mock.Mock(side_effect=lambda _p, current, _n, _t: current)
+        deterministic = "Dark brown yarn"
+        self.apply(
+            deterministic,
+            deterministic,
+            "Traditional Chinese",
+            provider,
+        )
+        provider.assert_called_once()
+        self.assertIsInstance(provider.call_args.args[1], str)
+
+    def test_ocr_line_boundary_routes_confirmed_pattern_title(self):
+        rows = pd.DataFrame([
+            {
+                "text": "Otter pattern",
+                "confidence": 0.99,
+                "min_x": 0,
+                "max_x": 180,
+                "min_y": 0,
+                "max_y": 20,
+            },
+            {
+                "text": "R1: 6 sc",
+                "confidence": 0.99,
+                "min_x": 0,
+                "max_x": 180,
+                "min_y": 30,
+                "max_y": 50,
+            },
+        ])
+
+        def provider(_previous, current, _following, _target):
+            self.assertIsInstance(current, llm_fallback.TitleTranslationRequest)
+            return json.dumps({
+                "classification": "ordinary_descriptive_noun",
+                "translated_or_preserved_text": "已翻譯標題",
+            })
+
+        result = ocr_lines.build_ocr_line_translations(
+            rows,
+            self.english_index,
+            self.df,
+            "Traditional Chinese",
+            llm_provider=provider,
+        )
+        self.assertEqual(result.loc[0, "Translation"], "已翻譯標題 花樣")
+
     def test_short_notation_and_noise_do_not_call_provider(self):
         cases = (
             ("x", "x"),
@@ -185,7 +405,11 @@ class LlmFallbackTests(unittest.TestCase):
             with self.subTest(source=source):
                 provider = mock.Mock(return_value="wrong")
                 result = self.apply(
-                    source, deterministic, "Traditional Chinese", provider
+                    source,
+                    deterministic,
+                    "Traditional Chinese",
+                    provider,
+                    title_context=True,
                 )
                 self.assertEqual(result, deterministic)
                 provider.assert_not_called()

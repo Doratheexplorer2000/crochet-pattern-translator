@@ -13,6 +13,7 @@ import pandas as pd
 
 from pattern_translator.engine import line_translation
 from pattern_translator.engine import llm_fallback
+from pattern_translator.engine import pattern_document
 from pattern_translator.engine import terminology
 
 
@@ -191,6 +192,11 @@ def build_ocr_line_translations(
     for position, (row, cleaned, translated) in enumerate(prepared):
         previous = prepared[position - 1][1] if position > 0 else ""
         following = prepared[position + 1][1] if position + 1 < len(prepared) else ""
+        nearby_lines = [
+            prepared[index][1]
+            for index in range(max(0, position - 2), min(len(prepared), position + 3))
+            if index != position
+        ]
         translated = llm_fallback.apply_llm_fallback(
             source=cleaned,
             deterministic=translated,
@@ -199,6 +205,9 @@ def build_ocr_line_translations(
             output_mode=output_mode,
             df=df,
             provider=llm_provider,
+            title_context=pattern_document.is_title_heading_context(
+                cleaned, nearby_lines
+            ),
         )
         changed = terminology.norm_text(cleaned) != terminology.norm_text(translated)
         out.append({
