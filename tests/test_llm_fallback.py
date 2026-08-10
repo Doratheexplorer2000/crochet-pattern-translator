@@ -6,6 +6,7 @@ from unittest import mock
 import pandas as pd
 
 from pattern_translator.engine import llm_fallback
+from pattern_translator.engine import line_translation
 from pattern_translator.engine import ocr_lines
 from pattern_translator.engine import terminology
 
@@ -14,6 +15,7 @@ class LlmFallbackTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.df = pd.read_csv("knowledge_base/data/master_stitches.csv")
+        cls.english_index = terminology.build_term_index(cls.df, "English — US")
 
     def apply(self, source, deterministic, target, provider):
         return llm_fallback.apply_llm_fallback(
@@ -36,6 +38,76 @@ class LlmFallbackTests(unittest.TestCase):
             lambda *_args: "我们不会填充身体",
         )
         self.assertEqual(result, "我们不会填充身体")
+
+    def test_context_backed_single_unresolved_word_calls_provider(self):
+        deterministic = line_translation.translate_ocr_line(
+            "Capybara pattern",
+            self.english_index,
+            self.df,
+            "Traditional Chinese",
+        )
+        self.assertEqual(deterministic, "Capybara 花樣")
+        self.assertTrue(
+            llm_fallback.should_use_llm(
+                "Capybara pattern", deterministic, "Traditional Chinese"
+            )
+        )
+
+        provider = mock.Mock(side_effect=lambda _p, current, _n, _t: current)
+        result = self.apply(
+            "Capybara pattern", deterministic, "Traditional Chinese", provider
+        )
+        self.assertEqual(result, deterministic)
+        provider.assert_called_once()
+
+    def test_context_backed_rule_is_general_for_short_labels(self):
+        csv_text = " ".join(self.df.fillna("").astype(str).to_numpy().ravel()).lower()
+        self.assertNotIn("otter", csv_text)
+        self.assertNotIn("forest", csv_text)
+
+        for source, expected in (
+            ("Otter pattern", "Otter 花樣"),
+            ("Forest stuffing", "Forest 塞入棉花"),
+        ):
+            with self.subTest(source=source):
+                deterministic = line_translation.translate_ocr_line(
+                    source,
+                    self.english_index,
+                    self.df,
+                    "Traditional Chinese",
+                )
+                self.assertEqual(deterministic, expected)
+                self.assertTrue(
+                    llm_fallback.should_use_llm(
+                        source, deterministic, "Traditional Chinese"
+                    )
+                )
+
+    def test_short_notation_and_noise_do_not_call_provider(self):
+        cases = (
+            ("x", "x"),
+            ("v", "v"),
+            ("A", "A"),
+            ("sc", "sc"),
+            ("dc", "dc"),
+            ("hdc", "hdc"),
+            ("24x", "24x"),
+            ("8A", "8A"),
+            ("xv", "xv"),
+            ("v2x", "v2x"),
+            ("R16:x", "R16:x"),
+            ("XYZ pattern", "XYZ 花樣"),
+            ("R16: 24 sc", "R16: 24 sc"),
+            ("xyl0ph0ne pattern", "xyl0ph0ne 花樣"),
+        )
+        for source, deterministic in cases:
+            with self.subTest(source=source):
+                provider = mock.Mock(return_value="wrong")
+                result = self.apply(
+                    source, deterministic, "Traditional Chinese", provider
+                )
+                self.assertEqual(result, deterministic)
+                provider.assert_not_called()
 
     def test_mixed_prose_preserves_terms_and_counts(self):
         deterministic = "中长针2针 with the one paw (24)"

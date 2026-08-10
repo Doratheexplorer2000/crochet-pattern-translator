@@ -31,6 +31,7 @@ _KNOWN_ABBREVIATIONS = {
 
 _CJK_RE = re.compile(r"[\u3400-\u9fff]")
 _ENGLISH_WORD_RE = re.compile(r"[A-Za-z]{3,}")
+_ORDINARY_SINGLE_WORD_RE = re.compile(r"[A-Z]?[a-z]{2,}")
 _ROUND_RE = re.compile(r"\b(?:R|Rnd|Row)\s*\d+(?:\s*[-–—~～〜－]\s*\d+)?\s*[:：]?", re.IGNORECASE)
 _REPEAT_RE = re.compile(r"(?:\bx\s*\d+\b|[×*]\s*\d+)", re.IGNORECASE)
 _NUMBER_RE = re.compile(r"\d+(?:\.\d+)?(?:\s*[-–—~～〜－]\s*\d+)?")
@@ -73,6 +74,23 @@ def _meaningful_english_words(text: str) -> List[str]:
     return [word for word in _ENGLISH_WORD_RE.findall(text) if word.lower().replace(" ", "") not in ignored]
 
 
+def _has_context_backed_single_unresolved_word(source: str, deterministic: str) -> bool:
+    unresolved = _meaningful_english_words(deterministic)
+    if len(unresolved) != 1 or not _CJK_RE.search(deterministic):
+        return False
+
+    word = unresolved[0]
+    if not _ORDINARY_SINGLE_WORD_RE.fullmatch(word):
+        return False
+    if not re.search(rf"(?<![A-Za-z0-9]){re.escape(word)}(?![A-Za-z0-9])", deterministic):
+        return False
+
+    source_words = _meaningful_english_words(source)
+    return len(source_words) >= 2 and any(
+        source_word.lower() != word.lower() for source_word in source_words
+    )
+
+
 def should_use_llm(source: str, deterministic: str, output_mode: str) -> bool:
     """Return true only for clear unresolved or mixed ordinary-language content."""
     source = str(source or "").strip()
@@ -87,7 +105,10 @@ def should_use_llm(source: str, deterministic: str, output_mode: str) -> bool:
         unresolved = len(_CJK_RE.findall(deterministic))
         return unresolved >= 2 and len(source) >= 4
     if output_mode in _CHINESE_OUTPUTS:
-        return len(_meaningful_english_words(deterministic)) >= 2
+        unresolved = _meaningful_english_words(deterministic)
+        return len(unresolved) >= 2 or _has_context_backed_single_unresolved_word(
+            source, deterministic
+        )
     return False
 
 
