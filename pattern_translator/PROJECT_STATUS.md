@@ -1,10 +1,10 @@
 # Crochet Pattern Translator Project Status
 
-Last updated: 2026-08-08
+Last updated: 2026-08-10
 
 ## Current Version
 
-Current production release: `RC54A`
+Current production baseline: Contextual LLM translation (`cddd55cf06bea39b6879add00d8db0416e109092`)
 
 Validated rollback baseline: `RC28`
 
@@ -18,15 +18,15 @@ pattern_translator/app.py
 
 ## Current Production Status
 
-Crochet Pattern OCR Translator is the current OCR-based pattern translation app. RC54A is deployed to Railway from GitHub `main` and has passed Production Human UAT. RC28 remains the final fully validated Streamlit production architecture and rollback baseline. The first External UAT phase concluded with positive results from real crochet users.
+Crochet Pattern OCR Translator is the current OCR-based pattern translation app. The Contextual LLM translation baseline at `cddd55cf06bea39b6879add00d8db0416e109092` is deployed to Railway from GitHub `main` and has passed Production Owner Smoke UAT. RC28 remains the final fully validated Streamlit production architecture and rollback baseline. The first External UAT phase concluded with positive results from real crochet users.
 
 RC42 completed the first Engine Extraction by moving the CSV terminology / lookup engine into `pattern_translator/engine/terminology.py`. RC43 extracted pure line-translation logic into `pattern_translator/engine/line_translation.py`. RC44 extracted Diagnostic Report construction and formatting into `pattern_translator/engine/diagnostic_report.py`. RC45 completed Boundary Cleanup. RC46 extracted overlay rendering into `pattern_translator/engine/overlay.py`. RC47 extracted Pattern Document responsibilities into `pattern_translator/engine/pattern_document.py`. RC48 extracted OCR line assembly into `pattern_translator/engine/ocr_lines.py`. RC49 extracted deterministic OCR cleanup into `pattern_translator/engine/ocr_cleanup.py`, completing Engine Migration and Domain Layer extraction. Regression and Human UAT passed with no user-visible behavior changes, and the completed engine layer is included in the current production release.
 
-RC50A completed the custom uploader technical spike. RC50B replaced the native Streamlit file uploader with a production Streamlit Components V1 uploader while preserving the existing Python and domain-engine boundary. Physical iPhone Safari and Android Chrome Human UAT passed with no functional regression. RC50 remains local only; RC28 remains the production baseline.
+RC50A completed the custom uploader technical spike. RC50B replaced the native Streamlit file uploader with a production Streamlit Components V1 uploader while preserving the existing Python and domain-engine boundary. Physical iPhone Safari and Android Chrome Human UAT passed with no functional regression. At RC50 closeout, the work remained local and RC28 was the production baseline.
 
 Phase A Brand Identity Foundation is complete. RC51 completed the first Phase B implementation. Physical-iPhone Human Visual UAT approved the Pattern Translator Home Screen as the current baseline, including the custom uploader, privacy card, and equal secondary treatment for Replace and Remove. `Brand identity & UI/UI_SPEC.md` remains the authoritative Living Design Specification; this approval is not a final UI freeze. No product workflow or domain behavior was changed.
 
-RC52 completed the custom Select Area component and finalized the upload-to-crop workflow. Human UAT passed on iPhone Safari, Android Chrome, and Desktop Chrome with no remaining functional issues. RC52 is production-ready and frozen locally; RC28 remains the deployed production baseline until a separate deployment decision.
+RC52 completed the custom Select Area component and finalized the upload-to-crop workflow. Human UAT passed on iPhone Safari, Android Chrome, and Desktop Chrome with no remaining functional issues. At RC52 closeout, the work was production-ready and frozen locally while RC28 was the deployed production baseline.
 
 The independent Astro Portal Skeleton is now the Crochet Intelligence platform entry point. Its architecture and Information Architecture are frozen after Human UAT. The Portal has been deployed independently to Railway and is now the primary platform entry point at `https://crochet-intelligence-portal-production.up.railway.app`. Pattern Translator and Stitch Translator are presented as equal tools. Platform Analytics is the current priority; Portal visual refinement and branding follow after it.
 
@@ -104,16 +104,18 @@ The Portal Skeleton is functionally complete and frozen. It is an independent As
 
 ## Current Release Notes
 
-### Hybrid LLM fallback (integrated into main; production activation pending)
+### Contextual LLM translation (production complete; Human UAT PASS)
 
-- Architecture: deterministic translation first, then `gpt-5-nano` only for eligible unresolved prose, followed by protected-structure validation and deterministic fail-open on any failure.
-- Privacy boundary: uploaded images are never sent to OpenAI. Only the minimum extracted current-line text and adjacent visual-line context required for translation assistance are sent, without user identity or analytics identifiers.
-- Production activation: code integration into `main` is complete with production activation pending. Activation requires `PATTERN_LLM_FALLBACK_ENABLED=1` and `OPENAI_API_KEY` as a Railway secret; neither variable has been configured as part of this integration.
-- Diagnostics: `PATTERN_LLM_DEBUG` is disabled by default, is diagnostic-only, and should remain disabled in production.
-- Validation: automated deterministic and mocked-provider tests passed, the historical deterministic corpus remained unchanged with the feature flag off, and Capybara, Mushroom, and Jellycat Human UAT passed sufficiently for this release.
-- Maintenance direction: freeze the approved implementation and address future translation edge cases only when encountered through real testing.
-- Separate known issue: cross-column OCR/visual-line merging is outside this release.
-- Analytics boundary: RC54B remains not started.
+- Architecture: the deterministic engine remains authoritative for crochet-critical terminology and structure. Eligible ordinary natural-language content is handled by `gpt-5.6-luna`, with a separate validated title route where applicable. The general Luna route uses low reasoning effort and `max_output_tokens=400`; `gpt-5-nano` is no longer an active production translation route.
+- Context boundary: compact semantic context is derived from the active translation scope. Whole Pattern uses Whole Pattern OCR scope; Select Area uses only selected-area OCR scope.
+- Translation ownership: historical ordinary `pattern_instruction` mappings do not constrain successful LLM translation, while deterministic translation remains the fail-open fallback. Mixed notation and prose spans are supported with rounds, stitches, counts, repeats, and other structural tokens protected.
+- Validation boundary: Chinese- and Japanese-target output is checked for unsupported invented Latin or alphanumeric content. Missing credentials, timeouts, network/model failures, malformed responses, and validation failures all return deterministic output without interrupting the workflow.
+- Privacy boundary: uploaded images are never sent to OpenAI. Requests contain only the extracted text and compact semantic context required for the eligible translation, without user identity or analytics identifiers.
+- Uploader state: the custom uploader frontend hydrates from authoritative backend active-image state across Streamlit reruns, preserving Replace and Remove and allowing replacement after translation.
+- Production configuration: requires `PATTERN_LLM_FALLBACK_ENABLED=1` and `OPENAI_API_KEY` as a Railway secret. `PATTERN_LLM_DEBUG` is diagnostic-only and should remain disabled in production.
+- Validation: Hybrid/Human-UAT automated suite `73 / 73` passed; the feature-flag-OFF deterministic corpus remained `220 / 220` identical; Local Human UAT passed; Production Owner Smoke UAT passed; and Railway deployment passed at `cddd55cf06bea39b6879add00d8db0416e109092`.
+- Maintenance direction: natural LLM wording variation is acceptable when meaning and crochet structure remain valid. Further translation-quality improvements must be driven by production evidence rather than speculative tuning.
+- Deferred: minor overlay placement refinement remains non-blocking. Cross-column OCR/visual-line merging remains separate future work.
 
 ### RC54A (completed; Production Human UAT PASS)
 
@@ -137,7 +139,7 @@ The Portal Skeleton is functionally complete and frozen. It is an independent As
 - OCR feedback: the existing running status is positioned above the disabled running-labelled action so feedback remains visible immediately on mobile.
 - Validation: Human UAT passed on physical iPhone Safari, Android Chrome, and Desktop Chrome with no remaining functional issues.
 - Architecture: the custom uploader and cropper replace targeted Streamlit UI limitations through supported component boundaries rather than framework workarounds. OCR, parser, translation, overlay, diagnostics, analytics, exports, coordinate conversion, and downstream engines remain unchanged.
-- Status: production-ready and frozen locally. Further cropper visual polish is deferred until after Platform Analytics unless a functional regression is found. No deployment was performed; RC28 remains the deployed production baseline.
+- Status at RC52 closeout: production-ready and frozen locally. Further cropper visual polish was deferred until after Platform Analytics unless a functional regression was found. No RC52 deployment had yet been performed, and RC28 was the deployed production baseline at that stage.
 
 ### RC51 (completed locally)
 
@@ -150,7 +152,7 @@ The Portal Skeleton is functionally complete and frozen. It is an independent As
 - UI governance: the Product-driven workflow in `ENGINEERING_RULES.md` is now standard; implementation alone does not constitute visual approval.
 - Deferred: broader Pattern Translator UI standardisation will be revisited after Platform Analytics. This baseline is not a final UI freeze.
 - Boundary: no OCR, translation, overlay, diagnostics, analytics, export, engine, or workflow behavior was changed.
-- Status: RC51 complete locally. No deployment or GitHub push; RC28 remains the production baseline.
+- Status at RC51 closeout: complete locally, with no deployment or GitHub push; RC28 was the production baseline at that stage.
 
 ### RC50
 
@@ -161,7 +163,7 @@ The Portal Skeleton is functionally complete and frozen. It is an independent As
 - Validation: physical iPhone Safari and Android Chrome Human UAT passed; real image upload and downstream workflows passed; unrelated-image/no-crochet-content handling was validated and its message improved; no functional regression was observed.
 - Boundary: one native Streamlit UI widget has been replaced. Streamlit still owns runtime, session state, and component communication.
 - Follow-on: Phase A subsequently established the brand direction and Living Design Specification. Logo work and GIF/onboarding guidance remain deferred.
-- Status: RC50 complete locally. Its custom uploader is now the approved reference implementation following RC51. No production deployment or GitHub push; RC28 remains the production baseline.
+- Status at RC50 closeout: complete locally, with no production deployment or GitHub push; RC28 was the production baseline at that stage. Its custom uploader subsequently became the approved reference implementation following RC51.
 
 ### RC49
 
@@ -173,7 +175,7 @@ The Portal Skeleton is functionally complete and frozen. It is an independent As
 - Intentional boundary: Streamlit UI, application orchestration, OCR runtime/provider lifecycle, session state, downloads, analytics, localization, Cropper / Select Area, and runtime infrastructure remain in `app.py` because they are application, framework, or runtime responsibilities rather than domain-engine responsibilities.
 - Future direction: product features, runtime improvements, deployment, or Application Layer work may proceed when justified. Application Layer separation is deferred until it provides clear product value.
 - Behavior: no user-visible behavior changes.
-- Release handling: local only. No production deployment and no GitHub push. RC28 remains the current production baseline.
+- Release handling at RC49 closeout: local only, with no production deployment or GitHub push; RC28 was the production baseline at that stage.
 
 ### RC48
 
@@ -183,7 +185,7 @@ The Portal Skeleton is functionally complete and frozen. It is an independent As
 - App impact: `pattern_translator/app.py` reduced from 3,089 lines to 2,971 lines.
 - Validation: automated regression passed; Human UAT passed; stored OCR fixtures and intermediate OCR-line records were identical; overlay, TXT, Pattern Export, and Diagnostic Report outputs remained identical.
 - Behavior: no user-visible behavior changes.
-- Release handling: local only. No production deployment and no GitHub push. RC28 remains the current production baseline.
+- Release handling at RC48 closeout: local only, with no production deployment or GitHub push; RC28 was the production baseline at that stage.
 - Architecture status at RC48: Engine Migration entered its final stage, completed subsequently by RC49.
 
 ### RC47
@@ -195,7 +197,7 @@ The Portal Skeleton is functionally complete and frozen. It is an independent As
 - Known validation limitation: OCR was intentionally not rerun during automated regression because RC47 only extracted Pattern Document responsibilities.
 - Human UAT note: JellyCat 元寶 overlay placement shows a minor cosmetic placement difference. Translation correctness, anchor position, readability, and functionality are unaffected. This is recorded as future Overlay placement tuning rather than an RC47 regression.
 - Behavior: no user-visible behavior changes.
-- Release handling: local only. No production deployment and no GitHub push. RC28 remains the current production baseline.
+- Release handling at RC47 closeout: local only, with no production deployment or GitHub push; RC28 was the production baseline at that stage.
 - Architecture status: Engine Migration is now in the late stage following RC47. A fresh post-RC47 architecture assessment will determine whether additional engine extraction is warranted or whether the project should transition to the next architectural phase.
 
 ### RC46
@@ -207,7 +209,7 @@ The Portal Skeleton is functionally complete and frozen. It is an independent As
 - Validation: automated regression passed; Human UAT passed; overlay PNG byte comparison passed; overlay pixel comparison passed; overlay legend comparison passed; translation regression, TXT regression, Diagnostic Report regression, and `220 / 220` direct corpus outputs were identical.
 - Known validation limitation: OCR was intentionally not rerun during automated regression because RC46 only refactored overlay rendering.
 - Behavior: no user-visible behavior changes.
-- Release handling: local only. No production deployment and no GitHub push. RC28 remains the current production baseline. RC46 is another major milestone in the ongoing Engine Migration, but Engine Migration is not complete.
+- Release handling at RC46 closeout: local only, with no production deployment or GitHub push; RC28 was the production baseline at that stage. RC46 was another major milestone in the ongoing Engine Migration, which was not yet complete.
 - Remaining `app.py` responsibilities are increasingly concentrated around application orchestration, OCR, session management, localization, downloads, and Streamlit integration.
 
 ### RC45
@@ -218,7 +220,7 @@ The Portal Skeleton is functionally complete and frozen. It is an independent As
 - App impact: `pattern_translator/app.py` reduced from approximately 4468 lines to approximately 4229 lines, a net reduction of approximately 239 lines.
 - Validation: translation regression identical; TXT regression identical; Diagnostic Report regression identical; `220 / 220` direct corpus outputs identical; Human UAT passed.
 - Behavior: no user-visible behavior changes.
-- Release handling: local only. No production deployment and no GitHub push. RC28 remains the current production baseline.
+- Release handling at RC45 closeout: local only, with no production deployment or GitHub push; RC28 was the production baseline at that stage.
 
 ### RC44
 
@@ -228,7 +230,7 @@ The Portal Skeleton is functionally complete and frozen. It is an independent As
 - Validation: representative Diagnostic Report diff was zero bytes; translation regression and TXT regression were identical; the existing regression corpus was unchanged; Human UAT passed.
 - Human UAT finding: a missing `_debug_cell` helper reference caused a NameError during OCR diagnostic metadata generation. The hotfix restored `_debug_cell` only where required inside `app.py`, while the Diagnostic Report Engine retained its own private helper. Repeated Human UAT passed.
 - Behavior: no user-visible behavior changes.
-- Release handling: local only. No production deployment and no GitHub push. RC28 remains the current production baseline.
+- Release handling at RC44 closeout: local only, with no production deployment or GitHub push; RC28 was the production baseline at that stage.
 
 ### RC43
 
@@ -237,7 +239,7 @@ The Portal Skeleton is functionally complete and frozen. It is an independent As
 - App impact: `pattern_translator/app.py` reduced by approximately 759 lines.
 - Validation: automated regression confirmed `220 / 220` direct corpus cases identical; Human UAT passed.
 - Behavior: no user-visible behavior changes.
-- Release handling: local only. No production deployment and no GitHub push. RC28 remains the current production baseline.
+- Release handling at RC43 closeout: local only, with no production deployment or GitHub push; RC28 was the production baseline at that stage.
 
 ### RC42
 
@@ -246,7 +248,7 @@ The Portal Skeleton is functionally complete and frozen. It is an independent As
 - Cache handling: Streamlit cache behavior intentionally preserved through app-level wrappers.
 - Validation: automated regression confirmed `209 / 209` translation cases identical; Human UAT passed.
 - Behavior: no user-visible behavior changes.
-- Release handling: local only. No production deployment and no GitHub push. RC28 remains the current production baseline.
+- Release handling at RC42 closeout: local only, with no production deployment or GitHub push; RC28 was the production baseline at that stage.
 
 ### RC28
 
@@ -254,14 +256,14 @@ The Portal Skeleton is functionally complete and frozen. It is an independent As
 - Status: completed.
 - Diagnostic Report fix: Railway session-state regression after Diagnostic Report download was fixed by preventing the Diagnostic Report download button from triggering a Streamlit rerun.
 - Validation: local validation passed, Railway production deployment passed, and Railway Desktop Human UAT passed.
-- Production baseline: RC28 is now the Pattern Translator production baseline.
+- Historical production status: RC28 became the Pattern Translator production baseline at RC28 closeout.
 - Deployment platform: Railway is now the primary production deployment platform. Streamlit Community Cloud remains available as a backup platform.
 - Non-blocking items: version number is not currently shown in the UI; minor overlay text box alignment refinement is deferred.
 
 ### RC40 Architecture Decision
 
 - Decision: begin a phased post-Streamlit migration after RC40 architecture review.
-- Rationale: RC28 is a stable production baseline, and RC30b confirmed Streamlit is now the primary architectural limitation rather than Railway.
+- Rationale at RC40: RC28 was the stable production baseline, and RC30b had confirmed Streamlit as the primary architectural limitation rather than Railway.
 - Migration rule: start locally only. Do not create a GitHub migration branch, push, deploy, or change production until local extraction work has been reviewed and validated.
 - First objective: separate OCR, parser, translation, overlay, diagnostics, analytics integration, and knowledge-base access from Streamlit UI/session code while preserving current behavior.
 - Rollback target: RC28 Railway production remains the fully recoverable production path.

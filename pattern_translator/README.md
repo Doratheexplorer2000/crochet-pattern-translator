@@ -2,7 +2,7 @@
 
 Mobile-first OCR translation for crochet pattern images.
 
-Current production release: **RC54A**
+Current production baseline: **Contextual LLM translation** (`cddd55cf06bea39b6879add00d8db0416e109092`)
 
 Validated rollback baseline: **RC28**
 
@@ -24,7 +24,7 @@ pattern_translator/app.py
 
 ## Current Product Status
 
-RC54A is the current Pattern Translator production release, deployed from GitHub `main`. RC28 remains the final fully validated Streamlit production architecture and rollback baseline. The first External UAT phase concluded with positive results from real crochet users, and Railway remains the production deployment platform.
+The Contextual LLM translation baseline at `cddd55cf06bea39b6879add00d8db0416e109092` is deployed from GitHub `main` and has passed Production Owner Smoke UAT. RC28 remains the final fully validated Streamlit production architecture and rollback baseline. The first External UAT phase concluded with positive results from real crochet users, and Railway remains the production deployment platform.
 
 Key validated behavior:
 
@@ -100,23 +100,27 @@ Key validated behavior:
 - UI development now follows the Product-driven approval workflow in `ENGINEERING_RULES.md`. `UI_SPEC.md` is updated only after Human Visual UAT and explicit Product Owner approval. Logo work and GIF/onboarding guidance remain deferred.
 - Regression evidence is stored under `regression/regression_test/Reports/`.
 
-## Hybrid LLM Fallback
+## Contextual LLM Translation
 
-The Hybrid LLM fallback is implemented locally and has passed Human UAT. Pattern Translator always runs the deterministic translation engine first. Only eligible unresolved instruction prose is sent to `gpt-5-nano`; protected crochet terminology and structure are then validated before the result is accepted. Any missing key, timeout, network, model, malformed-response, or validation failure returns the deterministic translation without interrupting the workflow.
+The production Contextual LLM translation architecture keeps the deterministic engine authoritative for crochet-critical terminology and structure. Eligible ordinary natural-language content is handled by `gpt-5.6-luna`; the validated title route remains separate where applicable. The general Luna route uses low reasoning effort and `max_output_tokens=400`. `gpt-5-nano` is no longer an active production translation route.
 
-Uploaded images are never sent to OpenAI. Requests contain only the minimum extracted current-line text and adjacent visual-line context required for translation assistance, without user identity or analytics identifiers.
+Compact semantic context is derived from the active OCR translation scope: Whole Pattern uses the Whole Pattern OCR scope, while Select Area uses only the selected-area OCR scope. Historical ordinary `pattern_instruction` mappings do not constrain successful LLM translation; deterministic translation remains the fail-open result. Mixed notation and prose spans are supported while rounds, stitches, counts, repeats, and other structural tokens remain protected. Chinese- and Japanese-target output is also checked for unsupported invented Latin or alphanumeric content.
 
-Production integration requires `PATTERN_LLM_FALLBACK_ENABLED=1` and an `OPENAI_API_KEY` Railway secret. `PATTERN_LLM_DEBUG` is diagnostic-only, is disabled by default, and should remain disabled in production. Future translation edge cases will be addressed only when observed through real testing. Cross-column OCR/visual-line merging remains a separate existing issue and is not part of this capability.
+Uploaded images are never sent to OpenAI. Any missing key, timeout, network, model, malformed-response, or validation failure returns the deterministic translation without interrupting the workflow. Production requires `PATTERN_LLM_FALLBACK_ENABLED=1` and an `OPENAI_API_KEY` Railway secret. `PATTERN_LLM_DEBUG` is diagnostic-only and should remain disabled in production.
+
+The custom uploader hydrates its frontend from the authoritative backend active-image state after Streamlit reruns, so Replace and Remove remain available and replacing the active image continues to work after translation.
+
+Validation passed: Hybrid/Human-UAT automated suite `73 / 73`; feature-flag-OFF deterministic corpus `220 / 220` identical; Local Human UAT; Production Owner Smoke UAT; and Railway production deployment. Minor overlay placement refinement remains deferred and is not a release blocker. Natural LLM wording variation is acceptable when meaning and crochet structure remain valid; further translation-quality changes must be evidence-driven.
 
 ## Current Project Status
 
-- Current production release: `RC54A`
+- Current production baseline: Contextual LLM translation (`cddd55cf06bea39b6879add00d8db0416e109092`)
 - Validated rollback baseline: `RC28`
 - Current app version string: `Pattern OCR Translator (Beta RC26)`
 - Current phase: Platform Analytics
-- Latest production milestone: `RC54A` completed with Production Human UAT PASS.
+- Latest production milestone: Contextual LLM translation completed with Local Human UAT and Production Owner Smoke UAT PASS.
 - Current production database: `knowledge_base/data/master_stitches.csv`
-- Current focus: preserve the RC54A production baseline and plan RC54B separately; RC54B has not started.
+- Current focus: preserve the production Contextual LLM translation baseline and plan RC54B separately; RC54B has not started.
 - Future testing: continue with occasional trusted-user testing and incremental fixes based on production evidence. Plan for a Soft Launch after Landing Page completion instead of another formal External UAT cycle.
 
 Known non-blocking polish items:
