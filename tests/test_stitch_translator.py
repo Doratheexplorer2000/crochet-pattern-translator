@@ -51,6 +51,45 @@ class StitchTranslatorRegressionTests(unittest.TestCase):
         )
         self.assertIn("youtube.com/results?search_query=", app.build_tutorial_search_url(result, "en"))
 
+    def test_search_analytics_dispatches_once_per_changed_submission(self):
+        state = {}
+
+        first = app.search_analytics_event(state, "single crochet", "en", found=True)
+        rerun = app.search_analytics_event(state, "single crochet", "en", found=True)
+        second = app.search_analytics_event(state, "double crochet", "zh-Hant", found=False)
+
+        self.assertEqual(first["name"], "stitch_searched")
+        self.assertEqual(
+            first["properties"],
+            {
+                "search_keyword": "single crochet",
+                "translate_to": "en",
+                "search_result_status": "found",
+            },
+        )
+        self.assertIsNone(rerun)
+        self.assertEqual(second["properties"]["search_result_status"], "not_found")
+        self.assertNotEqual(first["id"], second["id"])
+
+    def test_clearing_search_allows_same_query_to_be_submitted_again(self):
+        state = {}
+        first = app.search_analytics_event(state, "dc", "en", found=True)
+        app.search_analytics_event(state, "", "en", found=False)
+        second = app.search_analytics_event(state, "dc", "en", found=True)
+
+        self.assertIsNotNone(first)
+        self.assertIsNotNone(second)
+        self.assertNotEqual(first["id"], second["id"])
+
+    def test_stitch_app_uses_shared_v2_bridge_for_approved_events(self):
+        source = Path("stitch_translator/app.py").read_text(encoding="utf-8")
+
+        self.assertIn("mount_plausible_bridge(None)", source)
+        self.assertIn('"stitch_searched"', source)
+        self.assertIn('"tutorial_opened"', source)
+        self.assertIn('"feedback_clicked"', source)
+        self.assertNotIn("components.v2.component", source)
+
     def test_all_interface_languages_have_complete_visible_copy(self):
         required = {
             "title",

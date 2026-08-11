@@ -4,14 +4,21 @@
 
 import re
 import unicodedata
+import uuid
 from difflib import SequenceMatcher
 from pathlib import Path
+from typing import MutableMapping, Optional
 from urllib.parse import quote_plus
 
 import pandas as pd
 import streamlit as st
-from typing import Optional
 import streamlit.components.v1 as components
+
+from crochet_intelligence.plausible_bridge import (
+    emit_plausible_event,
+    mount_plausible_bridge,
+    plausible_link_button,
+)
 
 APP_VERSION = "v1.9a"
 
@@ -718,7 +725,7 @@ def build_tutorial_search_url(row: pd.Series, ui_lang: str) -> str:
     return f"https://www.youtube.com/results?search_query={quote_plus(query)}"
 
 
-def render_result_card(row: pd.Series, text: dict) -> None:
+def render_result_card(row: pd.Series, text: dict, search_keyword: str) -> None:
     def raw(col: str) -> str:
         return str(row.get(col, "")).strip()
 
@@ -801,7 +808,21 @@ def render_result_card(row: pd.Series, text: dict) -> None:
 
     if raw("tutorial_search").lower() == "yes":
         ui_lang = st.session_state.get("ui_lang", "en")
-        st.link_button(text["tutorial_button"], build_tutorial_search_url(row, ui_lang))
+        tutorial_url = build_tutorial_search_url(row, ui_lang)
+        stitch_id = raw("stitch_id") or str(row.name)
+        tracked = plausible_link_button(
+            text["tutorial_button"],
+            tutorial_url,
+            "tutorial_opened",
+            key=f"stitch_tutorial_opened_{stitch_id}",
+            properties={
+                "search_keyword": search_keyword,
+                "translate_to": ui_lang,
+                "tutorial_destination": tutorial_url,
+            },
+        )
+        if not tracked:
+            st.link_button(text["tutorial_button"], tutorial_url)
         st.caption(text["tutorial_note"])
 
 
@@ -842,8 +863,37 @@ def get_query_param(params, key: str, default: str = "") -> str:
         return value[0] if value else default
     return str(value) if value is not None else default
 
+
+def search_analytics_event(
+    session_state: MutableMapping[str, object],
+    query: str,
+    translate_to: str,
+    *,
+    found: bool,
+) -> Optional[dict[str, object]]:
+    """Return one event for each changed, non-empty search value."""
+    submitted_query = query.strip()
+    previous_query = str(session_state.get("last_analytics_search_query", ""))
+    if not submitted_query:
+        session_state["last_analytics_search_query"] = ""
+        return None
+    if submitted_query == previous_query:
+        return None
+
+    session_state["last_analytics_search_query"] = submitted_query
+    return {
+        "name": "stitch_searched",
+        "id": uuid.uuid4().hex,
+        "properties": {
+            "search_keyword": submitted_query,
+            "translate_to": translate_to,
+            "search_result_status": "found" if found else "not_found",
+        },
+    }
+
 def main() -> None:
     init_page()
+    mount_plausible_bridge(None)
     detect_lang_from_browser()
 
     params = st.query_params
@@ -872,6 +922,19 @@ def main() -> None:
     st.markdown(f'<div class="hint">{text["hint"]}</div>', unsafe_allow_html=True)
     if query.strip():
         results = search(query, df, idx)
+        analytics_event = search_analytics_event(
+            st.session_state,
+            query,
+            selected,
+            found=not results.empty,
+        )
+        if analytics_event:
+            emit_plausible_event(
+                str(analytics_event["name"]),
+                str(analytics_event["id"]),
+                key="stitch_searched_transport",
+                properties=analytics_event["properties"],
+            )
         if results.empty:
             st.warning(text["no_result"])
             st.caption(text["try"])
@@ -893,7 +956,9 @@ def main() -> None:
 
             st.markdown(f"### {text['results']}")
             for _, row in results.iterrows():
-                render_result_card(row, text)
+                render_result_card(row, text, query.strip())
+    else:
+        search_analytics_event(st.session_state, "", selected, found=False)
 
     if not query.strip():
         st.markdown('<div class="footer-push"></div>', unsafe_allow_html=True)
@@ -902,7 +967,15 @@ def main() -> None:
     st.markdown('<div class="feedback"></div>', unsafe_allow_html=True)
     with st.expander(text["feedback_title"], expanded=False):
         st.caption(text["feedback_text"])
-        st.link_button(text["feedback_button"], FEEDBACK_FORM_URL)
+        tracked = plausible_link_button(
+            text["feedback_button"],
+            FEEDBACK_FORM_URL,
+            "feedback_clicked",
+            key="stitch_feedback_clicked_link",
+            properties={"feedback_surface": "stitch_translator"},
+        )
+        if not tracked:
+            st.link_button(text["feedback_button"], FEEDBACK_FORM_URL)
         st.caption(text["privacy_note"])
         st.caption(APP_VERSION)
 

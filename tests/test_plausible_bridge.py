@@ -50,6 +50,43 @@ class PlausibleBridgeTests(unittest.TestCase):
             {"name": "pattern_image_uploaded", "id": "upload-action-1"},
         )
 
+    def test_event_properties_are_forwarded_to_v2_component(self):
+        with mock.patch.dict(
+            os.environ,
+            {"PUBLIC_PLAUSIBLE_SCRIPT_URL": "https://example.test/pa.js"},
+            clear=True,
+        ), mock.patch.object(plausible_bridge, "_plausible_bridge") as component:
+            plausible_bridge.emit_plausible_event(
+                "stitch_searched",
+                "search-action-1",
+                key="stitch-search-transport",
+                properties={"search_result_status": "found"},
+            )
+
+        self.assertEqual(
+            component.call_args.kwargs["data"]["event"]["props"],
+            {"search_result_status": "found"},
+        )
+
+    def test_link_properties_are_forwarded_to_v2_component(self):
+        with mock.patch.dict(
+            os.environ,
+            {"PUBLIC_PLAUSIBLE_SCRIPT_URL": "https://example.test/pa.js"},
+            clear=True,
+        ), mock.patch.object(plausible_bridge, "_plausible_bridge") as component:
+            plausible_bridge.plausible_link_button(
+                "Tutorial",
+                "https://example.test/tutorial",
+                "tutorial_opened",
+                key="tutorial-link",
+                properties={"search_keyword": "single crochet"},
+            )
+
+        self.assertEqual(
+            component.call_args.kwargs["data"]["link"]["props"],
+            {"search_keyword": "single crochet"},
+        )
+
     def test_tracked_link_uses_v2_and_preserves_native_fallback_on_failure(self):
         environment = {"PUBLIC_PLAUSIBLE_SCRIPT_URL": "https://example.test/pa.js"}
         with mock.patch.dict(os.environ, environment, clear=True), mock.patch.object(
@@ -107,6 +144,7 @@ class PlausibleBridgeTests(unittest.TestCase):
         self.assertIn("window.__ciPlausibleSentEvents", source)
         self.assertIn("window.sessionStorage", source)
         self.assertIn("duplicate suppressed", source)
+        self.assertIn("options.props = props", source)
         self.assertNotIn("iframe", source.lower())
 
     def test_app_maps_all_five_events_to_v2_transport(self):
@@ -138,7 +176,9 @@ class PlausibleBridgeTests(unittest.TestCase):
             '"pattern_feedback_clicked",\n            key="pattern_feedback_clicked_link"',
             app_source,
         )
-        self.assertFalse(Path("pattern_translator/components/plausible_event").exists())
+        self.assertFalse(
+            Path("pattern_translator/components/plausible_event/__init__.py").exists()
+        )
 
 
 if __name__ == "__main__":

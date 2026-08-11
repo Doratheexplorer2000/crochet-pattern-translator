@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 import uuid
-from typing import MutableMapping, Optional
+from typing import Mapping, MutableMapping, Optional
 
 import streamlit as st
 
@@ -111,6 +111,7 @@ async function sendEvent() {
 async function dispatchEvent(eventData) {
   const eventName = String(eventData?.name || "").trim();
   const eventId = String(eventData?.id || "").trim();
+  const props = eventData?.props;
   if (!eventName || !eventId) return;
 
   const key = eventStorageKey(eventName, eventId);
@@ -122,7 +123,7 @@ async function dispatchEvent(eventData) {
   try {
     await ensureTracker();
     markSent(key);
-    window.plausible(eventName, {
+    const options = {
       url: window.location.href,
       callback: (result) => {
         if (result?.status) {
@@ -133,7 +134,16 @@ async function dispatchEvent(eventData) {
           debugWarn("event ignored", eventName);
         }
       },
-    });
+    };
+    if (
+      props &&
+      typeof props === "object" &&
+      !Array.isArray(props) &&
+      Object.keys(props).length > 0
+    ) {
+      options.props = props;
+    }
+    window.plausible(eventName, options);
     debugLog("event dispatched", eventName, eventId);
   } catch (error) {
     debugWarn("event not dispatched", eventName, error);
@@ -152,6 +162,7 @@ function renderTrackedLink() {
   const label = String(link?.label || "").trim();
   const href = String(link?.href || "").trim();
   const eventName = String(link?.event_name || "").trim();
+  const props = link?.props;
   if (!label || !href || !eventName || !parentElement) return;
 
   let root = parentElement.querySelector("[data-ci-plausible-link-root]");
@@ -171,6 +182,7 @@ function renderTrackedLink() {
     void dispatchEvent({
       name: eventName,
       id: newLinkEventId(eventName),
+      props,
     });
   });
   root.replaceChildren(anchor);
@@ -261,14 +273,18 @@ def _mount_bridge(*, key: str, event: object = None, link: object = None) -> boo
 def stage_plausible_event(
     session_state: MutableMapping[str, object],
     event_name: str,
+    properties: Optional[Mapping[str, object]] = None,
 ) -> None:
     """Stage one event for the bridge mounted at the start of the next rerun."""
     if not event_name:
         return
-    session_state["pending_plausible_v2_event"] = {
+    event = {
         "name": event_name,
         "id": uuid.uuid4().hex,
     }
+    if properties:
+        event["props"] = dict(properties)
+    session_state["pending_plausible_v2_event"] = event
 
 
 def mount_plausible_bridge(
@@ -281,29 +297,42 @@ def mount_plausible_bridge(
     )
 
 
-def emit_plausible_event(event_name: str, event_id: str, *, key: str) -> None:
+def emit_plausible_event(
+    event_name: str,
+    event_id: str,
+    *,
+    key: str,
+    properties: Optional[Mapping[str, object]] = None,
+) -> None:
     """Dispatch one browser event through the main-page V2 bridge."""
     if not event_name:
         return
-    _mount_bridge(
-        key=key,
-        event={
-            "name": event_name,
-            "id": event_id or uuid.uuid4().hex,
-        },
-    )
+    event = {
+        "name": event_name,
+        "id": event_id or uuid.uuid4().hex,
+    }
+    if properties:
+        event["props"] = dict(properties)
+    _mount_bridge(key=key, event=event)
 
 
-def plausible_link_button(label: str, url: str, event_name: str, *, key: str) -> bool:
+def plausible_link_button(
+    label: str,
+    url: str,
+    event_name: str,
+    *,
+    key: str,
+    properties: Optional[Mapping[str, object]] = None,
+) -> bool:
     """Render a tracked main-page link through the V2 bridge."""
     script_url, _debug = _tracking_config()
     if not script_url or not label or not url or not event_name:
         return False
-    return _mount_bridge(
-        key=key,
-        link={
-            "label": label,
-            "href": url,
-            "event_name": event_name,
-        },
-    )
+    link = {
+        "label": label,
+        "href": url,
+        "event_name": event_name,
+    }
+    if properties:
+        link["props"] = dict(properties)
+    return _mount_bridge(key=key, link=link)
