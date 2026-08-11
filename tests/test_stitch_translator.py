@@ -1,5 +1,6 @@
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import streamlit
 
@@ -63,7 +64,7 @@ class StitchTranslatorRegressionTests(unittest.TestCase):
             first["properties"],
             {
                 "search_keyword": "single crochet",
-                "translate_to": "en",
+                "interface_language": "en",
                 "search_result_status": "found",
             },
         )
@@ -81,6 +82,29 @@ class StitchTranslatorRegressionTests(unittest.TestCase):
         self.assertIsNotNone(second)
         self.assertNotEqual(first["id"], second["id"])
 
+    def test_tutorial_analytics_uses_interface_language(self):
+        row = app.pd.Series(
+            {
+                "stitch_id": "st_003_single_crochet",
+                "US_term": "single crochet",
+                "tutorial_search": "yes",
+            }
+        )
+        text = {"tutorial_button": "Tutorial", "tutorial_note": "Tutorial note"}
+
+        with mock.patch.object(app.st, "session_state", {"ui_lang": "zh-Hant"}), mock.patch.object(
+            app.st, "markdown"
+        ), mock.patch.object(app.st, "caption"), mock.patch.object(
+            app, "plausible_link_button", return_value=True
+        ) as tracked_link:
+            app.render_result_card(row, text, "sc")
+
+        properties = tracked_link.call_args.kwargs["properties"]
+        self.assertEqual(properties["search_keyword"], "sc")
+        self.assertEqual(properties["interface_language"], "zh-Hant")
+        self.assertIn("youtube.com/results?search_query=", properties["tutorial_destination"])
+        self.assertNotIn("translate_to", properties)
+
     def test_stitch_app_uses_shared_v2_bridge_for_approved_events(self):
         source = Path("stitch_translator/app.py").read_text(encoding="utf-8")
 
@@ -88,6 +112,13 @@ class StitchTranslatorRegressionTests(unittest.TestCase):
         self.assertIn('"stitch_searched"', source)
         self.assertIn('"tutorial_opened"', source)
         self.assertIn('"feedback_clicked"', source)
+        self.assertIn('"interface_language": interface_language', source)
+        self.assertIn('"interface_language": ui_lang', source)
+        self.assertNotIn('"translate_to"', source)
+        self.assertIn(
+            'properties={"feedback_surface": "stitch_translator"}',
+            source,
+        )
         self.assertNotIn("components.v2.component", source)
 
     def test_all_interface_languages_have_complete_visible_copy(self):

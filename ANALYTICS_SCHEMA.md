@@ -111,7 +111,7 @@ A Stitch Translator Session represents one anonymous visit to Stitch Translator.
 | `tutorial_open_count` | Number of tutorial links opened in the session. |
 | `feedback_click_count` | Number of Feedback link clicks in the session. |
 
-Do not place a single `translate_to` field in the session record. A user may change the target language during one session.
+Stitch Translator has no target translation language. Its selected interface language is recorded as `interface_language`.
 
 Use the same `entry_source` definitions as Pattern Translator.
 
@@ -143,7 +143,7 @@ Stitch Search History is a separate detailed dataset. Each submitted stitch sear
 | `stitch_session_id` | Owning Stitch Translator Session. |
 | `timestamp` | UTC search submission time. |
 | `search_keyword` | Submitted stitch query only. |
-| `translate_to` | Target interface or result language used for this search. |
+| `interface_language` | Interface language used for this search. |
 | `search_result_status` | Controlled result status. |
 
 `search_result_status` uses this controlled set:
@@ -151,7 +151,7 @@ Stitch Search History is a separate detailed dataset. Each submitted stitch sear
 - `found`
 - `not_found`
 
-Timestamp naturally preserves event sequence, so no separate order field is required. `translate_to` belongs on each search record because a user may change the target language during one session.
+Timestamp naturally preserves event sequence, so no separate order field is required. `interface_language` belongs on each search record because a user may change the interface language during one session.
 
 Search terms are valuable product data because they reveal popular stitches and missing terminology. They must be limited to the submitted stitch query and must not be combined with personal data. `search_count` in the Stitch Translator Session should be derived from, or remain consistent with, the number of Stitch Search History records.
 
@@ -191,8 +191,8 @@ Do not automatically add every unsuccessful translation or unsupported upload as
 | Event | Event meaning | Required properties | Optional properties | Session |
 | --- | --- | --- | --- | --- |
 | `stitch_session_started` | A validated anonymous Stitch Translator visit began. | `stitch_session_id`, `timestamp` | `landing_session_id`, `entry_source`, `interface_language` | Stitch Translator Session |
-| `stitch_searched` | The user submitted a stitch query and a result status was determined. | `stitch_session_id`, `timestamp`, `search_keyword`, `translate_to`, `search_result_status` | None | Stitch Translator Session and Stitch Search History |
-| `tutorial_opened` | The user opened a tutorial search for a stitch. | `stitch_session_id`, `timestamp`, `search_keyword` | `translate_to`, `tutorial_destination` | Stitch Translator Session |
+| `stitch_searched` | The user submitted a stitch query and a result status was determined. | `stitch_session_id`, `timestamp`, `search_keyword`, `interface_language`, `search_result_status` | None | Stitch Translator Session and Stitch Search History |
+| `tutorial_opened` | The user opened a tutorial search for a stitch. | `stitch_session_id`, `timestamp`, `search_keyword` | `interface_language`, `tutorial_destination` | Stitch Translator Session |
 | `feedback_clicked` | The user clicked the Stitch Translator Feedback link. | `stitch_session_id`, `timestamp` | `feedback_surface` | Stitch Translator Session |
 
 ## 7. Feedback Funnel
@@ -275,7 +275,7 @@ Suggested logical views:
 - Average and median searches per session.
 - Average and median session duration.
 - Most searched terms.
-- Searches by target language.
+- Searches by interface language.
 - Found versus not-found searches.
 - Tutorial open count and rate.
 - Feedback click count and rate.

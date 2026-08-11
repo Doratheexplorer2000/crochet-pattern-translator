@@ -817,7 +817,7 @@ def render_result_card(row: pd.Series, text: dict, search_keyword: str) -> None:
             key=f"stitch_tutorial_opened_{stitch_id}",
             properties={
                 "search_keyword": search_keyword,
-                "translate_to": ui_lang,
+                "interface_language": ui_lang,
                 "tutorial_destination": tutorial_url,
             },
         )
@@ -867,7 +867,7 @@ def get_query_param(params, key: str, default: str = "") -> str:
 def search_analytics_event(
     session_state: MutableMapping[str, object],
     query: str,
-    translate_to: str,
+    interface_language: str,
     *,
     found: bool,
 ) -> Optional[dict[str, object]]:
@@ -886,7 +886,7 @@ def search_analytics_event(
         "id": uuid.uuid4().hex,
         "properties": {
             "search_keyword": submitted_query,
-            "translate_to": translate_to,
+            "interface_language": interface_language,
             "search_result_status": "found" if found else "not_found",
         },
     }
