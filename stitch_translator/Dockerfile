@@ -16,6 +16,7 @@ RUN pip install --upgrade pip \
     && pip install -r stitch_translator/requirements.txt
 
 COPY knowledge_base ./knowledge_base
+COPY crochet_intelligence ./crochet_intelligence
 COPY stitch_translator ./stitch_translator
 
 RUN chmod +x ./stitch_translator/railway_start.sh

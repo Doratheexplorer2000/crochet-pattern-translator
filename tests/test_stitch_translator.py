@@ -125,6 +125,7 @@ class StitchTranslatorRegressionTests(unittest.TestCase):
 
         self.assertIn("streamlit==1.51.0", requirements)
         self.assertIn("pandas==2.3.3", requirements)
+        self.assertIn("COPY crochet_intelligence ./crochet_intelligence", dockerfile)
         self.assertIn("COPY stitch_translator ./stitch_translator", dockerfile)
         self.assertIn("streamlit run stitch_translator/app.py", start_script)
         self.assertNotIn("pattern_translator/app.py", start_script)
