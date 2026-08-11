@@ -10,7 +10,7 @@ Application version: `v1.9a`
 
 ## Current Production Status
 
-Crochet Stitch Translator is a stable dictionary-style Streamlit application. Its production-alignment candidate now runs on the Crochet Intelligence Streamlit `1.51.0` baseline, follows the approved shared UI specification, and includes minimal Stitch-specific Railway deployment files. The work is local and pending Human UI UAT; no Stitch Translator Railway production deployment has been performed yet.
+Crochet Stitch Translator is a stable dictionary-style Streamlit application deployed independently to Railway at `https://stitch-translator-production.up.railway.app/`. Production Alignment and Human UI UAT passed on desktop, iPhone, and Android across light and dark modes and all four interface languages. Production runs on the Crochet Intelligence Streamlit `1.51.0` baseline using the Stitch-specific Dockerfile and startup command.
 
 ## Current Database Version
 
@@ -35,20 +35,17 @@ Accepted source snapshot: `stitches_1_8e.csv`
 
 ## Current Priorities
 
-1. Complete local Human UI UAT for the production-alignment candidate.
-2. Deploy Stitch Translator to its own Railway service after explicit approval.
-3. Validate search, Tutorial Search, Feedback, mobile, desktop, light mode, and dark mode in production.
-4. Implement Stitch Translator analytics only after the production baseline is approved.
-5. Continue evidence-driven terminology and knowledge-base maintenance.
+1. Preserve the production-aligned search and UI baseline.
+2. Implement Stitch Translator Plausible analytics as the next separately approved phase.
+3. Continue evidence-driven terminology and knowledge-base maintenance.
 
 ## Known Issues
 
-- No production Stitch Translator URL exists yet.
 - Stitch Translator analytics are intentionally not implemented in this alignment RC.
 
 ## Planned Next Version
 
-The next release step is Human UI UAT followed by the first independent Railway deployment. No feature or search-semantic expansion is included.
+The next release step is Stitch Translator Plausible analytics. No feature or search-semantic expansion is included.
 
 ## Future Backlog
 

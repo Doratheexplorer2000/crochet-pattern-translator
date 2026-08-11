@@ -29,7 +29,8 @@ v1.9a
 
 - Official version: `v1.9a`
 - Runtime baseline: Streamlit `1.51.0`
-- Development phase: production alignment implemented locally; Human UI UAT and first Railway deployment pending
+- Development phase: Production Alignment deployed; Human UI UAT PASS
+- Production URL: `https://stitch-translator-production.up.railway.app/`
 - Current production database: `knowledge_base/data/master_stitches.csv`
 - Source snapshot: `stitches_1_8e.csv`
 - Visual baseline: `Brand identity & UI/UI_SPEC.md`
@@ -68,7 +69,7 @@ stitch_translator/Dockerfile
 stitch_translator/railway_start.sh
 ```
 
-Railway should use `stitch_translator/Dockerfile` with the repository root as its build context. No Stitch Translator Railway production deployment has been performed yet.
+Railway uses `stitch_translator/Dockerfile` with the repository root as its build context. The independent Stitch Translator service is deployed from GitHub `main` at `https://stitch-translator-production.up.railway.app/`.
 
 ## Visual Baseline
 
