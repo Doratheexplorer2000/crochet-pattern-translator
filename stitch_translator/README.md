@@ -34,7 +34,9 @@ v1.9a
 - Current production database: `knowledge_base/data/master_stitches.csv`
 - Source snapshot: `stitches_1_8e.csv`
 - Visual baseline: `Brand identity & UI/UI_SPEC.md`
-- Analytics: not implemented for Stitch Translator yet
+- Analytics: shared Plausible analytics completed; Production Human UAT PASS
+
+Production analytics events are `stitch_searched`, `tutorial_opened`, and `feedback_clicked`. Search and tutorial events record the current `interface_language`; Stitch Translator has no target translation language, so it does not use a Stitch-specific `translate_to` property.
 
 ## Current Database
 

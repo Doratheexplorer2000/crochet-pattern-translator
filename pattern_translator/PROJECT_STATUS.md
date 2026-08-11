@@ -28,7 +28,7 @@ Phase A Brand Identity Foundation is complete. RC51 completed the first Phase B 
 
 RC52 completed the custom Select Area component and finalized the upload-to-crop workflow. Human UAT passed on iPhone Safari, Android Chrome, and Desktop Chrome with no remaining functional issues. At RC52 closeout, the work was production-ready and frozen locally while RC28 was the deployed production baseline.
 
-The independent Astro Portal Skeleton is now the Crochet Intelligence platform entry point. Its architecture and Information Architecture are frozen after Human UAT. The Portal has been deployed independently to Railway and is now the primary platform entry point at `https://crochet-intelligence-portal-production.up.railway.app`. Pattern Translator and Stitch Translator are presented as equal tools. Platform Analytics is the current priority; Portal visual refinement and branding follow after it.
+The independent Astro Portal Skeleton is now the Crochet Intelligence platform entry point. Its architecture and Information Architecture are frozen after Human UAT. The Portal has been deployed independently to Railway and is now the primary platform entry point at `https://crochet-intelligence-portal-production.up.railway.app`. Pattern Translator and Stitch Translator are presented as equal tools. RC54 shared Plausible analytics is complete with Production Human UAT PASS; Portal visual refinement and branding remain separately planned work.
 
 ## Current Database
 
@@ -59,16 +59,16 @@ stitches_1_8e.csv
 
 ## Current Priorities
 
-Current Phase: Platform Analytics
+Current Phase: RC54 Analytics completed; Production Human UAT PASS
 
 Purpose:
 
 - Preserve the approved RC51 Pattern Translator Home Screen and frozen RC52 custom-component baseline.
 - Preserve the production-validated RC54B Components V2 analytics transport baseline.
 - All five current Pattern Translator Plausible events use the shared Components V2 bridge; no V1 Plausible analytics dependency remains.
-- Reuse the browser-side analytics approach validated in the Portal while keeping translator analytics observational and non-blocking.
-- Keep Google Sheets Product Facts as a later RC54 milestone.
-- Defer Portal visual refinement until after analytics.
+- Preserve the shared browser-side analytics implementation across the Portal and both translators while keeping analytics observational and non-blocking.
+- Keep Google Sheets Product Facts as separately approved future work; they are not implemented.
+- Plan Portal visual refinement separately after RC54 closeout.
 
 Roadmap decisions:
 
@@ -76,8 +76,8 @@ Roadmap decisions:
 - Preserve the completed Engine Migration and Domain Layer extraction now included in the production release.
 - Preserve the completed RC54B analytics transport baseline.
 - Do not use the unreliable `app_open` event as the basis of platform visitor analytics.
-- Plausible Starter is integrated into the Portal. Human UAT confirmed Portal pageview tracking and the `portal_pattern_selected` custom event.
-- Browser-side analytics transport has been validated and will be reused by the translators.
+- Plausible is shared across the Portal, Pattern Translator, and Stitch Translator. Production Human UAT confirmed Portal tool-selection analytics and both translators' approved event surfaces.
+- Browser-side analytics transport is production-validated across both translators.
 - Google Sheets Product Facts are intentionally not implemented yet.
 - Continue occasional testing with trusted users and incremental fixes based on real production usage.
 - Keep OCR, parser, overlay, and database changes small and evidence-based.
@@ -92,8 +92,8 @@ The Portal Skeleton is functionally complete and frozen. It is an independent As
 - Pattern Translator and Stitch Translator are presented equally.
 - Future Tool architecture is retained through configuration but hidden from the current UI.
 - The Portal is deployed independently to Railway and is now the primary platform entry point: `https://crochet-intelligence-portal-production.up.railway.app`.
-- RC54 Phase 1 integrated Plausible Starter into the Portal. Human UAT confirmed Portal pageview tracking and the `portal_pattern_selected` custom event.
-- Visual design and branding refinement are intentionally deferred until after platform analytics.
+- RC54 integrated shared Plausible analytics across the Portal and both tools. Production Human UAT passed.
+- Visual design and branding refinement remain separately planned after RC54 closeout.
 
 ## Known Issues
 
@@ -338,18 +338,17 @@ The Portal Skeleton is functionally complete and frozen. It is an independent As
 
 Current platform sequence:
 
-1. Align Stitch Translator with Streamlit 1.51.0, the shared UI specification, and Railway production requirements.
-2. Implement Stitch Translator analytics using the validated browser-side transport after its production baseline passes Human UAT.
-3. Add Google Sheets Product Facts in a later RC54 milestone.
-4. Refine Portal visual design and branding.
-5. Introduce shared infrastructure improvements when appropriate.
+1. Preserve the completed RC54 shared Plausible analytics baseline.
+2. Plan Portal visual design and branding separately.
+3. Add Google Sheets Product Facts only after separate approval.
+4. Introduce shared infrastructure improvements when appropriate.
 
 Additional deferred work:
 
 - Improve discoverability of editable line-by-line translation before TXT download. The feature already exists, but users may not realise the translation text can be edited before downloading. Consider clearer UI guidance in a future UX enhancement; implementation is not scheduled now.
 - Replace reliance on `app_open` with the approved platform visitor and activity analytics model.
 - Review the Google Feedback Form questions and workflow.
-- Reuse the improved analytics and feedback design when implementing Stitch Translator analytics.
+- Centralize interface-language selection at the Portal, pass the selected language to each tool, and then reassess whether tool-level `interface_language` analytics remains necessary.
 
 ### RC23b Hotfix 1
 

@@ -24,7 +24,7 @@ Current focus:
 - The Portal currently supports English, Traditional Chinese, Simplified Chinese, and Japanese; configurable tool routing; inline Privacy & Terms; and a contact email link.
 - Pattern Translator and Stitch Translator are presented as equal tools. Two future-tool entries remain available through configuration but are hidden from the current UI.
 - The Portal has been deployed independently to Railway and is now the primary platform entry point: `https://crochet-intelligence-portal-production.up.railway.app`.
-- RC54 Phase 1 integrated Plausible Starter into the Portal. Human UAT confirmed Portal pageview tracking and the `portal_pattern_selected` custom event.
+- RC54 integrated shared Plausible analytics across the Portal, Pattern Translator, and Stitch Translator. Production Human UAT passed for Portal tool selections and both tools' approved event surfaces.
 - Pattern Translator RC28 is the current production baseline.
 - Whole Pattern is now the default Pattern Translator workflow.
 - Select Area remains available as an optional / experimental workflow.
@@ -40,7 +40,7 @@ Current focus:
 - Railway Hobby resource usage during the spike was suitable for low-volume production: peak RAM approximately 1.84 GB, normal RAM approximately 1.29 GB, and peak CPU approximately 1.39 vCPU.
 - Streamlit Community Cloud is retained as a backup platform.
 - Pattern Translator Feedback Form migration to `crochetintelligence@gmail.com` is complete.
-- Pattern Translator's existing tool analytics remains implemented and validated. RC54 Phase 1 added the Portal Plausible foundation; remaining Pattern Translator and Stitch Translator analytics events are planned for RC54 Phase 2.
+- Portal tool-selection analytics and the approved Pattern Translator and Stitch Translator event sets are implemented and production-validated through the shared Plausible system.
 - RC42 completed the first local Engine Extraction by moving the CSV terminology / lookup engine into `pattern_translator/engine/terminology.py`.
 - RC43 completed the second local Engine Extraction by moving pure line-translation logic into `pattern_translator/engine/line_translation.py`.
 - RC43 regression confirmed `220 / 220` direct corpus cases identical, Human UAT passed, and no user-visible behavior changed.
@@ -87,20 +87,20 @@ Current focus:
 
 Next:
 
-- Implement RC54 Phase 2: add the remaining approved analytics events for Pattern Translator and Stitch Translator using the validated browser-side analytics transport.
-- Keep the Portal Skeleton architecture and Information Architecture stable while analytics work proceeds.
-- Keep Google Sheets Product Facts as a later RC54 milestone; they are intentionally not implemented yet.
-- Defer Portal visual polish and branding until after analytics.
+- Preserve the completed RC54 Plausible analytics baseline.
+- Keep the Portal Skeleton architecture and Information Architecture stable.
+- Treat Google Sheets Product Facts as separately approved future work; they are not implemented.
+- Plan Portal visual polish and branding separately after RC54 closeout.
 - RC52 remains frozen as a production-ready local release. Do not add further cropper polish unless a functional regression is found.
 - Keep the completed Engine Migration local until a future integration decision is approved.
 - Focus future work on product features, runtime improvements, deployment, or Application Layer work when justified by clear product value.
 - Keep the existing RC28 Railway production path fully recoverable as the rollback target.
-- Add the reusable analytics implementation to Crochet Stitch Translator.
 - Address non-blocking polish items: expose the version number in the UI and refine minor overlay text box alignment.
 
 Later:
 
 - Continue incremental trusted-user testing and prepare for Soft Launch.
+- Centralize interface-language selection at the Portal, pass it to each tool, and reassess whether tool-level `interface_language` analytics remains necessary.
 
 ## Shared Knowledge Base
 

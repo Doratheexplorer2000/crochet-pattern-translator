@@ -1,6 +1,6 @@
 # Crochet Stitch Translator Project Status
 
-Last updated: 2026-08-11
+Last updated: 2026-08-12
 
 ## Current Version
 
@@ -10,7 +10,7 @@ Application version: `v1.9a`
 
 ## Current Production Status
 
-Crochet Stitch Translator is a stable dictionary-style Streamlit application deployed independently to Railway at `https://stitch-translator-production.up.railway.app/`. Production Alignment and Human UI UAT passed on desktop, iPhone, and Android across light and dark modes and all four interface languages. Production runs on the Crochet Intelligence Streamlit `1.51.0` baseline using the Stitch-specific Dockerfile and startup command.
+Crochet Stitch Translator is a stable dictionary-style Streamlit application deployed independently to Railway at `https://stitch-translator-production.up.railway.app/`. Production Alignment and Human UI UAT passed on desktop, iPhone, and Android across light and dark modes and all four interface languages. Production runs on the Crochet Intelligence Streamlit `1.51.0` baseline using the Stitch-specific Dockerfile and startup command. Shared Plausible analytics and Production Human UAT are complete.
 
 ## Current Database Version
 
@@ -32,27 +32,28 @@ Accepted source snapshot: `stitches_1_8e.csv`
 - Crochet Intelligence Warm Modern visual alignment with light and dark mode support.
 - Streamlit 1.51.0 runtime alignment.
 - Stitch-specific Railway Dockerfile and startup command.
+- Shared Plausible events `stitch_searched`, `tutorial_opened`, and `feedback_clicked`, validated in production.
 
 ## Current Priorities
 
 1. Preserve the production-aligned search and UI baseline.
-2. Implement Stitch Translator Plausible analytics as the next separately approved phase.
+2. Preserve the production-validated RC54 analytics baseline.
 3. Continue evidence-driven terminology and knowledge-base maintenance.
 
 ## Known Issues
 
-- Stitch Translator analytics are intentionally not implemented in this alignment RC.
+- No known RC54 analytics blocker remains.
 
 ## Planned Next Version
 
-The next release step is Stitch Translator Plausible analytics. No feature or search-semantic expansion is included.
+The next Stitch Translator release step requires separate Product Owner approval. RC54 analytics is closed.
 
 ## Future Backlog
 
 - Better database validation workflow.
 - Possible admin/database contribution workflow.
 - Research and add Cross Single Crochet to the shared stitch database after terminology validation.
-- Future Stitch analytics using the browser-side approach already validated by the platform.
+- Centralize interface-language selection at the Portal, pass the selected language to each tool, and then reassess whether tool-level `interface_language` analytics remains necessary.
 
 ## Important Design Decisions
 
@@ -67,5 +68,5 @@ The next release step is Stitch Translator Plausible analytics. No feature or se
 ## Cross-App Strategy
 
 - The independent Astro Portal is the platform entry point and presents Pattern Translator and Stitch Translator equally.
-- Pattern Translator is already deployed to Railway; Stitch Translator is being aligned to the same production runtime and product family before its independent Railway deployment.
-- Stitch analytics follows only after the aligned production baseline passes Human UAT.
+- Pattern Translator and Stitch Translator are deployed independently to Railway.
+- Portal, Pattern Translator, and Stitch Translator share the production-validated Plausible analytics system.
