@@ -15,22 +15,6 @@ import streamlit.components.v1 as components
 
 APP_VERSION = "v1.9a"
 
-st.markdown("""
-<style>
-/* v1.8 UI polish */
-h1 {
-    color: #5f73a8 !important;
-    margin-bottom: 1.2rem !important;
-}
-.stTextInput {
-    margin-top: 0.5rem !important;
-}
-details {
-    margin-top: 0.4rem !important;
-}
-</style>
-""", unsafe_allow_html=True)
-
 FEEDBACK_FORM_URL = "https://forms.gle/dNr7BXJuVaaosGyw6"
 BASE_DIR = Path(__file__).resolve().parent
 REPO_ROOT = BASE_DIR.parent
@@ -48,7 +32,8 @@ SUPPORTED_LANGS = {
 
 UI_TEXT = {
     "en": {
-        "title": "🧶 Crochet Stitch Translator",
+        "title": "Crochet Stitch Translator",
+        "subtitle": "Find crochet stitch terms across US, UK, Chinese, and Japanese.",
         "placeholder": "dc, double crochet, 長針, 长针, 長編み",
         "hint": "Enter a stitch name or abbreviation.",
         "search_label": "Search",
@@ -57,16 +42,20 @@ UI_TEXT = {
         "results": "Results",
         "possible": "Possible matches",
         "symbol_label": "Symbol",
-        "feedback_title": "Feedback to developer",
+        "feedback_title": "Feedback",
         "feedback_text": "Found a wrong translation, missing stitch, or display problem? Please send feedback using the form below.",
         "feedback_button": "Open feedback form",
-        "privacy_note": "This tool may collect feedback and search-related information to improve the database. Please do not enter personal information.",
-        "terminology_note": "🧶 Some crochet terms may differ between US and UK patterns.",
-        "tutorial_button": "🎥 Search Tutorials",
+        "privacy_note": "Feedback is collected through Google Forms. Please do not include personal information.",
+        "terminology_note": "Some crochet terms differ between US and UK patterns.",
+        "tutorial_button": "Search tutorials",
         "tutorial_note": "Searches YouTube for related crochet tutorials.",
+        "terminology_us": "US term",
+        "terminology_uk": "UK term",
+        "terminology_both": "Not sure / show both",
     },
     "zh-Hant": {
-        "title": "🧶 鈎織針法翻譯器",
+        "title": "鈎織針法翻譯器",
+        "subtitle": "搜尋美式、英式、中文及日文鈎織針法術語。",
         "placeholder": "dc, double crochet, 長針, 长针, 長編み",
         "hint": "請輸入針法名稱或縮寫。",
         "search_label": "搜尋",
@@ -75,16 +64,20 @@ UI_TEXT = {
         "results": "搜尋結果",
         "possible": "可能相關",
         "symbol_label": "符號 / SYMBOL",
-        "feedback_title": "Feedback to developer",
+        "feedback_title": "意見回報",
         "feedback_text": "如果發現翻譯錯誤、缺少針法或顯示問題，請使用以下表格回報。",
         "feedback_button": "開啟意見回報表格",
-        "privacy_note": "本工具可能會收集意見回報及搜尋相關資料，用作改善資料庫。請勿輸入個人資料。",
-        "terminology_note": "🧶 美式與英式織圖的部分術語可能不同。",
-        "tutorial_button": "🎥 搜尋教學",
+        "privacy_note": "意見會透過 Google 表格收集。請勿提供個人資料。",
+        "terminology_note": "美式與英式織圖的部分術語可能不同。",
+        "tutorial_button": "搜尋教學",
         "tutorial_note": "在 YouTube 搜尋相關鈎織教學。",
+        "terminology_us": "美式術語",
+        "terminology_uk": "英式術語",
+        "terminology_both": "不確定／顯示兩者",
     },
     "zh-Hans": {
-        "title": "🧶 钩织针法翻译器",
+        "title": "钩织针法翻译器",
+        "subtitle": "搜索美式、英式、中文及日文钩织针法术语。",
         "placeholder": "dc, double crochet, 長針, 长针, 長編み",
         "hint": "请输入针法名称或缩写。",
         "search_label": "搜索",
@@ -93,16 +86,20 @@ UI_TEXT = {
         "results": "搜索结果",
         "possible": "可能相关",
         "symbol_label": "符号 / SYMBOL",
-        "feedback_title": "Feedback to developer",
+        "feedback_title": "意见反馈",
         "feedback_text": "如果发现翻译错误、缺少针法或显示问题，请使用以下表格回报。",
         "feedback_button": "开启意见回报表格",
-        "privacy_note": "本工具可能会收集意见回报及搜索相关资料，用作改善资料库。请勿输入个人资料。",
-        "terminology_note": "🧶 美式与英式图解的部分术语可能不同。",
-        "tutorial_button": "🎥 搜索教程",
+        "privacy_note": "意见会通过 Google 表单收集。请勿提供个人信息。",
+        "terminology_note": "美式与英式图解的部分术语可能不同。",
+        "tutorial_button": "搜索教程",
         "tutorial_note": "在 YouTube 搜索相关钩织教程。",
+        "terminology_us": "美式术语",
+        "terminology_uk": "英式术语",
+        "terminology_both": "不确定／显示两者",
     },
     "ja": {
-        "title": "🧶 かぎ針編みステッチ翻訳",
+        "title": "かぎ針編みステッチ翻訳",
+        "subtitle": "米式・英式・中国語・日本語のかぎ針編み用語を検索できます。",
         "placeholder": "dc, double crochet, 長針, 长针, 長編み",
         "hint": "編み目の名前または略語を入力してください。",
         "search_label": "検索",
@@ -111,13 +108,16 @@ UI_TEXT = {
         "results": "検索結果",
         "possible": "候補",
         "symbol_label": "記号 / SYMBOL",
-        "feedback_title": "Feedback to developer",
+        "feedback_title": "フィードバック",
         "feedback_text": "翻訳ミス、不足しているステッチ、表示の問題があれば、以下のフォームから送信してください。",
         "feedback_button": "フィードバックフォームを開く",
-        "privacy_note": "このツールはデータベース改善のため、フィードバックや検索関連情報を収集する場合があります。個人情報は入力しないでください。",
-        "terminology_note": "🧶 アメリカ式とイギリス式のパターンでは、一部の用語が異なる場合があります。",
-        "tutorial_button": "🎥 チュートリアルを検索",
+        "privacy_note": "フィードバックは Google フォームで収集されます。個人情報は入力しないでください。",
+        "terminology_note": "アメリカ式とイギリス式のパターンでは、一部の用語が異なる場合があります。",
+        "tutorial_button": "チュートリアルを検索",
         "tutorial_note": "関連するかぎ針編みチュートリアルを YouTube で検索します。",
+        "terminology_us": "アメリカ式",
+        "terminology_uk": "イギリス式",
+        "terminology_both": "不明／両方表示",
     },
 }
 
@@ -156,61 +156,335 @@ def init_page() -> None:
     )
     st.markdown(
         """
-        <style>
-        .block-container { padding-top: 0.35rem; padding-bottom: 1.2rem; max-width: 720px; overflow-x: hidden; }
-        header, footer { visibility: hidden; }
-        [data-testid="stSidebar"] { display: none; }
+<style>
+:root {
+    color-scheme: light dark;
+    --ci-teal-700: #0F766E;
+    --ci-teal-600: #13867D;
+    --ci-teal-100: #DDEDEA;
+    --ci-bg: #FAF9F7;
+    --ci-surface: #FFFFFF;
+    --ci-surface-subtle: #F2EEE9;
+    --ci-border: #E7E3DE;
+    --ci-text-primary: #1E1E20;
+    --ci-text-secondary: #55565A;
+    --ci-text-muted: #8A8D91;
+    --ci-text-on-primary: #FFFFFF;
+    --ci-primary: #0F766E;
+    --ci-primary-hover: #13867D;
+    --ci-primary-soft: #DDEDEA;
+    --ci-focus-ring: rgba(15, 118, 110, 0.28);
+    --ci-warning: #D99A24;
+    --ci-font: "Noto Sans TC", "Noto Sans SC", "Noto Sans JP", "Noto Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --ci-radius-sm: 8px;
+    --ci-radius-md: 12px;
+    --ci-radius-lg: 16px;
+    --ci-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
 
-        .topbar-iframe { margin: 0; padding: 0; }
-        .headline-spacer { height: clamp(1.25rem, 5vh, 2.6rem); }
-        .app-title { font-size: clamp(1.95rem, 8.8vw, 3.0rem); font-weight: 800; line-height: 1.08; margin: 0 0 1.15rem 0; letter-spacing: -0.04em; color:#3f4f7a !important; -webkit-text-fill-color:#3f4f7a !important; }
-        @media (prefers-color-scheme: dark) {
-            .app-title { color:#7f8fbd !important; -webkit-text-fill-color:#7f8fbd !important; }
-            .hint { color:#9ca3af !important; -webkit-text-fill-color:#9ca3af !important; }
-        }
-        .hint { margin-top: -0.25rem; color: #6b7280 !important; -webkit-text-fill-color:#6b7280 !important; font-size: .92rem; }
-        :root { color-scheme: light; }
-        .terminology-note { margin-top: 1.15rem; margin-bottom: .65rem; padding: .65rem .75rem; border-radius: 12px; background: #f7f4ee !important; color: #4f4638 !important; font-size: .88rem; line-height: 1.42; }
-        .result-card { border: 1px solid #e5e7eb !important; border-radius: 16px; padding: 1rem; margin: .75rem 0; background: #fffdf9 !important; color: #111827 !important; -webkit-text-fill-color: #111827; }
-        .result-card * { color-scheme: light; }
-        .term-row { display: grid; grid-template-columns: 88px 1fr; gap: .45rem; padding: .28rem 0; border-bottom: 1px solid #f2f2f2 !important; background: transparent !important; }
-        .term-row:last-child { border-bottom: 0 !important; }
-        .term-label { color: #6b7280 !important; -webkit-text-fill-color: #6b7280; font-size: .9rem; }
-        .term-value { color: #111827 !important; -webkit-text-fill-color: #111827; font-weight: 600; }
-        .small-note { color: #6b7280 !important; -webkit-text-fill-color: #6b7280; font-size: .88rem; margin-top: .5rem; }
-        .symbol-card { border: 1px solid #e5e7eb !important; border-radius: 16px; padding: 1rem; margin: .75rem 0; background: #fffdf9 !important; text-align: center; min-height: 180px; display:flex; flex-direction:column; justify-content:flex-start; align-items:center; }
-        .symbol-title { color: #6b46c1 !important; -webkit-text-fill-color:#6b46c1 !important; font-size: .88rem; font-weight: 700; margin-bottom: .85rem; letter-spacing: .02em; }
-        .symbol-image { width:100%; display:flex; justify-content:center; align-items:center; flex:1; }
-        .symbol-image svg { max-width: 92px !important; max-height: 118px !important; width: 92px !important; height: auto !important; display:block; margin:0 auto; }
-        .symbol-missing { color:#9ca3af !important; font-size:.85rem; padding-top:2rem; }
-        .feedback { margin-top: 1.2rem; padding-top: 1.2rem; border-top: 1px solid #eee; color: #666; font-size: .9rem; }
-        .footer-push { height: min(22vh, 170px); }
-        .feedback-box { border: 1px solid #eee; border-radius: 14px; padding: .85rem; background: #fff !important; color:#111827 !important; margin-top: .6rem; }
-        /* Real Streamlit language selector. More reliable than iframe component. */
-        div[data-testid="stSelectbox"] { max-width: 142px; margin-left: auto; margin-bottom: 0; }
-        div[data-testid="stSelectbox"] label { display: none; }
-        div[data-testid="stSelectbox"] div,
-        div[data-testid="stSelectbox"] span,
-        div[data-testid="stSelectbox"] input,
-        div[data-testid="stSelectbox"] p { color:#111827 !important; -webkit-text-fill-color:#111827 !important; }
-        div[data-baseweb="select"] > div { min-height: 34px; font-size: .82rem; padding-left: .15rem; padding-right: .15rem; border-radius: 14px; background:#f1f3f7 !important; border:0 !important; color:#111827 !important; -webkit-text-fill-color:#111827 !important; }
-        div[data-baseweb="select"] * { color:#111827 !important; -webkit-text-fill-color:#111827 !important; }
-        div[data-baseweb="select"] svg { color:#4b5563 !important; fill:#4b5563 !important; }
-        div[data-baseweb="popover"] * { color:#111827 !important; -webkit-text-fill-color:#111827 !important; background-color:#ffffff !important; }
-        @media (prefers-color-scheme: dark) {
-            div[data-testid="stSelectbox"] div,
-            div[data-testid="stSelectbox"] span,
-            div[data-testid="stSelectbox"] input,
-            div[data-testid="stSelectbox"] p { color:#111827 !important; -webkit-text-fill-color:#111827 !important; }
-            div[data-baseweb="select"] > div { background:#f1f3f7 !important; color:#111827 !important; -webkit-text-fill-color:#111827 !important; }
-            div[data-baseweb="select"] * { color:#111827 !important; -webkit-text-fill-color:#111827 !important; }
-            div[data-baseweb="select"] svg { color:#4b5563 !important; fill:#4b5563 !important; }
-        }
-        .stTextInput input { font-size: 1.05rem; padding: .85rem .75rem; margin-top: .15rem; }
-        </style>
+html, body, .stApp {
+    font-family: var(--ci-font);
+    letter-spacing: 0;
+}
+
+body, .stApp, [data-testid="stAppViewContainer"] {
+    background: var(--ci-bg);
+    color: var(--ci-text-primary);
+}
+
+[data-testid="stSidebar"] { display: none; }
+
+.block-container {
+    width: 100%;
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 24px 20px 32px;
+    overflow-x: hidden;
+}
+
+.product-kicker {
+    margin: 16px 0 4px;
+    color: var(--ci-primary);
+    font-size: 14px;
+    line-height: 20px;
+    font-weight: 600;
+}
+
+.app-title {
+    margin: 0;
+    padding: 0;
+    color: var(--ci-primary) !important;
+    font-size: 30px;
+    line-height: 36px;
+    font-weight: 700;
+}
+
+.app-subtitle {
+    margin: 4px 0 24px;
+    color: var(--ci-text-secondary);
+    font-size: 16px;
+    line-height: 24px;
+}
+
+h1, h2, h3 { color: var(--ci-text-primary) !important; }
+h3 {
+    font-size: 18px !important;
+    line-height: 26px !important;
+    font-weight: 600 !important;
+}
+
+.hint,
+.small-note {
+    color: var(--ci-text-muted);
+    font-size: 14px;
+    line-height: 20px;
+}
+
+.hint { margin: 4px 0 12px; }
+.small-note { margin-top: 8px; }
+
+.terminology-note {
+    margin: 24px 0 16px;
+    padding: 12px 16px;
+    border: 1px solid rgba(15, 118, 110, 0.22);
+    border-radius: var(--ci-radius-md);
+    background: var(--ci-primary-soft);
+    color: var(--ci-text-secondary);
+    font-size: 14px;
+    line-height: 21px;
+}
+
+.result-card,
+.symbol-card {
+    margin: 12px 0;
+    border: 1px solid var(--ci-border);
+    border-radius: var(--ci-radius-lg);
+    background: var(--ci-surface);
+    box-shadow: var(--ci-shadow-sm);
+}
+
+.result-card { padding: 16px; }
+.symbol-card {
+    display: flex;
+    min-height: 180px;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-start;
+    padding: 16px;
+    text-align: center;
+}
+
+.term-row {
+    display: grid;
+    grid-template-columns: 88px minmax(0, 1fr);
+    gap: 8px;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--ci-border);
+}
+
+.term-row:last-child { border-bottom: 0; }
+.term-label {
+    color: var(--ci-text-muted);
+    font-size: 14px;
+    line-height: 20px;
+}
+.term-value {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    color: var(--ci-text-primary);
+    font-weight: 600;
+    line-height: 24px;
+}
+.symbol-title {
+    margin-bottom: 12px;
+    color: var(--ci-primary);
+    font-size: 14px;
+    font-weight: 600;
+}
+.symbol-image {
+    display: flex;
+    width: 100%;
+    flex: 1;
+    align-items: center;
+    justify-content: center;
+}
+.symbol-image svg {
+    display: block;
+    width: 92px !important;
+    max-width: 92px !important;
+    height: auto !important;
+    max-height: 118px !important;
+    margin: 0 auto;
+}
+
+.feedback {
+    margin-top: 16px;
+    padding-top: 8px;
+    border-top: 1px solid var(--ci-border);
+}
+.footer-push { height: min(12vh, 80px); }
+
+div[data-testid="stSelectbox"] {
+    max-width: 176px;
+    margin-left: auto;
+    margin-bottom: 0;
+}
+div[data-testid="stSelectbox"] label { display: none; }
+
+div[data-baseweb="select"] > div,
+div[role="radiogroup"] label,
+div[data-testid="stTextInput"] input {
+    border-color: var(--ci-border);
+    border-radius: var(--ci-radius-md);
+    background: var(--ci-surface);
+    color: var(--ci-text-primary);
+}
+
+div[data-testid="stTextInput"] input {
+    min-height: 52px;
+    padding: 0 16px;
+    font-size: 16px;
+}
+
+div[data-baseweb="select"] > div { min-height: 44px; }
+div[data-baseweb="select"] *,
+div[role="radiogroup"] label,
+div[role="radiogroup"] label p {
+    color: var(--ci-text-primary) !important;
+}
+
+[role="listbox"] {
+    border-color: var(--ci-border) !important;
+    background: var(--ci-surface) !important;
+}
+[role="listbox"] [role="option"] { color: var(--ci-text-primary) !important; }
+[role="listbox"] [role="option"][aria-selected="true"] { background: var(--ci-surface-subtle) !important; }
+
+button:focus-visible,
+a:focus-visible,
+summary:focus-visible,
+[role="radio"]:focus-visible,
+div[data-testid="stTextInput"] input:focus-visible {
+    outline: 3px solid var(--ci-focus-ring) !important;
+    outline-offset: 2px !important;
+}
+div[data-baseweb="select"]:focus-within > div {
+    outline: 3px solid var(--ci-focus-ring) !important;
+    outline-offset: 2px !important;
+}
+
+div[data-testid="stButton"] > button,
+div[data-testid="stLinkButton"] > a {
+    min-height: 52px;
+    padding: 0 20px;
+    border: 1px solid var(--ci-primary);
+    border-radius: var(--ci-radius-md);
+    background: transparent;
+    color: var(--ci-primary);
+    font-size: 16px;
+    line-height: 24px;
+    font-weight: 600;
+    box-shadow: none;
+}
+
+@media (hover: hover) and (pointer: fine) {
+    div[data-testid="stButton"] > button:hover,
+    div[data-testid="stLinkButton"] > a:hover {
+        border-color: var(--ci-primary-hover);
+        background: var(--ci-primary-soft);
+        color: var(--ci-primary-hover);
+    }
+}
+
+div[data-testid="stAlert"] { border-radius: var(--ci-radius-md); }
+div[data-testid="stExpander"] details {
+    border: 1px solid var(--ci-border);
+    border-radius: var(--ci-radius-md);
+    background: var(--ci-surface);
+    box-shadow: var(--ci-shadow-sm);
+    overflow: hidden;
+}
+div[data-testid="stExpander"] summary {
+    min-height: 56px;
+    padding: 0 16px;
+    color: var(--ci-text-primary);
+    font-size: 16px;
+    font-weight: 500;
+}
+
+@media (max-width: 374px) {
+    .app-title.cjk-title {
+        font-size: 30px;
+        line-height: 36px;
+        white-space: nowrap;
+    }
+}
+
+@media (max-width: 359px) {
+    .block-container { padding-left: 16px; padding-right: 16px; }
+    .term-row { grid-template-columns: 72px minmax(0, 1fr); }
+}
+
+@media (min-width: 768px) {
+    .block-container { padding-left: 32px; padding-right: 32px; }
+}
+
+@media (prefers-color-scheme: dark) {
+    :root {
+        --ci-bg: #17191A;
+        --ci-surface: #202426;
+        --ci-surface-subtle: #292D2F;
+        --ci-border: #434A4D;
+        --ci-text-primary: #F4F3F1;
+        --ci-text-secondary: #C9C7C3;
+        --ci-text-muted: #999C9D;
+        --ci-text-on-primary: #FFFFFF;
+        --ci-primary: #2F928A;
+        --ci-primary-hover: #3AA49B;
+        --ci-primary-soft: #213B39;
+        --ci-focus-ring: rgba(47, 146, 138, 0.34);
+        --ci-shadow-sm: none;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        scroll-behavior: auto !important;
+        transition-duration: 0.01ms !important;
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+    }
+}
+</style>
         """,
         unsafe_allow_html=True,
     )
+
+    active_theme_type = getattr(st.context.theme, "type", "light")
+    configured_theme_base = st.get_option("theme.base")
+    if active_theme_type == "dark" or configured_theme_base == "dark":
+        st.markdown(
+            """
+<style>
+:root {
+    --ci-bg: #17191A;
+    --ci-surface: #202426;
+    --ci-surface-subtle: #292D2F;
+    --ci-border: #434A4D;
+    --ci-text-primary: #F4F3F1;
+    --ci-text-secondary: #C9C7C3;
+    --ci-text-muted: #999C9D;
+    --ci-text-on-primary: #FFFFFF;
+    --ci-primary: #2F928A;
+    --ci-primary-hover: #3AA49B;
+    --ci-primary-soft: #213B39;
+    --ci-focus-ring: rgba(47, 146, 138, 0.34);
+    --ci-shadow-sm: none;
+}
+</style>
+            """,
+            unsafe_allow_html=True,
+        )
 
 
 def normalise_text(value: object) -> str:
@@ -543,19 +817,20 @@ def render_language_bar(selected: str) -> str:
         "Language",
         options=lang_options,
         index=index,
-        format_func=lambda code: f"🌐 {SUPPORTED_LANGS[code]['short']}",
+        format_func=lambda code: SUPPORTED_LANGS[code]["short"],
         label_visibility="collapsed",
         key="ui_lang_select",
     )
     st.session_state["ui_lang"] = chosen
     return chosen
 
-def render_headline(text: dict) -> None:
-    # Separate headline from the language bar so it can sit lower on mobile.
+def render_headline(text: dict, language: str) -> None:
+    title_class = "app-title cjk-title" if language in {"zh-Hant", "zh-Hans"} else "app-title"
     st.markdown(
         f"""
-        <div class="headline-spacer"></div>
-        <div class="app-title">{text['title']}</div>
+        <div class="product-kicker">Crochet Intelligence</div>
+        <h1 class="{title_class}">{text['title']}</h1>
+        <p class="app-subtitle">{text['subtitle']}</p>
         """,
         unsafe_allow_html=True,
     )
@@ -583,7 +858,7 @@ def main() -> None:
 
     selected = render_language_bar(st.session_state["ui_lang"])
     text = UI_TEXT[selected]
-    render_headline(text)
+    render_headline(text, selected)
 
     df = load_data()
     idx = build_index(df)
@@ -606,9 +881,9 @@ def main() -> None:
                     "Terminology",
                     options=["us", "uk", "not_sure"],
                     format_func=lambda x: {
-                        "us": "US term",
-                        "uk": "UK term",
-                        "not_sure": "Not sure / show both",
+                        "us": text["terminology_us"],
+                        "uk": text["terminology_uk"],
+                        "not_sure": text["terminology_both"],
                     }[x],
                     horizontal=True,
                     label_visibility="collapsed",
@@ -625,11 +900,11 @@ def main() -> None:
 
     st.markdown(f'<div class="terminology-note">{text["terminology_note"]}</div>', unsafe_allow_html=True)
     st.markdown('<div class="feedback"></div>', unsafe_allow_html=True)
-    with st.expander(f"✉️ {text['feedback_title']}", expanded=False):
+    with st.expander(text["feedback_title"], expanded=False):
         st.caption(text["feedback_text"])
         st.link_button(text["feedback_button"], FEEDBACK_FORM_URL)
         st.caption(text["privacy_note"])
-        st.caption(f"{APP_VERSION} · Feedback is collected through Google Forms.")
+        st.caption(APP_VERSION)
 
 
 if __name__ == "__main__":

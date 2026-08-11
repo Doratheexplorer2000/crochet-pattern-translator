@@ -1,6 +1,6 @@
 # Crochet Stitch Translator Project Status
 
-Last updated: 2026-07-22
+Last updated: 2026-08-11
 
 ## Current Version
 
@@ -10,7 +10,7 @@ Application version: `v1.9a`
 
 ## Current Production Status
 
-Crochet Stitch Translator is a stable dictionary-style Streamlit application in maintenance mode. It remains independent from Crochet Pattern Translator during the current Streamlit deployment phase.
+Crochet Stitch Translator is a stable dictionary-style Streamlit application. Its production-alignment candidate now runs on the Crochet Intelligence Streamlit `1.51.0` baseline, follows the approved shared UI specification, and includes minimal Stitch-specific Railway deployment files. The work is local and pending Human UI UAT; no Stitch Translator Railway production deployment has been performed yet.
 
 ## Current Database Version
 
@@ -29,48 +29,46 @@ Accepted source snapshot: `stitches_1_8e.csv`
 - Tutorial Search: YouTube tutorial search for rows marked `tutorial_search=yes`.
 - Mobile-friendly Streamlit UI.
 - Feedback form link.
+- Crochet Intelligence Warm Modern visual alignment with light and dark mode support.
+- Streamlit 1.51.0 runtime alignment.
+- Stitch-specific Railway Dockerfile and startup command.
 
 ## Current Priorities
 
-1. Add Google Sheets anonymous usage analytics.
-2. Migrate the feedback/error-reporting Google Form and related links from the user's private Gmail/Drive to `crochetintelligence@gmail.com`.
-3. Maintain dictionary search stability.
-4. Apply terminology updates and bug fixes as needed.
-5. Improve the shared knowledge base without introducing unnecessary new features.
-6. Keep the app independent from Crochet Pattern Translator.
+1. Complete local Human UI UAT for the production-alignment candidate.
+2. Deploy Stitch Translator to its own Railway service after explicit approval.
+3. Validate search, Tutorial Search, Feedback, mobile, desktop, light mode, and dark mode in production.
+4. Implement Stitch Translator analytics only after the production baseline is approved.
+5. Continue evidence-driven terminology and knowledge-base maintenance.
 
 ## Known Issues
 
-- Shared Python modules are intentionally not introduced yet.
+- No production Stitch Translator URL exists yet.
+- Stitch Translator analytics are intentionally not implemented in this alignment RC.
 
 ## Planned Next Version
 
-Recommended next-version scope:
-
-- terminology updates;
-- bug fixes;
-- knowledge-base improvements;
-- avoid UI redesign or new features unless Human UAT shows a clear need.
+The next release step is Human UI UAT followed by the first independent Railway deployment. No feature or search-semantic expansion is included.
 
 ## Future Backlog
 
 - Better database validation workflow.
 - Possible admin/database contribution workflow.
 - Research and add Cross Single Crochet to the shared stitch database after terminology validation.
-- Future integration into a broader Crochet Intelligence platform.
+- Future Stitch analytics using the browser-side approach already validated by the platform.
 
 ## Important Design Decisions
 
-- Crochet Stitch Translator and Crochet Pattern Translator remain separate applications for now.
+- Crochet Stitch Translator and Crochet Pattern Translator remain separate applications within Crochet Intelligence.
 - Both applications should gradually share one master stitch database.
 - `stitch_id` should become the durable reference for future features.
-- Shared Python modules are postponed until after a future platform migration.
+- Shared Python modules are introduced only when they remove real duplication without coupling the applications.
 - Tutorial Search is data-driven by `tutorial_search`.
 - YouTube tutorial URLs are generated dynamically, not stored in the CSV.
+- New Stitch Railway deployments should use the dedicated Stitch Dockerfile and must not modify Pattern Translator or Portal services.
 
 ## Cross-App Strategy
 
-- Immediate work: add anonymous Google Sheets usage analytics to both Crochet Pattern Translator and Crochet Stitch Translator, and migrate feedback/error-reporting links to `crochetintelligence@gmail.com`.
-- After analytics and error-report migration: conduct External UAT while collecting real usage, performance, failure, and reliability data.
-- Use the collected evidence to evaluate Streamlit Community Cloud viability, including quota limits, sleeping, crashes, and resource failures.
-- Later: evaluate a new deployment platform. The Crochet Intelligence landing page should wait until the deployment-platform direction is clearer, to avoid building and moving it twice.
+- The independent Astro Portal is the platform entry point and presents Pattern Translator and Stitch Translator equally.
+- Pattern Translator is already deployed to Railway; Stitch Translator is being aligned to the same production runtime and product family before its independent Railway deployment.
+- Stitch analytics follows only after the aligned production baseline passes Human UAT.

@@ -18,7 +18,7 @@ pattern_translator/app.py
 
 ## Current Production Status
 
-Crochet Pattern OCR Translator is the current OCR-based pattern translation app. The Contextual LLM translation baseline at `cddd55cf06bea39b6879add00d8db0416e109092` is deployed to Railway from GitHub `main` and has passed Production Owner Smoke UAT. RC28 remains the final fully validated Streamlit production architecture and rollback baseline. The first External UAT phase concluded with positive results from real crochet users.
+Crochet Pattern OCR Translator is the current OCR-based pattern translation app. RC54B at `8b6a6195f85baf5967f42ef2d6acc105741950b3` is deployed to Railway from GitHub `main` and has passed Production Human UAT. It includes the production-validated Contextual LLM translation baseline and the completed Components V2 analytics transport. RC28 remains the validated rollback baseline. The first External UAT phase concluded with positive results from real crochet users.
 
 RC42 completed the first Engine Extraction by moving the CSV terminology / lookup engine into `pattern_translator/engine/terminology.py`. RC43 extracted pure line-translation logic into `pattern_translator/engine/line_translation.py`. RC44 extracted Diagnostic Report construction and formatting into `pattern_translator/engine/diagnostic_report.py`. RC45 completed Boundary Cleanup. RC46 extracted overlay rendering into `pattern_translator/engine/overlay.py`. RC47 extracted Pattern Document responsibilities into `pattern_translator/engine/pattern_document.py`. RC48 extracted OCR line assembly into `pattern_translator/engine/ocr_lines.py`. RC49 extracted deterministic OCR cleanup into `pattern_translator/engine/ocr_cleanup.py`, completing Engine Migration and Domain Layer extraction. Regression and Human UAT passed with no user-visible behavior changes, and the completed engine layer is included in the current production release.
 
@@ -64,8 +64,8 @@ Current Phase: Platform Analytics
 Purpose:
 
 - Preserve the approved RC51 Pattern Translator Home Screen and frozen RC52 custom-component baseline.
-- Preserve the production-validated RC54A Components V2 analytics bridge baseline.
-- Plan RC54B separately to migrate the remaining Pattern Translator V1 analytics transport to the validated V2 bridge; RC54B has not started.
+- Preserve the production-validated RC54B Components V2 analytics transport baseline.
+- All five current Pattern Translator Plausible events use the shared Components V2 bridge; no V1 Plausible analytics dependency remains.
 - Reuse the browser-side analytics approach validated in the Portal while keeping translator analytics observational and non-blocking.
 - Keep Google Sheets Product Facts as a later RC54 milestone.
 - Defer Portal visual refinement until after analytics.
@@ -74,7 +74,7 @@ Roadmap decisions:
 
 - Preserve RC28 as the validated Railway rollback target.
 - Preserve the completed Engine Migration and Domain Layer extraction now included in the production release.
-- Preserve the RC54A analytics baseline while RC54B remains unstarted.
+- Preserve the completed RC54B analytics transport baseline.
 - Do not use the unreliable `app_open` event as the basis of platform visitor analytics.
 - Plausible Starter is integrated into the Portal. Human UAT confirmed Portal pageview tracking and the `portal_pattern_selected` custom event.
 - Browser-side analytics transport has been validated and will be reused by the translators.
@@ -123,13 +123,22 @@ The Portal Skeleton is functionally complete and frozen. It is an independent As
 - Architecture: added one frameless Components V2 Plausible bridge that mounts near the start of `app.py`, reads the shared `PUBLIC_PLAUSIBLE_SCRIPT_URL`, and injects the personalized tracker once into the main browser page.
 - Scope: migrated only `pattern_translation_completed`. Upload, PNG download, TXT download, and feedback remain on the existing Components V1 transport and are reserved for RC54B.
 - Rerun handoff: one pending event slot carries a completed translation across the required `st.rerun()`; the previous V1 list/counter queue is not used for the migrated event.
+
 - Local validation: Python compilation passed; Streamlit 1.51 startup passed; the bridge rendered without an analytics iframe; one tracker script remained after a Streamlit rerun; one completed-translation probe dispatched once and an unrelated rerun produced no duplicate; `git diff --check` passed.
 - Production validation: Railway production tracks GitHub `main`; Chrome on macOS confirmed the personalized script and accepted Plausible event request in the main page. One completed translation generated exactly one `pattern_translation_completed` event, ordinary Streamlit reruns generated no duplicate, and the event appeared in the existing Portal Plausible dashboard.
 - Single-site architecture: production uses one Plausible Starter site, `crochet-intelligence-portal-production.up.railway.app`. Pattern Translator uses the same personalized script/site while preserving its production URL in the event URL.
-- Production event baseline: `pattern_image_uploaded`, `pattern_translation_completed`, `pattern_png_downloaded`, `pattern_txt_downloaded`, and `pattern_feedback_clicked` each appeared once during the smoke test. The four non-translation events remain on the V1 transport pending RC54B. Plausible `/` and `Outbound Link: Click` entries are platform page/outbound-link tracking, not Pattern Translator custom product goals.
+- Production event baseline at RC54A closeout: `pattern_image_uploaded`, `pattern_translation_completed`, `pattern_png_downloaded`, `pattern_txt_downloaded`, and `pattern_feedback_clicked` each appeared once during the smoke test. The four non-translation events still used V1 at that historical stage. Plausible `/` and `Outbound Link: Click` entries are platform page/outbound-link tracking, not Pattern Translator custom product goals.
 - Regression smoke test: Streamlit 1.51 production testing passed for Whole Pattern, Select Area/cropper, overlay, PNG download, TXT download, and Feedback in Chrome on macOS, with no functional regression observed.
-- Next step: RC54B is not started. Its purpose is to migrate the remaining V1 Pattern analytics transport to the production-validated V2 bridge.
+- Next step at RC54A closeout: RC54B had not started; its purpose was to migrate the remaining V1 Pattern analytics transport to the production-validated V2 bridge.
 - Boundary: OCR, translation, overlay, diagnostics, exports, upload, cropper, and existing non-migrated analytics behavior are unchanged.
+
+### RC54B (completed; Production Human UAT PASS)
+
+- Production revision: `8b6a6195f85baf5967f42ef2d6acc105741950b3` on Railway at `https://pattern-translator-production.up.railway.app/`.
+- Transport: `pattern_image_uploaded`, `pattern_translation_completed`, `pattern_png_downloaded`, `pattern_txt_downloaded`, and `pattern_feedback_clicked` all use the production-validated Components V2 bridge.
+- Cleanup: the obsolete Components V1 Plausible analytics component and dependency were removed. The custom uploader and cropper remain Components V1 and are unaffected.
+- Validation: five genuine production actions were verified successfully with no observed rerun duplicates, analytics UI regression, or Pattern Translator functional regression.
+- Deliberate exclusion: Diagnostic Report analytics is not included because its `on_click="ignore"` download path would require a different browser-side tracking mechanism.
 
 ### RC52 (completed locally)
 
@@ -329,10 +338,10 @@ The Portal Skeleton is functionally complete and frozen. It is an independent As
 
 Current platform sequence:
 
-1. Implement RC54 Phase 2 translator analytics events using the validated browser-side transport.
-2. Add Google Sheets Product Facts in a later RC54 milestone.
-3. Refine Portal visual design and branding.
-4. Migrate Stitch Translator to Railway when separately approved.
+1. Align Stitch Translator with Streamlit 1.51.0, the shared UI specification, and Railway production requirements.
+2. Implement Stitch Translator analytics using the validated browser-side transport after its production baseline passes Human UAT.
+3. Add Google Sheets Product Facts in a later RC54 milestone.
+4. Refine Portal visual design and branding.
 5. Introduce shared infrastructure improvements when appropriate.
 
 Additional deferred work:

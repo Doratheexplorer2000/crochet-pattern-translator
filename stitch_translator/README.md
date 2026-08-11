@@ -2,7 +2,7 @@
 
 Dictionary-style crochet terminology lookup.
 
-Crochet Stitch Translator is an independent application within the broader Crochet Intelligence ecosystem. It should remain separate from Crochet Pattern Translator during the current Streamlit phase, while gradually moving toward the same master stitch database strategy.
+Crochet Stitch Translator is an independent application within the Crochet Intelligence platform. It shares the platform's visual language and master stitch database strategy while retaining its own focused search workflow and deployment boundary.
 
 Current local working version:
 
@@ -28,10 +28,12 @@ v1.9a
 ## Current Project Status
 
 - Official version: `v1.9a`
-- Development phase: maintenance mode
+- Runtime baseline: Streamlit `1.51.0`
+- Development phase: production alignment implemented locally; Human UI UAT and first Railway deployment pending
 - Current production database: `knowledge_base/data/master_stitches.csv`
 - Source snapshot: `stitches_1_8e.csv`
-- Future work: terminology updates, bug fixes, and knowledge-base improvements
+- Visual baseline: `Brand identity & UI/UI_SPEC.md`
+- Analytics: not implemented for Stitch Translator yet
 
 ## Current Database
 
@@ -52,15 +54,32 @@ The app treats blank `search_status` values as active and excludes inactive rows
 ## Run Locally
 
 ```bash
-python3 -m streamlit run stitch_translator/app.py
+python3 -m streamlit run stitch_translator/app.py --client.toolbarMode=minimal --theme.primaryColor="#0F766E"
 ```
+
+The repository's local Pattern Translator Python 3.11 environment may also be used when it contains the pinned Stitch dependencies.
+
+## Railway Readiness
+
+The local production-alignment candidate includes a Stitch-specific Docker image and startup command:
+
+```text
+stitch_translator/Dockerfile
+stitch_translator/railway_start.sh
+```
+
+Railway should use `stitch_translator/Dockerfile` with the repository root as its build context. No Stitch Translator Railway production deployment has been performed yet.
+
+## Visual Baseline
+
+The interface uses the approved Crochet Intelligence Warm Modern system: Warm Linen White and charcoal page surfaces, Primary Teal controls, Noto-family typography, restrained bordered cards, visible focus states, mobile-first spacing, and system-aware light/dark presentation. The search, US/UK terminology, results, symbols, Tutorial Search, and Feedback workflows remain functionally unchanged.
 
 ## Tutorial Search
 
 Rows marked with `tutorial_search=yes` display:
 
 ```text
-🎥 Search Tutorials
+Search tutorials
 ```
 
 The YouTube search URL is generated dynamically from the canonical stitch name in the master database and the current interface language.
