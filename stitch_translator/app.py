@@ -2,13 +2,15 @@
 # Run from the repository root with:
 # python3 -m streamlit run stitch_translator/app.py
 
+import os
+import html
 import re
 import unicodedata
 import uuid
 from difflib import SequenceMatcher
 from pathlib import Path
 from typing import MutableMapping, Optional
-from urllib.parse import quote_plus
+from urllib.parse import parse_qsl, quote_plus, urlencode, urlsplit, urlunsplit
 
 import pandas as pd
 import streamlit as st
@@ -23,6 +25,8 @@ from crochet_intelligence.plausible_bridge import (
 APP_VERSION = "v1.9a"
 
 FEEDBACK_FORM_URL = "https://forms.gle/dNr7BXJuVaaosGyw6"
+DEFAULT_PORTAL_URL = "https://crochet-intelligence-portal-production.up.railway.app/"
+PORTAL_URL = os.getenv("CROCHET_INTELLIGENCE_PORTAL_URL", DEFAULT_PORTAL_URL).strip() or DEFAULT_PORTAL_URL
 BASE_DIR = Path(__file__).resolve().parent
 REPO_ROOT = BASE_DIR.parent
 KNOWLEDGE_BASE_DIR = REPO_ROOT / "knowledge_base"
@@ -39,6 +43,7 @@ SUPPORTED_LANGS = {
 
 UI_TEXT = {
     "en": {
+        "back_to_portal": "Back to Crochet Intelligence",
         "title": "Crochet Stitch Translator",
         "subtitle": "Find crochet stitch terms across US, UK, Chinese, and Japanese.",
         "placeholder": "dc, double crochet, 長針, 长针, 長編み",
@@ -61,6 +66,7 @@ UI_TEXT = {
         "terminology_both": "Not sure / show both",
     },
     "zh-Hant": {
+        "back_to_portal": "返回 Crochet Intelligence",
         "title": "鈎織針法翻譯器",
         "subtitle": "搜尋美式、英式、中文及日文鈎織針法術語。",
         "placeholder": "dc, double crochet, 長針, 长针, 長編み",
@@ -83,6 +89,7 @@ UI_TEXT = {
         "terminology_both": "不確定／顯示兩者",
     },
     "zh-Hans": {
+        "back_to_portal": "返回 Crochet Intelligence",
         "title": "钩织针法翻译器",
         "subtitle": "搜索美式、英式、中文及日文钩织针法术语。",
         "placeholder": "dc, double crochet, 長針, 长针, 長編み",
@@ -105,6 +112,7 @@ UI_TEXT = {
         "terminology_both": "不确定／显示两者",
     },
     "ja": {
+        "back_to_portal": "Crochet Intelligence に戻る",
         "title": "かぎ針編みステッチ翻訳",
         "subtitle": "米式・英式・中国語・日本語のかぎ針編み用語を検索できます。",
         "placeholder": "dc, double crochet, 長針, 长针, 長編み",
@@ -574,7 +582,7 @@ def detect_lang_from_browser() -> None:
             """
             <script>
             const params = new URLSearchParams(window.parent.location.search);
-            if (!params.has('browser_lang')) {
+            if (!params.has('browser_lang') && !params.has('ui_lang')) {
                 const lang = navigator.language || navigator.userLanguage || 'en';
                 params.set('browser_lang', lang);
                 window.parent.history.replaceState({}, '', window.parent.location.pathname + '?' + params.toString());
@@ -600,6 +608,21 @@ def map_browser_lang(raw: Optional[str]) -> str:
     if raw.startswith("en"):
         return "en"
     return "en"
+
+
+def resolve_interface_language(params) -> str:
+    requested = get_query_param(params, "ui_lang", "")
+    if requested in SUPPORTED_LANGS:
+        return requested
+    return map_browser_lang(get_query_param(params, "browser_lang", ""))
+
+
+def portal_url_for_language(language: str) -> str:
+    selected_language = language if language in SUPPORTED_LANGS else "en"
+    parts = urlsplit(PORTAL_URL)
+    query = dict(parse_qsl(parts.query, keep_blank_values=True))
+    query["ui_lang"] = selected_language
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment))
 
 
 def score_match(query_norm: str, term_norm: str) -> float:
@@ -704,7 +727,9 @@ def zh_hans_display(value: str) -> str:
     return str(value or "").translate(ZH_HANS_DISPLAY)
 
 
-def build_tutorial_search_query(row: pd.Series, ui_lang: str) -> str:
+def build_tutorial_search_query(
+    row: pd.Series, ui_lang: str, search_keyword: str = ""
+) -> str:
     canonical = str(row.get("US_term", "")).strip()
     localized = ""
     if ui_lang == "zh-Hant":
@@ -714,14 +739,20 @@ def build_tutorial_search_query(row: pd.Series, ui_lang: str) -> str:
     elif ui_lang == "ja":
         localized = str(row.get("Japanese", "")).strip()
 
-    parts = ["crochet", canonical]
-    if localized and localized.casefold() != canonical.casefold():
-        parts.append(localized)
+    parts = ["crochet"]
+    seen = {"crochet"}
+    for value in (canonical, localized, str(search_keyword or "").strip()):
+        key = value.casefold()
+        if value and key not in seen:
+            parts.append(value)
+            seen.add(key)
     return " ".join(part for part in parts if part).strip()
 
 
-def build_tutorial_search_url(row: pd.Series, ui_lang: str) -> str:
-    query = build_tutorial_search_query(row, ui_lang)
+def build_tutorial_search_url(
+    row: pd.Series, ui_lang: str, search_keyword: str = ""
+) -> str:
+    query = build_tutorial_search_query(row, ui_lang, search_keyword)
     return f"https://www.youtube.com/results?search_query={quote_plus(query)}"
 
 
@@ -808,7 +839,7 @@ def render_result_card(row: pd.Series, text: dict, search_keyword: str) -> None:
 
     if raw("tutorial_search").lower() == "yes":
         ui_lang = st.session_state.get("ui_lang", "en")
-        tutorial_url = build_tutorial_search_url(row, ui_lang)
+        tutorial_url = build_tutorial_search_url(row, ui_lang, search_keyword)
         stitch_id = raw("stitch_id") or str(row.name)
         tracked = plausible_link_button(
             text["tutorial_button"],
@@ -826,24 +857,6 @@ def render_result_card(row: pd.Series, text: dict, search_keyword: str) -> None:
         st.caption(text["tutorial_note"])
 
 
-
-def render_language_bar(selected: str) -> str:
-    """Use native Streamlit selectbox so changing language triggers a real rerun.
-    The earlier iframe selector looked better, but did not reliably update the main app state on mobile.
-    """
-    lang_options = list(SUPPORTED_LANGS.keys())
-    index = lang_options.index(selected) if selected in lang_options else 0
-
-    chosen = st.selectbox(
-        "Language",
-        options=lang_options,
-        index=index,
-        format_func=lambda code: SUPPORTED_LANGS[code]["short"],
-        label_visibility="collapsed",
-        key="ui_lang_select",
-    )
-    st.session_state["ui_lang"] = chosen
-    return chosen
 
 def render_headline(text: dict, language: str) -> None:
     title_class = "app-title cjk-title" if language in {"zh-Hant", "zh-Hans"} else "app-title"
@@ -897,17 +910,14 @@ def main() -> None:
     detect_lang_from_browser()
 
     params = st.query_params
-    browser_lang = get_query_param(params, "browser_lang", "")
-    default_lang = map_browser_lang(browser_lang)
-
-    lang_options = list(SUPPORTED_LANGS.keys())
-
-    if "ui_lang" not in st.session_state:
-        initial_lang = get_query_param(params, "ui_lang", default_lang)
-        st.session_state["ui_lang"] = initial_lang if initial_lang in lang_options else "en"
-
-    selected = render_language_bar(st.session_state["ui_lang"])
+    selected = resolve_interface_language(params)
+    st.session_state["ui_lang"] = selected
     text = UI_TEXT[selected]
+    st.markdown(
+        f'<a href="{html.escape(portal_url_for_language(selected), quote=True)}" '
+        f'target="_self">← {html.escape(text["back_to_portal"])}</a>',
+        unsafe_allow_html=True,
+    )
     render_headline(text, selected)
 
     df = load_data()

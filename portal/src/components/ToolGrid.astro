@@ -40,6 +40,7 @@ const fallbackContent = {
           <a
             class:list={["button-link", tool.analyticsEvent && `plausible-event-name=${tool.analyticsEvent}`]}
             href={tool.href}
+            data-tool-href={tool.href}
             data-i18n={`tools.${tool.translationKey}.action`}
           >
             {fallbackContent[tool.translationKey].action}

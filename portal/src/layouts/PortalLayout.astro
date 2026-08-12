@@ -63,6 +63,26 @@ const plausibleScriptUrl = import.meta.env.PUBLIC_PLAUSIBLE_SCRIPT_URL?.trim() |
         }
       }
 
+      function queryLocale() {
+        const value = new URLSearchParams(window.location.search).get("ui_lang");
+        return supportedLocales.includes(value) ? value : null;
+      }
+
+      function updateToolLinks(locale) {
+        document.querySelectorAll("a[data-tool-href]").forEach((element) => {
+          const configuredHref = element.getAttribute("data-tool-href");
+          if (!configuredHref) return;
+
+          try {
+            const toolUrl = new URL(configuredHref, window.location.href);
+            toolUrl.searchParams.set("ui_lang", locale);
+            element.setAttribute("href", toolUrl.toString());
+          } catch {
+            // A malformed configured tool URL must not break Portal rendering.
+          }
+        });
+      }
+
       function applyLocale(locale) {
         const selectedLocale = supportedLocales.includes(locale) ? locale : defaultLocale;
         const messages = translations[selectedLocale];
@@ -80,6 +100,7 @@ const plausibleScriptUrl = import.meta.env.PUBLIC_PLAUSIBLE_SCRIPT_URL?.trim() |
 
         const selector = document.querySelector("#language-selector");
         if (selector) selector.value = selectedLocale;
+        updateToolLinks(selectedLocale);
 
         try {
           window.localStorage.setItem("ci_portal_language", selectedLocale);
@@ -109,7 +130,7 @@ const plausibleScriptUrl = import.meta.env.PUBLIC_PLAUSIBLE_SCRIPT_URL?.trim() |
         trackLanguageChange(selectedLocale);
       });
 
-      applyLocale(storedLocale() || browserLocale());
+      applyLocale(queryLocale() || storedLocale() || browserLocale());
     </script>
   </body>
 </html>

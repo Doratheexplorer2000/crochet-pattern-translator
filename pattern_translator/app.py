@@ -23,6 +23,7 @@ import time
 import unicodedata
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import numpy as np
 import pandas as pd
@@ -60,6 +61,8 @@ SOURCE_CSV = KNOWLEDGE_BASE_DIR / "data" / "master_stitches.csv"
 FALLBACK_CSV = KNOWLEDGE_BASE_DIR / "releases" / "database" / "stitches_1_8e.csv"
 DEBUG_MODE = os.getenv("CROCHET_DEBUG", "").strip().lower() in {"1", "true", "yes", "on"}
 FEEDBACK_FORM_URL = "https://docs.google.com/forms/d/e/1FAIpQLScoDrN0xsyOg800O8Pw7aXAa5GREQIU-RmxlmXIlBOE7y_Q_w/viewform"
+DEFAULT_PORTAL_URL = "https://crochet-intelligence-portal-production.up.railway.app/"
+PORTAL_URL = os.getenv("CROCHET_INTELLIGENCE_PORTAL_URL", DEFAULT_PORTAL_URL).strip() or DEFAULT_PORTAL_URL
 SELECT_AREA_PREVIEW_WIDTH = 360
 
 TRANSLATION_PROFILE: Optional[Dict[str, Dict[str, float]]] = None
@@ -118,7 +121,7 @@ ocr_lines_engine.configure_profile_context(
     profile_add_time,
 )
 
-st.set_page_config(page_title="Crochet Translator", page_icon="🧶", layout="centered")
+st.set_page_config(page_title="Crochet Pattern Translator", page_icon="🧶", layout="centered")
 
 st.markdown(
     """
@@ -200,6 +203,13 @@ div[data-testid="stCaptionContainer"] {
     opacity: 1;
 }
 p, label, li { line-height: 24px; }
+.product-kicker {
+    margin: 16px 0 0;
+    color: var(--ci-primary);
+    font-size: 14px;
+    line-height: 20px;
+    font-weight: 600;
+}
 .small-note {
     color: var(--ci-text-secondary);
     font-size: 14px;
@@ -212,11 +222,6 @@ p, label, li { line-height: 24px; }
     padding: 12px 16px;
     background: rgba(217, 154, 36, 0.09);
     color: var(--ci-text-primary);
-    font-size: 14px;
-    line-height: 21px;
-}
-.privacy-box {
-    color: var(--ci-text-secondary);
     font-size: 14px;
     line-height: 21px;
 }
@@ -1682,10 +1687,9 @@ def make_area_preview(image: Image.Image, box: Tuple[int, int, int, int]) -> Ima
 # -----------------------------
 INTERFACE_LANGUAGES = {
     "English": {
-        "app_title": "Crochet Translator",
+        "app_title": "Crochet Pattern Translator",
         "app_subtitle": "Pattern OCR Translator (Beta)",
-        "privacy_expander": "Privacy / storage note",
-        "privacy": "Please only upload images you have permission to use, or images used for personal study/reference. This beta does not intentionally store uploaded images or OCR results; files are processed only for the current session. Anonymous usage statistics (such as country, app usage and performance) are collected to help improve the app. No personal information, IP addresses or uploaded images are stored. When AI assistance is enabled, extracted text—not uploaded images—may be sent to OpenAI only to translate unresolved pattern instructions. No user identity or analytics identifier is included in that request.",
+        "back_to_portal": "Back to Crochet Intelligence",
         "ai_translation_note": "AI may assist with unresolved instruction text. Crochet terminology and pattern structure are handled conservatively. Designer shorthand varies; check results against the original pattern and the designer's stitch key.",
         "intro": "Translate crochet pattern images with OCR overlay and line-by-line translation.",
         "source_label": "Pattern language / terminology",
@@ -1809,9 +1813,8 @@ INTERFACE_LANGUAGES = {
         "language_japanese": "Japanese",
     },
     "繁體中文": {
-        "privacy": "請只上載你有權使用的圖片，或只作個人學習／參考用途的圖片。本測試版不會刻意儲存上載圖片或文字辨識結果；檔案只在本次使用期間中處理。系統會收集匿名使用統計資料（例如國家／地區、應用程式使用情況和效能），以協助改善應用程式。不會儲存個人資料、IP 位址或上載圖片。啟用 AI 輔助時，系統可能只把擷取出的文字（不包括上載圖片）傳送至 OpenAI，以協助翻譯尚未解決的圖樣指示；請求不會包含使用者身分或分析識別資料。",
+        "back_to_portal": "返回 Crochet Intelligence",
         "ai_translation_note": "AI 可能協助翻譯尚未解決的指示文字。鈎織術語及圖樣結構會以保守方式處理。不同設計師的簡寫可能不同，請對照原圖樣及設計師的針法說明。",
-        "privacy_expander": "私隱／儲存說明",
         "intro": "上載鈎織圖樣圖片，取得圖片標示翻譯及逐行翻譯。",
         "app_title": "鈎織翻譯器",
         "app_subtitle": "圖樣文字辨識翻譯器（測試版）",
@@ -1936,9 +1939,8 @@ INTERFACE_LANGUAGES = {
         "language_japanese": "日文",
     },
     "简体中文": {
-        "privacy": "请只上传你有权使用的图片，或只作个人学习／参考用途的图片。本测试版不会刻意储存上传图片或文字识别结果；文件只在本次使用期间中处理。系统会收集匿名使用统计资料（例如国家／地区、应用程序使用情况和性能），以帮助改善应用程序。不会储存个人资料、IP 地址或上传图片。启用 AI 辅助时，系统可能只把提取出的文字（不包括上传图片）发送至 OpenAI，以协助翻译尚未解决的图样指示；请求不会包含用户身份或分析标识资料。",
+        "back_to_portal": "返回 Crochet Intelligence",
         "ai_translation_note": "AI 可能协助翻译尚未解决的指示文字。钩织术语及图样结构会以保守方式处理。不同设计师的简写可能不同，请对照原图样及设计师的针法说明。",
-        "privacy_expander": "隐私／存储说明",
         "intro": "上传钩织图样图片，获得图片标示翻译和逐行翻译。",
         "app_title": "钩织翻译器",
         "app_subtitle": "图样文字识别翻译器（测试版）",
@@ -2063,9 +2065,8 @@ INTERFACE_LANGUAGES = {
         "language_japanese": "日文",
     },
     "日本語": {
-        "privacy": "使用許可のある画像、または個人学習・参考用の画像のみアップロードしてください。このベータ版はアップロード画像やOCR結果を意図的に保存しません。ファイルは現在の利用中のみ処理されます。アプリ改善のため、国、アプリ利用状況、パフォーマンスなどの匿名使用統計を収集します。個人情報、IPアドレス、アップロード画像は保存されません。AI補助が有効な場合、未解決のパターン指示を翻訳する目的で、抽出されたテキストのみ（アップロード画像は含みません）がOpenAIへ送信されることがあります。リクエストにはユーザーの身元情報や分析用識別子を含めません。",
+        "back_to_portal": "Crochet Intelligence に戻る",
         "ai_translation_note": "AIが未解決の指示文の翻訳を補助する場合があります。かぎ針編み用語とパターン構造は慎重に保持されます。デザイナー独自の略語は異なるため、元のパターンとデザイナーのステッチキーをご確認ください。",
-        "privacy_expander": "プライバシー／保存について",
         "intro": "かぎ針編みパターン画像をアップロードして、画像上の翻訳と行ごとの翻訳を確認できます。",
         "app_title": "かぎ針編み翻訳",
         "app_subtitle": "パターンOCR翻訳（ベータ版）",
@@ -2513,14 +2514,15 @@ init_rc3_state()
 mount_plausible_bridge(st.session_state.pop("pending_plausible_v2_event", None))
 st.session_state["rc10b_rerun_count"] = st.session_state.get("rc10b_rerun_count", 0) + 1
 
-INTERFACE_LANGUAGE_DISPLAY_LABELS = {
-    "English": "EN",
-    "繁體中文": "繁中",
-    "简体中文": "简中",
-    "日本語": "日本語",
+CANONICAL_INTERFACE_LANGUAGES = {
+    "en": "English",
+    "zh-Hant": "繁體中文",
+    "zh-Hans": "简体中文",
+    "ja": "日本語",
 }
-
-INTERFACE_LANGUAGE_OPTIONS = ["English", "繁體中文", "简体中文", "日本語"]
+INTERFACE_LANGUAGE_CANONICAL_KEYS = {
+    value: key for key, value in CANONICAL_INTERFACE_LANGUAGES.items()
+}
 
 def detect_initial_interface_language() -> str:
     raw_locale = ""
@@ -2553,17 +2555,27 @@ def detect_initial_interface_language() -> str:
 
     return "English"
 
-initial_interface_language = detect_initial_interface_language()
-initial_interface_language_index = INTERFACE_LANGUAGE_OPTIONS.index(initial_interface_language)
 
-interface_language = st.selectbox(
-    "Language",
-    INTERFACE_LANGUAGE_OPTIONS,
-    index=initial_interface_language_index,
-    key="interface_language_selector",
-    format_func=lambda value: INTERFACE_LANGUAGE_DISPLAY_LABELS.get(value, value),
-    width="stretch",
+def resolve_interface_language(query_value: object, fallback: str) -> str:
+    if isinstance(query_value, list):
+        query_value = query_value[0] if query_value else ""
+    return CANONICAL_INTERFACE_LANGUAGES.get(str(query_value or ""), fallback)
+
+
+def portal_url_for_language(language: str) -> str:
+    canonical_language = INTERFACE_LANGUAGE_CANONICAL_KEYS.get(language, "en")
+    parts = urlsplit(PORTAL_URL)
+    query = dict(parse_qsl(parts.query, keep_blank_values=True))
+    query["ui_lang"] = canonical_language
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment))
+
+
+initial_interface_language = detect_initial_interface_language()
+interface_language = resolve_interface_language(
+    st.query_params.get("ui_lang", ""), initial_interface_language
 )
+st.session_state["interface_language_selector"] = interface_language
+st.session_state["ui_lang"] = INTERFACE_LANGUAGE_CANONICAL_KEYS.get(interface_language, "en")
 ui_text = INTERFACE_LANGUAGES.get(interface_language, INTERFACE_LANGUAGES["English"])
 
 def t(key: str) -> str:
@@ -2613,6 +2625,12 @@ AREA_LABEL_KEYS = {
 }
 
 
+st.markdown(
+    f'<a href="{html.escape(portal_url_for_language(interface_language), quote=True)}" '
+    f'target="_self">← {html.escape(t("back_to_portal"))}</a>',
+    unsafe_allow_html=True,
+)
+st.markdown('<div class="product-kicker">Crochet Intelligence</div>', unsafe_allow_html=True)
 st.title(t("app_title"))
 st.caption(t("app_subtitle"))
 
@@ -2683,11 +2701,6 @@ if upload_removed and st.session_state.get("rc3_image_signature") is not None:
 
 if image_file is None:
     rc10b_note_image_absent()
-    with st.expander(t("privacy_expander"), expanded=False):
-        st.markdown(
-            f"<div class='privacy-box'>{ui_text['privacy']}</div>",
-            unsafe_allow_html=True,
-        )
 
 if image_file is not None:
     current_signature = image_upload_signature(image_file)

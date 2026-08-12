@@ -52,6 +52,33 @@ class StitchTranslatorRegressionTests(unittest.TestCase):
         )
         self.assertIn("youtube.com/results?search_query=", app.build_tutorial_search_url(result, "en"))
 
+    def test_tutorial_search_preserves_submitted_stitch_across_interface_languages(self):
+        result = app.search("長長長針", self.database, self.index).iloc[0]
+
+        traditional = app.build_tutorial_search_query(result, "zh-Hant", "長長長針")
+        japanese = app.build_tutorial_search_query(result, "ja", "長長長針")
+
+        self.assertEqual(traditional, "crochet double treble crochet 長長長針")
+        self.assertEqual(japanese, traditional)
+
+    def test_portal_locale_and_direct_entry_fallback_are_resolved(self):
+        for language in ("en", "zh-Hant", "zh-Hans", "ja"):
+            self.assertEqual(app.resolve_interface_language({"ui_lang": language}), language)
+
+        self.assertEqual(app.resolve_interface_language({}), "en")
+        self.assertEqual(
+            app.resolve_interface_language({"ui_lang": "invalid", "browser_lang": "zh-TW"}),
+            "zh-Hant",
+        )
+
+    def test_portal_return_link_preserves_interface_language(self):
+        for language in ("en", "zh-Hant", "zh-Hans", "ja"):
+            self.assertEqual(
+                app.portal_url_for_language(language),
+                "https://crochet-intelligence-portal-production.up.railway.app/"
+                f"?ui_lang={language}",
+            )
+
     def test_search_analytics_dispatches_once_per_changed_submission(self):
         state = {}
 
@@ -120,9 +147,16 @@ class StitchTranslatorRegressionTests(unittest.TestCase):
             source,
         )
         self.assertNotIn("components.v2.component", source)
+        self.assertNotIn("def render_language_bar", source)
+        self.assertNotIn('key="ui_lang_select"', source)
+        self.assertIn("selected = resolve_interface_language(params)", source)
+        self.assertIn("portal_url_for_language(selected)", source)
+        self.assertIn('target="_self"', source)
+        self.assertIn('text["privacy_note"]', source)
 
     def test_all_interface_languages_have_complete_visible_copy(self):
         required = {
+            "back_to_portal",
             "title",
             "subtitle",
             "search_label",
