@@ -392,6 +392,6 @@ Light Mode and Dark Mode are equally supported. Mobile UI evidence must come fro
 
 The Crochet Intelligence Portal Skeleton architecture and Information Architecture are frozen after Human UAT. Preserve this baseline unless a new Goal, Success Criteria, and Out of Scope explicitly justify a structural change.
 
-- Follow the approved sequence: Platform Analytics first, then Portal visual refinement and branding.
+- RC54 Analytics and Portal Centralization are completed and production-validated. Portal visual refinement and branding are the next recorded Pre-Launch priority.
 - Add future tools through the Portal's tool configuration rather than redesigning its Information Architecture.
 - Describe analytics capabilities only after validation is complete. RC54 production-validated shared Plausible analytics across the Portal, Pattern Translator, and Stitch Translator, with Production Human UAT PASS. Google Sheets Product Facts remain unimplemented and require separate approval.

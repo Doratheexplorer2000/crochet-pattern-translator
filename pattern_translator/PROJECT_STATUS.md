@@ -18,7 +18,7 @@ pattern_translator/app.py
 
 ## Current Production Status
 
-Crochet Pattern OCR Translator is the current OCR-based pattern translation app. RC54B at `8b6a6195f85baf5967f42ef2d6acc105741950b3` is deployed to Railway from GitHub `main` and has passed Production Human UAT. It includes the production-validated Contextual LLM translation baseline and the completed Components V2 analytics transport. RC28 remains the validated rollback baseline. The first External UAT phase concluded with positive results from real crochet users.
+Crochet Pattern OCR Translator is the current OCR-based pattern translation app. Portal Centralization at `5e975741a9a53c1835120f0cdb24a60f5af706b1` is deployed to Railway from GitHub `main` and has passed Production Human UAT. It includes the production-validated Contextual LLM translation baseline and completed Components V2 analytics transport. RC28 remains the validated rollback baseline.
 
 RC42 completed the first Engine Extraction by moving the CSV terminology / lookup engine into `pattern_translator/engine/terminology.py`. RC43 extracted pure line-translation logic into `pattern_translator/engine/line_translation.py`. RC44 extracted Diagnostic Report construction and formatting into `pattern_translator/engine/diagnostic_report.py`. RC45 completed Boundary Cleanup. RC46 extracted overlay rendering into `pattern_translator/engine/overlay.py`. RC47 extracted Pattern Document responsibilities into `pattern_translator/engine/pattern_document.py`. RC48 extracted OCR line assembly into `pattern_translator/engine/ocr_lines.py`. RC49 extracted deterministic OCR cleanup into `pattern_translator/engine/ocr_cleanup.py`, completing Engine Migration and Domain Layer extraction. Regression and Human UAT passed with no user-visible behavior changes, and the completed engine layer is included in the current production release.
 
@@ -28,7 +28,7 @@ Phase A Brand Identity Foundation is complete. RC51 completed the first Phase B 
 
 RC52 completed the custom Select Area component and finalized the upload-to-crop workflow. Human UAT passed on iPhone Safari, Android Chrome, and Desktop Chrome with no remaining functional issues. At RC52 closeout, the work was production-ready and frozen locally while RC28 was the deployed production baseline.
 
-The independent Astro Portal Skeleton is now the Crochet Intelligence platform entry point. Its architecture and Information Architecture are frozen after Human UAT. The Portal has been deployed independently to Railway and is now the primary platform entry point at `https://crochet-intelligence-portal-production.up.railway.app`. Pattern Translator and Stitch Translator are presented as equal tools. RC54 shared Plausible analytics is complete with Production Human UAT PASS; Portal visual refinement and branding remain separately planned work.
+The independent Astro Portal is the Crochet Intelligence platform entry point. Portal Centralization is completed and closed after Production Human UAT: the Portal owns interface-language selection and general Privacy & Terms, passes canonical `ui_lang` values to both tools, and receives same-tab return navigation with language preservation. RC54 shared Plausible analytics remains closed and production-validated.
 
 ## Current Database
 
@@ -59,7 +59,7 @@ stitches_1_8e.csv
 
 ## Current Priorities
 
-Current Phase: RC54 Analytics completed; Production Human UAT PASS
+Current Phase: Portal Centralization completed and closed; Production Human UAT PASS
 
 Purpose:
 
@@ -68,7 +68,7 @@ Purpose:
 - All five current Pattern Translator Plausible events use the shared Components V2 bridge; no V1 Plausible analytics dependency remains.
 - Preserve the shared browser-side analytics implementation across the Portal and both translators while keeping analytics observational and non-blocking.
 - Keep Google Sheets Product Facts as separately approved future work; they are not implemented.
-- Plan Portal visual refinement separately after RC54 closeout.
+- Complete Portal visual refinement and branding as the highest-priority remaining Pre-Launch work item.
 
 Roadmap decisions:
 
@@ -93,7 +93,12 @@ The Portal Skeleton is functionally complete and frozen. It is an independent As
 - Future Tool architecture is retained through configuration but hidden from the current UI.
 - The Portal is deployed independently to Railway and is now the primary platform entry point: `https://crochet-intelligence-portal-production.up.railway.app`.
 - RC54 integrated shared Plausible analytics across the Portal and both tools. Production Human UAT passed.
-- Visual design and branding refinement remain separately planned after RC54 closeout.
+- The Portal owns interface-language selection using `en`, `zh-Hant`, `zh-Hans`, and `ja`; both tools consume the selected language and retain browser-language/English fallback for direct entry.
+- General Privacy & Terms are centralized in the Portal. Images are not sent to OpenAI; eligible extracted text and compact semantic context may be sent without identity or analytics identifiers.
+- Pattern source/result language controls remain independent. Pattern's duplicate general Privacy UI was removed, while Stitch's tool-specific Google Forms feedback privacy note remains.
+- Both tools return to the Portal in the same tab with interface-language preservation. Pattern uses the Crochet Intelligence eyebrow and English title `Crochet Pattern Translator`; Stitch Tutorial Search preserves the submitted stitch term across interface languages.
+- All three Railway services deployed release `5e975741a9a53c1835120f0cdb24a60f5af706b1`; production functional UAT and Plausible regression validation passed without analytics changes. RC54 Analytics remains closed.
+- Portal visual refinement and branding are the highest-priority remaining Pre-Launch work item.
 
 ## Known Issues
 
@@ -339,16 +344,14 @@ The Portal Skeleton is functionally complete and frozen. It is an independent As
 Current platform sequence:
 
 1. Preserve the completed RC54 shared Plausible analytics baseline.
-2. Plan Portal visual design and branding separately.
+2. Complete Portal visual design and branding before Soft Launch.
 3. Add Google Sheets Product Facts only after separate approval.
 4. Introduce shared infrastructure improvements when appropriate.
 
 Additional deferred work:
 
 - Improve discoverability of editable line-by-line translation before TXT download. The feature already exists, but users may not realise the translation text can be edited before downloading. Consider clearer UI guidance in a future UX enhancement; implementation is not scheduled now.
-- Replace reliance on `app_open` with the approved platform visitor and activity analytics model.
 - Review the Google Feedback Form questions and workflow.
-- Centralize interface-language selection at the Portal, pass the selected language to each tool, and then reassess whether tool-level `interface_language` analytics remains necessary.
 
 ### RC23b Hotfix 1
 

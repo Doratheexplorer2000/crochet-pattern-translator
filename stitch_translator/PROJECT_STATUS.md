@@ -10,7 +10,7 @@ Application version: `v1.9a`
 
 ## Current Production Status
 
-Crochet Stitch Translator is a stable dictionary-style Streamlit application deployed independently to Railway at `https://stitch-translator-production.up.railway.app/`. Production Alignment and Human UI UAT passed on desktop, iPhone, and Android across light and dark modes and all four interface languages. Production runs on the Crochet Intelligence Streamlit `1.51.0` baseline using the Stitch-specific Dockerfile and startup command. Shared Plausible analytics and Production Human UAT are complete.
+Crochet Stitch Translator is a stable dictionary-style Streamlit application deployed independently to Railway at `https://stitch-translator-production.up.railway.app/`. Production Alignment and Human UI UAT passed on desktop, iPhone, and Android across light and dark modes. Portal Centralization and shared Plausible analytics are complete with Production Human UAT PASS. The Portal supplies the canonical interface language; direct entry retains browser-language/English fallback, and same-tab return navigation preserves the selected language.
 
 ## Current Database Version
 
@@ -33,12 +33,15 @@ Accepted source snapshot: `stitches_1_8e.csv`
 - Streamlit 1.51.0 runtime alignment.
 - Stitch-specific Railway Dockerfile and startup command.
 - Shared Plausible events `stitch_searched`, `tutorial_opened`, and `feedback_clicked`, validated in production.
+- Portal-owned interface language using `en`, `zh-Hant`, `zh-Hans`, and `ja`, with direct-entry fallback and same-tab Portal return navigation.
+- Tutorial Search preserves the submitted stitch term across interface languages.
+- Tool-specific Google Forms feedback privacy note retained after centralizing general Privacy & Terms in the Portal.
 
 ## Current Priorities
 
 1. Preserve the production-aligned search and UI baseline.
 2. Preserve the production-validated RC54 analytics baseline.
-3. Continue evidence-driven terminology and knowledge-base maintenance.
+3. Support the platform's highest-priority remaining Pre-Launch work: Portal visual refinement and branding.
 
 ## Known Issues
 
@@ -53,7 +56,6 @@ The next Stitch Translator release step requires separate Product Owner approval
 - Better database validation workflow.
 - Possible admin/database contribution workflow.
 - Research and add Cross Single Crochet to the shared stitch database after terminology validation.
-- Centralize interface-language selection at the Portal, pass the selected language to each tool, and then reassess whether tool-level `interface_language` analytics remains necessary.
 
 ## Important Design Decisions
 

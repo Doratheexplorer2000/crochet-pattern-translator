@@ -19,13 +19,14 @@ Pattern Translator and Stitch Translator remain independent, equally important t
 
 Current focus:
 
-- The Portal Skeleton is functionally complete and frozen after Human UAT. Its Information Architecture is finalized; visual refinement and branding are scheduled after Platform Analytics.
+- The Portal Skeleton and Portal Centralization are functionally complete and closed after Production Human UAT. Its Information Architecture is finalized; Portal visual refinement and branding are the next recorded Pre-Launch priority.
 - The Astro Portal is independent of Streamlit and is now the platform entry point. Streamlit is no longer required for the platform entry page.
-- The Portal currently supports English, Traditional Chinese, Simplified Chinese, and Japanese; configurable tool routing; inline Privacy & Terms; and a contact email link.
+- The Portal is the single interface-language control point. It uses canonical `ui_lang` values `en`, `zh-Hant`, `zh-Hans`, and `ja`, and passes the selected language to both tools. Direct tool entry falls back to browser language or English.
+- General Privacy & Terms are centralized in the Portal. Uploaded images are not sent to OpenAI; eligible extracted text and compact semantic context may be sent without identity or analytics identifiers.
 - Pattern Translator and Stitch Translator are presented as equal tools. Two future-tool entries remain available through configuration but are hidden from the current UI.
 - The Portal has been deployed independently to Railway and is now the primary platform entry point: `https://crochet-intelligence-portal-production.up.railway.app`.
 - RC54 integrated shared Plausible analytics across the Portal, Pattern Translator, and Stitch Translator. Production Human UAT passed for Portal tool selections and both tools' approved event surfaces.
-- Pattern Translator RC28 is the current production baseline.
+- Portal Centralization release `5e975741a9a53c1835120f0cdb24a60f5af706b1` deployed successfully across all three Railway services. Production functional UAT and Plausible regression validation passed with existing analytics behaviour preserved.
 - Whole Pattern is now the default Pattern Translator workflow.
 - Select Area remains available as an optional / experimental workflow.
 - RC26 passed local developer validation and Human UAT.
@@ -70,7 +71,7 @@ Current focus:
 - Engine Migration is complete. The Streamlit-independent Pattern Translator engines are `terminology`, `line_translation`, `diagnostic_report`, `overlay`, `pattern_document`, `ocr_lines`, and `ocr_cleanup`.
 - Remaining `app.py` responsibilities are intentionally application, framework, and runtime concerns: Streamlit UI, application orchestration, OCR runtime/provider lifecycle, session state, downloads, analytics, localization, Cropper / Select Area, and runtime infrastructure.
 - Domain Layer extraction is complete. Application Layer separation is deferred until it provides clear product value.
-- Engine extraction remains local only: no production deployment and no GitHub push. RC28 remains the current production baseline.
+- Engine extraction was completed locally and is included in the current production release. RC28 remains the validated Pattern Translator rollback baseline.
 - RC50A proved the custom upload boundary, and RC50B completed the production custom uploader using Streamlit Components V1.
 - The upload path remains `custom uploader -> BytesIO -> image_upload_signature() -> Image.open()`, preserving OCR, translation, overlay, diagnostics, exports, and the analytics schema.
 - The uploader supports JPG, JPEG, PNG, and WebP; four interface languages; native mobile image selection; desktop drag-and-drop; Replace and Remove; and light and dark modes.
@@ -90,9 +91,9 @@ Next:
 - Preserve the completed RC54 Plausible analytics baseline.
 - Keep the Portal Skeleton architecture and Information Architecture stable.
 - Treat Google Sheets Product Facts as separately approved future work; they are not implemented.
-- Plan Portal visual polish and branding separately after RC54 closeout.
+- Complete Portal visual refinement and branding as the highest-priority remaining Pre-Launch work item.
 - RC52 remains frozen as a production-ready local release. Do not add further cropper polish unless a functional regression is found.
-- Keep the completed Engine Migration local until a future integration decision is approved.
+- Preserve the completed Engine Migration now included in the production release.
 - Focus future work on product features, runtime improvements, deployment, or Application Layer work when justified by clear product value.
 - Keep the existing RC28 Railway production path fully recoverable as the rollback target.
 - Address non-blocking polish items: expose the version number in the UI and refine minor overlay text box alignment.
@@ -100,7 +101,6 @@ Next:
 Later:
 
 - Continue incremental trusted-user testing and prepare for Soft Launch.
-- Centralize interface-language selection at the Portal, pass it to each tool, and reassess whether tool-level `interface_language` analytics remains necessary.
 
 ## Shared Knowledge Base
 
@@ -166,9 +166,9 @@ Streamlit Community Cloud is no longer the primary deployment direction for Patt
 
 ## Platform Architecture
 
-The Portal is an independent Astro application and the permanent platform entry point. It is deployed to Railway at `https://crochet-intelligence-portal-production.up.railway.app`. It routes to Pattern Translator and Stitch Translator without coupling their implementations to the Portal. New tools should be enabled through the Portal's tool configuration rather than through an Information Architecture redesign.
+The Portal is an independent Astro application and the permanent platform entry point. It is deployed to Railway at `https://crochet-intelligence-portal-production.up.railway.app`. It owns interface-language selection and general Privacy & Terms, and routes to Pattern Translator and Stitch Translator without coupling their implementations to the Portal. Both tools provide same-tab return navigation with the selected interface language preserved. New tools should be enabled through the Portal's tool configuration rather than through an Information Architecture redesign.
 
-Pattern Translator remains a Streamlit application, and its current RC28 Railway deployment remains the production baseline and rollback target.
+Pattern Translator remains a Streamlit application. RC28 remains its validated rollback baseline.
 
 ## Documentation
 

@@ -35,6 +35,7 @@ v1.9a
 - Source snapshot: `stitches_1_8e.csv`
 - Visual baseline: `Brand identity & UI/UI_SPEC.md`
 - Analytics: shared Plausible analytics completed; Production Human UAT PASS
+- Portal Centralization: completed and Production Human UAT PASS. The Portal supplies `ui_lang` (`en`, `zh-Hant`, `zh-Hans`, or `ja`); direct entry retains browser-language/English fallback, and same-tab return navigation preserves the selected language.
 
 Production analytics events are `stitch_searched`, `tutorial_opened`, and `feedback_clicked`. Search and tutorial events record the current `interface_language`; Stitch Translator has no target translation language, so it does not use a Stitch-specific `translate_to` property.
 
@@ -85,6 +86,6 @@ Rows marked with `tutorial_search=yes` display:
 Search tutorials
 ```
 
-The YouTube search URL is generated dynamically from the canonical stitch name in the master database and the current interface language.
+The YouTube search URL is generated dynamically from the matched canonical stitch and preserves the submitted stitch term across interface languages.
 
 YouTube URLs are not stored in the CSV.
