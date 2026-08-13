@@ -1,6 +1,6 @@
 # Crochet Stitch Translator Project Status
 
-Last updated: 2026-08-12
+Last updated: 2026-08-13
 
 ## Current Version
 
@@ -10,7 +10,7 @@ Application version: `v1.9a`
 
 ## Current Production Status
 
-Crochet Stitch Translator is a stable dictionary-style Streamlit application deployed independently to Railway at `https://stitch-translator-production.up.railway.app/`. Production Alignment and Human UI UAT passed on desktop, iPhone, and Android across light and dark modes. Portal Centralization and shared Plausible analytics are complete with Production Human UAT PASS. The Portal supplies the canonical interface language; direct entry retains browser-language/English fallback, and same-tab return navigation preserves the selected language.
+Crochet Stitch Translator is a stable dictionary-style Streamlit application deployed independently to Railway at `https://stitch.crochetintelligence.com`. Production Alignment, Portal Centralization, custom-domain navigation, and shared Plausible analytics are complete with Production Human UAT PASS. The Portal supplies the canonical interface language; direct entry retains browser-language/English fallback, and same-tab return navigation preserves the selected language.
 
 ## Current Database Version
 
@@ -36,16 +36,18 @@ Accepted source snapshot: `stitches_1_8e.csv`
 - Portal-owned interface language using `en`, `zh-Hant`, `zh-Hans`, and `ja`, with direct-entry fallback and same-tab Portal return navigation.
 - Tutorial Search preserves the submitted stitch term across interface languages.
 - Tool-specific Google Forms feedback privacy note retained after centralizing general Privacy & Terms in the Portal.
+- Custom-domain migration `22fded0fb39a389b87d767faa494d7ad48d3d799`, with production navigation UAT PASS.
 
 ## Current Priorities
 
 1. Preserve the production-aligned search and UI baseline.
 2. Preserve the production-validated RC54 analytics baseline.
-3. Support the platform's highest-priority remaining Pre-Launch work: Portal visual refinement and branding.
+3. Support Portal visual refinement and branding, final product-wide production smoke UAT, and Soft Launch.
 
 ## Known Issues
 
 - No known RC54 analytics blocker remains.
+- Direct entry without `ui_lang` may add `browser_lang` and force one reload in `detect_lang_from_browser()`. The resulting initial flash is a non-Launch-blocking polish issue and was not reproduced during later normal Portal-entry UAT.
 
 ## Planned Next Version
 
@@ -72,3 +74,4 @@ The next Stitch Translator release step requires separate Product Owner approval
 - The independent Astro Portal is the platform entry point and presents Pattern Translator and Stitch Translator equally.
 - Pattern Translator and Stitch Translator are deployed independently to Railway.
 - Portal, Pattern Translator, and Stitch Translator share the production-validated Plausible analytics system.
+- Public production domains are `crochetintelligence.com`, `pattern.crochetintelligence.com`, and `stitch.crochetintelligence.com`; all three services run in the Railway project `Crochet Intelligence`.

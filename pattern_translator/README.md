@@ -2,7 +2,7 @@
 
 Mobile-first OCR translation for crochet pattern images.
 
-Current production baseline: **Portal Centralization** (`5e975741a9a53c1835120f0cdb24a60f5af706b1`)
+Current production baseline: **Custom-domain migration** (`22fded0fb39a389b87d767faa494d7ad48d3d799`)
 
 Validated rollback baseline: **RC28**
 
@@ -24,7 +24,7 @@ pattern_translator/app.py
 
 ## Current Product Status
 
-The current production revision is Portal Centralization at `5e975741a9a53c1835120f0cdb24a60f5af706b1`, deployed from GitHub `main` to Railway. It includes the production-validated Contextual LLM translation baseline and completed RC54 Components V2 analytics transport. RC28 remains the validated rollback baseline. Production functional UAT and Plausible regression validation passed.
+The current production revision is custom-domain migration `22fded0fb39a389b87d767faa494d7ad48d3d799`, deployed from GitHub `main` to Railway and publicly available at `https://pattern.crochetintelligence.com`. It includes the production-validated Portal Centralization, Contextual LLM translation, and completed RC54 Components V2 analytics baselines. RC28 remains the validated rollback baseline. Production functional/navigation UAT and Plausible regression validation passed.
 
 Key validated behavior:
 
@@ -51,7 +51,7 @@ Key validated behavior:
 - RC54A upgraded Pattern Translator to Streamlit 1.51.0 and introduced a frameless Components V2 Plausible bridge. Production Human UAT confirmed that the bridge loads the shared `PUBLIC_PLAUSIBLE_SCRIPT_URL` in the main browser page and sends exactly one `pattern_translation_completed` event per completed translation without rerun duplicates.
 - RC54A production smoke testing passed in Chrome on macOS for Whole Pattern, Select Area/cropper, overlay, PNG and TXT downloads, and Feedback, with no functional regression observed.
 - The production analytics baseline contains `pattern_image_uploaded`, `pattern_translation_completed`, `pattern_png_downloaded`, `pattern_txt_downloaded`, and `pattern_feedback_clicked`. RC54B migrated all five events to the Components V2 bridge and removed the obsolete V1 Plausible transport.
-- The single Plausible Starter site architecture is production-validated: Pattern Translator uses the Portal's personalized Plausible script/site while preserving the Pattern Translator production URL in event data.
+- The single Plausible Starter site architecture is production-validated with Site Domain `crochetintelligence.com`: Pattern Translator uses the shared personalized script while preserving its custom-domain URL in event data.
 - RC54B Production Human UAT passed: five genuine actions produced the expected events with no observed rerun duplicates or functional regression. Diagnostic Report analytics remains intentionally excluded because its non-rerunning download path requires a different browser-side tracking mechanism.
 - Portal Centralization removed the tool-level interface-language selector. The Portal now passes canonical `ui_lang` values (`en`, `zh-Hant`, `zh-Hans`, `ja`), while direct entry retains browser-language/English fallback and Pattern source/result language controls remain independent.
 - Pattern now provides same-tab return navigation to the Portal with interface-language preservation, uses the Crochet Intelligence eyebrow and English title `Crochet Pattern Translator`, and no longer duplicates the Portal's general Privacy UI. Pattern LLM translation passed Human UAT with the API key available.
@@ -116,13 +116,13 @@ Validation passed: Hybrid/Human-UAT automated suite `73 / 73`; feature-flag-OFF 
 
 ## Current Project Status
 
-- Current production baseline: Portal Centralization (`5e975741a9a53c1835120f0cdb24a60f5af706b1`)
+- Current production baseline: Custom-domain migration (`22fded0fb39a389b87d767faa494d7ad48d3d799`)
 - Validated rollback baseline: `RC28`
 - Current app version string: `Pattern OCR Translator (Beta RC26)`
-- Current phase: Portal Centralization completed and closed; Production Human UAT PASS across all three Railway services.
+- Current phase: Pre-Launch infrastructure and custom-domain migration completed; Production Human UAT PASS across all three Railway services.
 - Latest Pattern Translator analytics milestone: RC54B Analytics Transport Migration completed with Production Human UAT PASS.
 - Current production database: `knowledge_base/data/master_stitches.csv`
-- Current focus: preserve the production Pattern Translator and closed RC54 analytics baselines; complete Portal visual refinement and branding before Soft Launch.
+- Current focus: Portal visual refinement and branding, then final product-wide production smoke UAT and Soft Launch. Do not add features unless required for a genuine Launch blocker.
 - Future testing: continue with occasional trusted-user testing and incremental fixes based on production evidence.
 
 Known non-blocking polish items:
