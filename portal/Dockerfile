@@ -2,8 +2,8 @@ FROM node:24-alpine AS build
 
 WORKDIR /app
 
-ARG PUBLIC_PATTERN_TRANSLATOR_URL=http://localhost:8501
-ARG PUBLIC_STITCH_TRANSLATOR_URL=https://stitch-translator-production.up.railway.app/
+ARG PUBLIC_PATTERN_TRANSLATOR_URL=https://pattern.crochetintelligence.com
+ARG PUBLIC_STITCH_TRANSLATOR_URL=https://stitch.crochetintelligence.com
 ARG PUBLIC_SHOW_FUTURE_TOOLS=false
 ARG PUBLIC_SHOW_AD_BAR=false
 ARG PUBLIC_PLAUSIBLE_SCRIPT_URL=

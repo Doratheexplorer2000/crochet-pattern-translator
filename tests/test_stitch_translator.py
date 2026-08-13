@@ -75,8 +75,7 @@ class StitchTranslatorRegressionTests(unittest.TestCase):
         for language in ("en", "zh-Hant", "zh-Hans", "ja"):
             self.assertEqual(
                 app.portal_url_for_language(language),
-                "https://crochet-intelligence-portal-production.up.railway.app/"
-                f"?ui_lang={language}",
+                f"https://crochetintelligence.com?ui_lang={language}",
             )
 
     def test_search_analytics_dispatches_once_per_changed_submission(self):

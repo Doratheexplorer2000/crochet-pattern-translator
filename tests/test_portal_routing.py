@@ -7,11 +7,16 @@ class PortalRoutingTests(unittest.TestCase):
         dockerfile = Path("portal/Dockerfile").read_text(encoding="utf-8")
 
         self.assertIn(
-            "ARG PUBLIC_STITCH_TRANSLATOR_URL="
-            "https://stitch-translator-production.up.railway.app/",
+            "ARG PUBLIC_PATTERN_TRANSLATOR_URL="
+            "https://pattern.crochetintelligence.com",
             dockerfile,
         )
-        self.assertIn("ARG PUBLIC_PATTERN_TRANSLATOR_URL=", dockerfile)
+        self.assertIn(
+            "ARG PUBLIC_STITCH_TRANSLATOR_URL="
+            "https://stitch.crochetintelligence.com",
+            dockerfile,
+        )
+        self.assertNotIn("up.railway.app", dockerfile)
 
     def test_portal_propagates_all_supported_locales_to_tool_links(self):
         layout = Path("portal/src/layouts/PortalLayout.astro").read_text(encoding="utf-8")
@@ -51,6 +56,8 @@ class PortalRoutingTests(unittest.TestCase):
         self.assertNotIn('t("privacy_expander")', source)
         self.assertIn("portal_url_for_language(interface_language)", source)
         self.assertIn('target="_self"', source)
+        self.assertIn('DEFAULT_PORTAL_URL = "https://crochetintelligence.com"', source)
+        self.assertNotIn("up.railway.app", source)
 
     def test_pattern_translation_routing_is_independent_from_interface_language(self):
         source = Path("pattern_translator/app.py").read_text(encoding="utf-8")

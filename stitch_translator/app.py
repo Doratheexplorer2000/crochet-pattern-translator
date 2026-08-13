@@ -25,7 +25,7 @@ from crochet_intelligence.plausible_bridge import (
 APP_VERSION = "v1.9a"
 
 FEEDBACK_FORM_URL = "https://forms.gle/dNr7BXJuVaaosGyw6"
-DEFAULT_PORTAL_URL = "https://crochet-intelligence-portal-production.up.railway.app/"
+DEFAULT_PORTAL_URL = "https://crochetintelligence.com"
 PORTAL_URL = os.getenv("CROCHET_INTELLIGENCE_PORTAL_URL", DEFAULT_PORTAL_URL).strip() or DEFAULT_PORTAL_URL
 BASE_DIR = Path(__file__).resolve().parent
 REPO_ROOT = BASE_DIR.parent

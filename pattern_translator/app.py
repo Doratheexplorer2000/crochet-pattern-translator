@@ -61,7 +61,7 @@ SOURCE_CSV = KNOWLEDGE_BASE_DIR / "data" / "master_stitches.csv"
 FALLBACK_CSV = KNOWLEDGE_BASE_DIR / "releases" / "database" / "stitches_1_8e.csv"
 DEBUG_MODE = os.getenv("CROCHET_DEBUG", "").strip().lower() in {"1", "true", "yes", "on"}
 FEEDBACK_FORM_URL = "https://docs.google.com/forms/d/e/1FAIpQLScoDrN0xsyOg800O8Pw7aXAa5GREQIU-RmxlmXIlBOE7y_Q_w/viewform"
-DEFAULT_PORTAL_URL = "https://crochet-intelligence-portal-production.up.railway.app/"
+DEFAULT_PORTAL_URL = "https://crochetintelligence.com"
 PORTAL_URL = os.getenv("CROCHET_INTELLIGENCE_PORTAL_URL", DEFAULT_PORTAL_URL).strip() or DEFAULT_PORTAL_URL
 SELECT_AREA_PREVIEW_WIDTH = 360
 
