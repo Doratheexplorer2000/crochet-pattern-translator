@@ -35,6 +35,7 @@ class UploadedImageBytes(BytesIO):
 def _decode_upload_payload(
     payload: Any,
     messages: Mapping[str, str],
+    accepted_action_id: str = "",
 ) -> Tuple[Optional[UploadedImageBytes], Optional[str], bool]:
     def message(key: str) -> str:
         return str(messages.get(key) or "")
@@ -46,6 +47,13 @@ def _decode_upload_payload(
 
     if payload.get("removed"):
         return None, None, True
+
+    if payload.get("acknowledged_action_id"):
+        return None, None, False
+
+    action_id = str(payload.get("action_id") or "")
+    if accepted_action_id and action_id == accepted_action_id:
+        return None, None, False
 
     frontend_error_code = str(payload.get("error_code") or "")
     if frontend_error_code:
@@ -83,8 +91,33 @@ def _decode_upload_payload(
         data,
         name,
         mime_type,
-        action_id=str(payload.get("action_id") or ""),
+        action_id=action_id,
     ), None, False
+
+
+def snapshot_uploaded_image(uploaded_image: UploadedImageBytes) -> dict[str, Any]:
+    """Keep one accepted upload in authoritative Streamlit session state."""
+    return {
+        "data": uploaded_image.getvalue(),
+        "name": str(uploaded_image.name or "uploaded-image"),
+        "type": str(uploaded_image.type or ""),
+        "action_id": str(uploaded_image.action_id or ""),
+    }
+
+
+def restore_uploaded_image(snapshot: Any) -> Optional[UploadedImageBytes]:
+    """Restore an already validated upload without decoding its base64 again."""
+    if not isinstance(snapshot, Mapping):
+        return None
+    data = snapshot.get("data")
+    if not isinstance(data, bytes) or not data:
+        return None
+    return UploadedImageBytes(
+        data,
+        Path(str(snapshot.get("name") or "uploaded-image")).name,
+        str(snapshot.get("type") or ""),
+        action_id=str(snapshot.get("action_id") or ""),
+    )
 
 
 def custom_image_uploader(
@@ -93,6 +126,7 @@ def custom_image_uploader(
     key: str,
     active_image_present: bool = False,
     active_image_name: str = "",
+    accepted_action_id: str = "",
 ) -> Tuple[Optional[UploadedImageBytes], Optional[str], bool]:
     payload = _custom_upload_component(
         strings=dict(strings),
@@ -101,7 +135,8 @@ def custom_image_uploader(
         max_upload_bytes=_MAX_UPLOAD_BYTES,
         active_image_present=bool(active_image_present),
         active_image_name=str(active_image_name or ""),
+        accepted_action_id=str(accepted_action_id or ""),
         key=key,
         default=None,
     )
-    return _decode_upload_payload(payload, strings)
+    return _decode_upload_payload(payload, strings, accepted_action_id)

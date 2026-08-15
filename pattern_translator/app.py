@@ -42,7 +42,11 @@ from crochet_intelligence.plausible_bridge import (
     plausible_link_button,
     stage_plausible_event,
 )
-from pattern_translator.components.custom_upload import custom_image_uploader
+from pattern_translator.components.custom_upload import (
+    custom_image_uploader,
+    restore_uploaded_image,
+    snapshot_uploaded_image,
+)
 from pattern_translator.components.custom_cropper import custom_select_area
 from pattern_translator.engine import terminology as terminology_engine
 from pattern_translator.engine import line_translation as line_translation_engine
@@ -2292,6 +2296,7 @@ def init_rc3_state():
     st.session_state.setdefault("rc3_ocr_result", None)
     st.session_state.setdefault("rc3_image_signature", None)
     st.session_state.setdefault("rc3_uploaded_image_name", "")
+    st.session_state.setdefault("rc3_active_image_upload", None)
     st.session_state.setdefault("rc3_ocr_result_signature", None)
     st.session_state.setdefault("pending_ocr_run", False)
     st.session_state.setdefault("latest_crop_box", None)
@@ -2658,11 +2663,15 @@ upload_strings = {
     "error_invalid": t("upload_error_invalid"),
 }
 
+active_image_upload = restore_uploaded_image(
+    st.session_state.get("rc3_active_image_upload")
+)
 image_file, upload_error, upload_removed = custom_image_uploader(
     upload_strings,
     key="pattern_image_uploader",
-    active_image_present=st.session_state.get("rc3_image_signature") is not None,
-    active_image_name=st.session_state.get("rc3_uploaded_image_name", ""),
+    active_image_present=active_image_upload is not None,
+    active_image_name=(active_image_upload.name if active_image_upload else ""),
+    accepted_action_id=(active_image_upload.action_id if active_image_upload else ""),
 )
 if upload_error:
     st.error(upload_error)
@@ -2693,11 +2702,24 @@ def reset_uploaded_image_derived_state(
     st.session_state["rc3_uploaded_image_name"] = (
         str(image_name or "") if image_signature is not None else ""
     )
+    if image_signature is None:
+        st.session_state["rc3_active_image_upload"] = None
 
 
-if upload_removed and st.session_state.get("rc3_image_signature") is not None:
+if upload_removed and (
+    st.session_state.get("rc3_image_signature") is not None
+    or st.session_state.get("rc3_active_image_upload") is not None
+):
     reset_uploaded_image_derived_state(None)
     st.rerun()
+
+if image_file is not None:
+    st.session_state["rc3_active_image_upload"] = snapshot_uploaded_image(image_file)
+    active_image_upload = restore_uploaded_image(
+        st.session_state.get("rc3_active_image_upload")
+    )
+
+image_file = active_image_upload
 
 if image_file is None:
     rc10b_note_image_absent()

@@ -86,6 +86,62 @@ class CustomUploadTests(unittest.TestCase):
             (None, None, True),
         )
 
+    def test_accepted_payload_is_not_decoded_again_on_rerun(self):
+        payload = {
+            "name": "capybara.png",
+            "type": "image/png",
+            "data_base64": "large-payload-is-not-read",
+            "action_id": "upload-accepted",
+        }
+        with mock.patch.object(custom_upload.base64, "b64decode") as decode:
+            result = custom_upload._decode_upload_payload(
+                payload,
+                self.strings,
+                accepted_action_id="upload-accepted",
+            )
+        self.assertEqual(result, (None, None, False))
+        decode.assert_not_called()
+
+    def test_lightweight_acknowledgement_is_not_treated_as_an_upload(self):
+        self.assertEqual(
+            custom_upload._decode_upload_payload(
+                {"acknowledged_action_id": "upload-accepted"}, self.strings
+            ),
+            (None, None, False),
+        )
+
+    def test_backend_snapshot_restores_upload_after_component_remount(self):
+        original = custom_upload.UploadedImageBytes(
+            self.png_bytes("green"),
+            "capybara.png",
+            "image/png",
+            action_id="upload-1",
+        )
+        snapshot = custom_upload.snapshot_uploaded_image(original)
+        restored = custom_upload.restore_uploaded_image(snapshot)
+
+        self.assertIsNotNone(restored)
+        self.assertEqual(restored.getvalue(), original.getvalue())
+        self.assertEqual(restored.name, "capybara.png")
+        self.assertEqual(restored.type, "image/png")
+        self.assertEqual(restored.action_id, "upload-1")
+
+    def test_repeated_upload_snapshots_keep_only_the_latest_image(self):
+        snapshot = None
+        for number, colour in enumerate(("red", "green", "blue"), start=1):
+            uploaded = custom_upload.UploadedImageBytes(
+                self.png_bytes(colour),
+                f"pattern-{number}.png",
+                "image/png",
+                action_id=f"upload-{number}",
+            )
+            snapshot = custom_upload.snapshot_uploaded_image(uploaded)
+
+        restored = custom_upload.restore_uploaded_image(snapshot)
+        self.assertEqual(restored.name, "pattern-3.png")
+        self.assertEqual(restored.action_id, "upload-3")
+        self.assertEqual(restored.getvalue(), self.png_bytes("blue"))
+
     def test_frontend_render_uses_backend_state_after_component_remount(self):
         source = (
             Path(custom_upload.__file__).resolve().parent
@@ -100,17 +156,45 @@ class CustomUploadTests(unittest.TestCase):
             source,
         )
         self.assertIn("backendImagePresent = false", source)
+        self.assertIn("acceptedActionId === selectedPayload.action_id", source)
+        self.assertIn("selectedFile = null", source)
+        self.assertIn("selectedPayload = null", source)
+        self.assertIn("acknowledged_action_id: acceptedActionId", source)
 
     def test_app_rerenders_component_after_backend_removal(self):
         app_source = (
             Path(custom_upload.__file__).resolve().parents[2] / "app.py"
         ).read_text(encoding="utf-8")
         self.assertIn(
-            'if upload_removed and st.session_state.get("rc3_image_signature") is not None:\n'
+            'if upload_removed and (\n'
+            '    st.session_state.get("rc3_image_signature") is not None\n'
+            '    or st.session_state.get("rc3_active_image_upload") is not None\n'
+            "):\n"
             "    reset_uploaded_image_derived_state(None)\n"
             "    st.rerun()",
             app_source,
         )
+        self.assertIn(
+            'st.session_state["rc3_active_image_upload"] = snapshot_uploaded_image(image_file)',
+            app_source,
+        )
+        self.assertIn("image_file = active_image_upload", app_source)
+        self.assertIn(
+            'st.session_state["rc3_active_image_upload"] = None', app_source
+        )
+
+    def test_app_preserves_duplicate_processing_guard(self):
+        app_source = (
+            Path(custom_upload.__file__).resolve().parents[2] / "app.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            'if st.session_state.get("pending_ocr_run") or st.session_state.get("ocr_running"):',
+            app_source,
+        )
+        self.assertIn(
+            'st.session_state["duplicate_ocr_run_ignored_count"]', app_source
+        )
+        self.assertIn("        return\n", app_source)
 
 
 if __name__ == "__main__":

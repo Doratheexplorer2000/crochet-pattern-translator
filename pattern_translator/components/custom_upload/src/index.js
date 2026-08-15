@@ -190,6 +190,13 @@ function onRender(event) {
   maxUploadBytes = args.max_upload_bytes || maxUploadBytes;
   backendImagePresent = Boolean(args.active_image_present);
   backendImageName = String(args.active_image_name || "");
+  const acceptedActionId = String(args.accepted_action_id || "");
+  if (selectedPayload && acceptedActionId === selectedPayload.action_id) {
+    selectedFile = null;
+    selectedPayload = null;
+    input.value = "";
+    Streamlit.setComponentValue({ acknowledged_action_id: acceptedActionId });
+  }
   applyTheme(event.detail.theme);
   renderStrings();
   renderActiveFileName();
