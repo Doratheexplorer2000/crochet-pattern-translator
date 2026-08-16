@@ -661,94 +661,11 @@ def paddle_lang_from_mode(lang_mode: str) -> str:
         return "ch"
     return "en"
 
-@st.cache_resource(show_spinner=False, max_entries=1)
-def get_paddle_reader(lang: str):
-    """Load PaddleOCR lazily. PaddleOCR 3.x and older APIs use different kwargs."""
-    from paddleocr import PaddleOCR
-    try:
-        return PaddleOCR(
-            lang=lang,
-            use_doc_orientation_classify=False,
-            use_doc_unwarping=False,
-            use_textline_orientation=False,
-        )
-    except TypeError:
-        return PaddleOCR(lang=lang, use_angle_cls=False)
-
-
 def _save_image_temp(image: Image.Image) -> str:
     fd, path = tempfile.mkstemp(suffix=".png")
     os.close(fd)
     image.convert("RGB").save(path)
     return path
-
-
-def _box_to_coords(box) -> Tuple[float, float, float, float]:
-    """Return min_x, max_x, min_y, max_y from Paddle/Easy style boxes."""
-    try:
-        arr = np.array(box, dtype=float)
-        if arr.ndim == 1 and arr.size >= 4:
-            # Sometimes [x1, y1, x2, y2]
-            xs = [arr[0], arr[2]]
-            ys = [arr[1], arr[3]]
-        else:
-            xs = arr[:, 0]
-            ys = arr[:, 1]
-        return float(np.min(xs)), float(np.max(xs)), float(np.min(ys)), float(np.max(ys))
-    except Exception:
-        return 0.0, 80.0, 0.0, 20.0
-
-
-def flatten_paddle_result_to_rows(result: object) -> List[Dict[str, object]]:
-    """Extract text, confidence and box from PaddleOCR 3.x / older result formats."""
-    rows: List[Dict[str, object]] = []
-
-    def add_row(text: object, confidence: object = None, box: object = None):
-        clean = str(text).strip() if text is not None else ""
-        if not clean:
-            return
-        try:
-            conf = float(confidence) if confidence is not None else 0.0
-        except Exception:
-            conf = 0.0
-        min_x, max_x, min_y, max_y = _box_to_coords(box)
-        rows.append({
-            "source": "PaddleOCR",
-            "text": clean,
-            "confidence": round(conf, 3),
-            "x": round((min_x + max_x) / 2, 1),
-            "global_x": round((min_x + max_x) / 2, 1),
-            "y": round((min_y + max_y) / 2, 1),
-            "min_x": round(min_x, 1),
-            "max_x": round(max_x, 1),
-            "min_y": round(min_y, 1),
-            "max_y": round(max_y, 1),
-        })
-
-    if isinstance(result, list):
-        for page in result:
-            if isinstance(page, dict):
-                texts = page.get("rec_texts") or page.get("texts") or []
-                scores = page.get("rec_scores") or page.get("scores") or []
-                boxes = page.get("rec_polys") or page.get("dt_polys") or page.get("boxes") or []
-                if texts:
-                    for i, text in enumerate(texts):
-                        add_row(text, scores[i] if i < len(scores) else None, boxes[i] if i < len(boxes) else None)
-                    continue
-            if isinstance(page, list):
-                for item in page:
-                    try:
-                        box = item[0]
-                        rec = item[1]
-                        if isinstance(rec, (list, tuple)) and len(rec) >= 2:
-                            add_row(rec[0], rec[1], box)
-                        elif isinstance(rec, str):
-                            add_row(rec, None, box)
-                    except Exception:
-                        if isinstance(item, str):
-                            add_row(item)
-
-    return sorted(rows, key=lambda r: (r["y"], r["global_x"]))
 
 
 def _ocr_trace_event(trace: Optional[List[str]], message: str):
@@ -840,17 +757,9 @@ def run_paddle_ocr_single(
         diagnostics["run_paddle_ocr_single_input"] = _image_size_dict(image)
     _ocr_trace_event(trace, "run_paddle_ocr_single start")
     lang = paddle_lang_from_mode(lang_mode)
-    try:
-        ocr = ocr_runtime_engine.run_serialized(get_paddle_reader, lang)
-    except Exception as error:
-        _log_paddle_failure("reader_init", error, image)
-        raise
     if diagnostics is not None:
         diagnostics["ocr_language_model"] = lang
         diagnostics["ocr_backend"] = "PaddleOCR"
-        diagnostics["ocr_reader_class"] = type(ocr).__name__
-        diagnostics["detector_model"] = _debug_cell(getattr(ocr, "det_model_dir", "")) or "Not exposed by current PaddleOCR object"
-        diagnostics["recognizer_model"] = _debug_cell(getattr(ocr, "rec_model_dir", "")) or "Not exposed by current PaddleOCR object"
         diagnostics["paddle_actual_loaded_image_size"] = "Not exposed by current PaddleOCR API"
     _ocr_trace_event(trace, "save temp PNG")
     try:
@@ -869,39 +778,32 @@ def run_paddle_ocr_single(
                 diagnostics["temp_png_image"] = _image_size_dict(temp_img)
         except Exception:
             diagnostics["temp_png_image"] = "Not captured"
-    inference_seconds = 0.0
-    inference_stage = "predict"
     try:
-        try:
-            _ocr_trace_event(trace, "PaddleOCR call start")
-            inference_start = time.perf_counter()
-            raw_result = ocr_runtime_engine.run_serialized(ocr.predict, image_path)
-            inference_seconds = time.perf_counter() - inference_start
-            _ocr_trace_event(trace, "PaddleOCR call end")
-        except AttributeError:
-            inference_stage = "legacy_ocr"
-            _ocr_trace_event(trace, "PaddleOCR call start")
-            inference_start = time.perf_counter()
-            raw_result = ocr_runtime_engine.run_serialized(
-                ocr.ocr,
-                image_path,
-                cls=False,
-            )
-            inference_seconds = time.perf_counter() - inference_start
-            _ocr_trace_event(trace, "PaddleOCR call end")
+        _ocr_trace_event(trace, "PaddleOCR call start")
+        worker_result = ocr_runtime_engine.get_process_ocr_manager().run_ocr(image_path, lang)
+        _ocr_trace_event(trace, "PaddleOCR call end")
     except Exception as error:
-        _log_paddle_failure(inference_stage, error, image, image_path=image_path, reader=ocr)
+        failure_stage = getattr(error, "stage", "worker")
+        _log_paddle_failure(failure_stage, error, image, image_path=image_path)
         raise
     finally:
         try:
             os.remove(image_path)
         except Exception:
             pass
-    rows = flatten_paddle_result_to_rows(raw_result)
+    reader_metadata = worker_result["reader_metadata"]
+    inference_seconds = float(worker_result["inference_seconds"])
+    rows = worker_result["rows"]
+    if diagnostics is not None:
+        diagnostics["ocr_reader_class"] = _debug_cell(reader_metadata.get("class")) or "Not exposed by current PaddleOCR object"
+        diagnostics["detector_model"] = _debug_cell(reader_metadata.get("detector_model")) or "Not exposed by current PaddleOCR object"
+        diagnostics["recognizer_model"] = _debug_cell(reader_metadata.get("recognizer_model")) or "Not exposed by current PaddleOCR object"
+        diagnostics["paddle_worker_recovered"] = "Yes" if worker_result.get("worker_recovered") else "No"
+        diagnostics["paddle_worker_recycled"] = "Yes" if worker_result.get("worker_recycled") else "No"
     df = pd.DataFrame(rows)
     text = "\n".join(df["text"].astype(str).tolist()) if not df.empty else ""
     _ocr_trace_event(trace, "OCR results returned")
-    return text, df, raw_result, inference_seconds
+    return text, df, None, inference_seconds
 
 
 def run_primary_ocr(
