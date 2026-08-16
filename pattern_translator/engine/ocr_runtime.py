@@ -5,6 +5,7 @@ import multiprocessing
 import os
 import sys
 import threading
+import time
 import uuid
 from pathlib import Path
 from typing import Dict, Optional
@@ -15,6 +16,52 @@ from pattern_translator.engine.ocr_worker import run_worker
 DEFAULT_OCR_TIMEOUT_SECONDS = 90.0
 DEFAULT_MAX_JOBS_PER_WORKER = 4
 _WORKER_STOP_GRACE_SECONDS = 3.0
+
+
+def _safe_log_token(value: object) -> str:
+    return "".join(
+        character if character.isalnum() or character in "._-" else "_"
+        for character in str(value or "")
+    )[:80] or "unavailable"
+
+
+def _request_uuid(value: Optional[str] = None) -> str:
+    try:
+        return uuid.UUID(str(value)).hex if value else uuid.uuid4().hex
+    except (TypeError, ValueError, AttributeError):
+        return uuid.uuid4().hex
+
+
+def log_ocr_timing(
+    request_id: str,
+    phase: str,
+    *,
+    elapsed_seconds: Optional[float] = None,
+    attempt: Optional[int] = None,
+    worker_pid: Optional[int] = None,
+    worker_generation: Optional[int] = None,
+    queue_seconds: Optional[float] = None,
+    outcome: str = "",
+) -> None:
+    """Emit content-free OCR lifecycle timing for production diagnosis."""
+    fields = [
+        f"request_id={_safe_log_token(request_id)}",
+        f"phase={_safe_log_token(phase)}",
+        f"monotonic_ms={time.perf_counter() * 1000:.1f}",
+    ]
+    if elapsed_seconds is not None:
+        fields.append(f"elapsed_ms={max(0.0, elapsed_seconds) * 1000:.1f}")
+    if attempt is not None:
+        fields.append(f"attempt={int(attempt)}")
+    if worker_pid is not None:
+        fields.append(f"worker_pid={int(worker_pid)}")
+    if worker_generation is not None:
+        fields.append(f"worker_generation={int(worker_generation)}")
+    if queue_seconds is not None:
+        fields.append(f"queue_wait_ms={max(0.0, queue_seconds) * 1000:.1f}")
+    if outcome:
+        fields.append(f"outcome={_safe_log_token(outcome)}")
+    print("[pattern_ocr_timing] " + " ".join(fields), file=sys.stderr, flush=True)
 
 
 class OCRWorkerError(RuntimeError):
@@ -65,6 +112,7 @@ class OCRWorkerManager:
         self._connection = None
         self._language: Optional[str] = None
         self._successful_jobs = 0
+        self._worker_generation = 0
 
     @property
     def worker_pid(self) -> Optional[int]:
@@ -74,7 +122,15 @@ class OCRWorkerManager:
     def successful_jobs(self) -> int:
         return self._successful_jobs
 
-    def _start_worker(self, language: str) -> None:
+    def _start_worker(self, language: str, request_id: str, attempt: int) -> None:
+        spawn_start = time.perf_counter()
+        next_generation = self._worker_generation + 1
+        log_ocr_timing(
+            request_id,
+            "worker_spawn_begin",
+            attempt=attempt,
+            worker_generation=next_generation,
+        )
         parent_connection, child_connection = self._context.Pipe(duplex=True)
         process = self._context.Process(
             target=self._worker_target,
@@ -93,10 +149,37 @@ class OCRWorkerManager:
         self._connection = parent_connection
         self._language = language
         self._successful_jobs = 0
+        self._worker_generation = next_generation
+        log_ocr_timing(
+            request_id,
+            "worker_process_spawned",
+            elapsed_seconds=time.perf_counter() - spawn_start,
+            attempt=attempt,
+            worker_pid=self.worker_pid,
+            worker_generation=self._worker_generation,
+        )
 
-    def _stop_worker(self, graceful: bool) -> None:
+    def _stop_worker(
+        self,
+        graceful: bool,
+        request_id: str = "",
+        attempt: Optional[int] = None,
+        reason: str = "",
+    ) -> None:
         process = self._process
         connection = self._connection
+        worker_pid = getattr(process, "pid", None)
+        worker_generation = self._worker_generation
+        stop_start = time.perf_counter()
+        if request_id:
+            log_ocr_timing(
+                request_id,
+                "worker_stop_begin",
+                attempt=attempt,
+                worker_pid=worker_pid,
+                worker_generation=worker_generation,
+                outcome=reason,
+            )
         self._process = None
         self._connection = None
         self._language = None
@@ -105,6 +188,15 @@ class OCRWorkerManager:
         if process is None:
             if connection is not None:
                 connection.close()
+            if request_id:
+                log_ocr_timing(
+                    request_id,
+                    "worker_stop_end",
+                    elapsed_seconds=time.perf_counter() - stop_start,
+                    attempt=attempt,
+                    worker_generation=worker_generation,
+                    outcome=reason,
+                )
             return
 
         if process.is_alive():
@@ -129,13 +221,46 @@ class OCRWorkerManager:
             process.close()
         except (AttributeError, ValueError):
             pass
+        if request_id:
+            log_ocr_timing(
+                request_id,
+                "worker_stop_end",
+                elapsed_seconds=time.perf_counter() - stop_start,
+                attempt=attempt,
+                worker_pid=worker_pid,
+                worker_generation=worker_generation,
+                outcome=reason,
+            )
 
-    def _ensure_worker(self, language: str) -> None:
+    def _ensure_worker(self, language: str, request_id: str, attempt: int) -> None:
+        worker_exists = self._process is not None
+        worker_alive = bool(worker_exists and self._process.is_alive())
+        if not worker_exists:
+            check_outcome = "missing"
+        elif self._language != language:
+            check_outcome = "language_change"
+        elif not worker_alive:
+            check_outcome = "not_alive"
+        else:
+            check_outcome = "healthy"
+        log_ocr_timing(
+            request_id,
+            "worker_health_check",
+            attempt=attempt,
+            worker_pid=self.worker_pid,
+            worker_generation=self._worker_generation,
+            outcome=check_outcome,
+        )
         if self._process is not None:
             if self._language != language or not self._process.is_alive():
-                self._stop_worker(graceful=self._process.is_alive())
+                self._stop_worker(
+                    graceful=self._process.is_alive(),
+                    request_id=request_id,
+                    attempt=attempt,
+                    reason=check_outcome,
+                )
         if self._process is None:
-            self._start_worker(language)
+            self._start_worker(language, request_id, attempt)
 
     @staticmethod
     def _validate_result(response: object, request_id: str) -> Dict[str, object]:
@@ -162,20 +287,39 @@ class OCRWorkerManager:
             raise OCRWorkerError("malformed_timing")
         return response
 
-    def _run_once(self, image_path: str, language: str) -> Dict[str, object]:
-        self._ensure_worker(language)
-        request_id = uuid.uuid4().hex
+    def _run_once(
+        self,
+        image_path: str,
+        language: str,
+        diagnostic_request_id: str,
+        attempt: int,
+    ) -> Dict[str, object]:
+        self._ensure_worker(language, diagnostic_request_id, attempt)
+        ipc_request_id = uuid.uuid4().hex
         request = {
             "type": "ocr",
-            "request_id": request_id,
+            "request_id": ipc_request_id,
+            "diagnostic_request_id": diagnostic_request_id,
+            "attempt": attempt,
+            "worker_generation": self._worker_generation,
             "image_path": image_path,
             "language": language,
         }
+        send_start = time.perf_counter()
         try:
             self._connection.send(request)
         except (BrokenPipeError, EOFError, OSError, ValueError) as error:
             raise OCRWorkerError("request_send", type(error).__name__) from error
+        log_ocr_timing(
+            diagnostic_request_id,
+            "ipc_request_sent",
+            elapsed_seconds=time.perf_counter() - send_start,
+            attempt=attempt,
+            worker_pid=self.worker_pid,
+            worker_generation=self._worker_generation,
+        )
 
+        response_wait_start = time.perf_counter()
         try:
             if not self._connection.poll(self.timeout_seconds):
                 raise OCRWorkerError("timeout")
@@ -184,32 +328,112 @@ class OCRWorkerManager:
             raise
         except (BrokenPipeError, EOFError, OSError, ValueError) as error:
             raise OCRWorkerError("worker_exit", type(error).__name__) from error
-        return self._validate_result(response, request_id)
+        log_ocr_timing(
+            diagnostic_request_id,
+            "ipc_response_received",
+            elapsed_seconds=time.perf_counter() - response_wait_start,
+            attempt=attempt,
+            worker_pid=self.worker_pid,
+            worker_generation=self._worker_generation,
+        )
+        return self._validate_result(response, ipc_request_id)
 
-    def run_ocr(self, image_path: str, language: str) -> Dict[str, object]:
+    def run_ocr(
+        self,
+        image_path: str,
+        language: str,
+        diagnostic_request_id: Optional[str] = None,
+    ) -> Dict[str, object]:
+        request_id = _request_uuid(diagnostic_request_id)
+        manager_start = time.perf_counter()
+        log_ocr_timing(request_id, "manager_request_begin")
         if not Path(image_path).is_file():
+            log_ocr_timing(
+                request_id,
+                "manager_request_end",
+                elapsed_seconds=time.perf_counter() - manager_start,
+                outcome="missing_temp_image",
+            )
             raise OCRWorkerError("missing_temp_image", "FileNotFoundError")
 
-        with self._request_lock:
+        queue_start = time.perf_counter()
+        log_ocr_timing(request_id, "manager_lock_requested")
+        self._request_lock.acquire()
+        queue_seconds = time.perf_counter() - queue_start
+        lock_start = time.perf_counter()
+        log_ocr_timing(
+            request_id,
+            "manager_lock_acquired",
+            queue_seconds=queue_seconds,
+            worker_pid=self.worker_pid,
+            worker_generation=self._worker_generation,
+        )
+        manager_outcome = "failed"
+        try:
             last_error: Optional[OCRWorkerError] = None
             for attempt in range(2):
+                attempt_number = attempt + 1
                 try:
-                    result = self._run_once(image_path, language)
+                    result = self._run_once(
+                        image_path,
+                        language,
+                        request_id,
+                        attempt_number,
+                    )
                 except OCRWorkerError as error:
                     last_error = error
                     self._log_failure(error, attempt)
-                    self._stop_worker(graceful=False)
+                    log_ocr_timing(
+                        request_id,
+                        "retry_triggered" if attempt == 0 else "attempt_failed",
+                        elapsed_seconds=time.perf_counter() - manager_start,
+                        attempt=attempt_number,
+                        worker_pid=self.worker_pid,
+                        worker_generation=self._worker_generation,
+                        outcome=error.stage,
+                    )
+                    self._stop_worker(
+                        graceful=False,
+                        request_id=request_id,
+                        attempt=attempt_number,
+                        reason="retry" if attempt == 0 else "failed",
+                    )
                     continue
 
                 self._successful_jobs += 1
                 result["worker_recovered"] = attempt == 1
                 result["worker_recycled"] = self._successful_jobs >= self.max_jobs_per_worker
                 if result["worker_recycled"]:
-                    self._stop_worker(graceful=True)
+                    self._stop_worker(
+                        graceful=True,
+                        request_id=request_id,
+                        attempt=attempt_number,
+                        reason="job_limit_recycle",
+                    )
+                manager_outcome = "recovered" if attempt == 1 else "success"
                 return result
 
             assert last_error is not None
+            manager_outcome = last_error.stage
             raise last_error
+        finally:
+            self._request_lock.release()
+            log_ocr_timing(
+                request_id,
+                "manager_lock_released",
+                elapsed_seconds=time.perf_counter() - lock_start,
+                queue_seconds=queue_seconds,
+                worker_pid=self.worker_pid,
+                worker_generation=self._worker_generation,
+                outcome=manager_outcome,
+            )
+            log_ocr_timing(
+                request_id,
+                "manager_request_end",
+                elapsed_seconds=time.perf_counter() - manager_start,
+                queue_seconds=queue_seconds,
+                outcome=manager_outcome,
+            )
 
     @staticmethod
     def _log_failure(error: OCRWorkerError, attempt: int) -> None:

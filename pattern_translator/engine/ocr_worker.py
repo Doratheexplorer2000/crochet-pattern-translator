@@ -129,9 +129,42 @@ def _worker_rss_mb() -> float:
     return round(maximum_rss / divisor, 1)
 
 
+def _safe_log_token(value: object) -> str:
+    return "".join(
+        character if character.isalnum() or character in "._-" else "_"
+        for character in str(value or "")
+    )[:80] or "unavailable"
+
+
+def _log_worker_timing(
+    request_id: str,
+    phase: str,
+    *,
+    elapsed_seconds: float | None = None,
+    attempt: int = 0,
+    worker_generation: int = 0,
+    outcome: str = "",
+) -> None:
+    fields = [
+        f"request_id={_safe_log_token(request_id)}",
+        f"phase={_safe_log_token(phase)}",
+        f"monotonic_ms={time.perf_counter() * 1000:.1f}",
+        f"attempt={int(attempt)}",
+        f"worker_pid={os.getpid()}",
+        f"worker_generation={int(worker_generation)}",
+    ]
+    if elapsed_seconds is not None:
+        fields.append(f"elapsed_ms={max(0.0, elapsed_seconds) * 1000:.1f}")
+    if outcome:
+        fields.append(f"outcome={_safe_log_token(outcome)}")
+    print("[pattern_ocr_timing] " + " ".join(fields), file=sys.stderr, flush=True)
+
+
 def run_worker(connection, language: str) -> None:
     """Own one Paddle reader and process OCR requests serially."""
     reader = None
+    worker_started = time.perf_counter()
+    first_request = True
     try:
         while True:
             request = connection.recv()
@@ -141,6 +174,27 @@ def run_worker(connection, language: str) -> None:
                 return
 
             request_id = str(request.get("request_id") or "")
+            diagnostic_request_id = str(
+                request.get("diagnostic_request_id") or request_id
+            )
+            attempt = int(request.get("attempt") or 0)
+            worker_generation = int(request.get("worker_generation") or 0)
+            attempt_started = time.perf_counter()
+            if first_request:
+                _log_worker_timing(
+                    diagnostic_request_id,
+                    "worker_ready",
+                    elapsed_seconds=time.perf_counter() - worker_started,
+                    attempt=attempt,
+                    worker_generation=worker_generation,
+                )
+                first_request = False
+            _log_worker_timing(
+                diagnostic_request_id,
+                "worker_request_received",
+                attempt=attempt,
+                worker_generation=worker_generation,
+            )
             if request.get("type") != "ocr" or request.get("language") != language:
                 connection.send(_safe_error_response(request_id, "request", ValueError("invalid request")))
                 return
@@ -148,16 +202,44 @@ def run_worker(connection, language: str) -> None:
             try:
                 if reader is None:
                     stage = "reader_init"
+                    reader_init_start = time.perf_counter()
+                    _log_worker_timing(
+                        diagnostic_request_id,
+                        "reader_init_begin",
+                        attempt=attempt,
+                        worker_generation=worker_generation,
+                    )
                     reader = _create_reader(language)
+                    _log_worker_timing(
+                        diagnostic_request_id,
+                        "reader_init_end",
+                        elapsed_seconds=time.perf_counter() - reader_init_start,
+                        attempt=attempt,
+                        worker_generation=worker_generation,
+                    )
 
                 stage = "predict"
                 inference_start = time.perf_counter()
+                _log_worker_timing(
+                    diagnostic_request_id,
+                    "worker_inference_begin",
+                    attempt=attempt,
+                    worker_generation=worker_generation,
+                )
                 try:
                     raw_result = reader.predict(request["image_path"])
                 except AttributeError:
                     stage = "legacy_ocr"
                     raw_result = reader.ocr(request["image_path"], cls=False)
                 inference_seconds = time.perf_counter() - inference_start
+                _log_worker_timing(
+                    diagnostic_request_id,
+                    "worker_inference_end",
+                    elapsed_seconds=inference_seconds,
+                    attempt=attempt,
+                    worker_generation=worker_generation,
+                    outcome="success",
+                )
 
                 stage = "normalize"
                 rows = normalize_paddle_result(raw_result)
@@ -175,6 +257,14 @@ def run_worker(connection, language: str) -> None:
                     "worker_rss_mb": _worker_rss_mb(),
                 })
             except Exception as error:
+                _log_worker_timing(
+                    diagnostic_request_id,
+                    "worker_attempt_failed",
+                    elapsed_seconds=time.perf_counter() - attempt_started,
+                    attempt=attempt,
+                    worker_generation=worker_generation,
+                    outcome=stage,
+                )
                 try:
                     connection.send(_safe_error_response(request_id, stage, error))
                 finally:

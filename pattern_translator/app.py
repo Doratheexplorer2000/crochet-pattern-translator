@@ -21,6 +21,7 @@ import sys
 import tempfile
 import time
 import unicodedata
+import uuid
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -71,6 +72,21 @@ PORTAL_URL = os.getenv("CROCHET_INTELLIGENCE_PORTAL_URL", DEFAULT_PORTAL_URL).st
 SELECT_AREA_PREVIEW_WIDTH = 360
 
 TRANSLATION_PROFILE: Optional[Dict[str, Dict[str, float]]] = None
+
+
+def log_app_ocr_timing(
+    request_id: str,
+    phase: str,
+    *,
+    elapsed_seconds: Optional[float] = None,
+    outcome: str = "",
+) -> None:
+    ocr_runtime_engine.log_ocr_timing(
+        request_id,
+        phase,
+        elapsed_seconds=elapsed_seconds,
+        outcome=outcome,
+    )
 
 
 def make_translation_profile() -> Dict[str, Dict[str, float]]:
@@ -751,6 +767,7 @@ def run_paddle_ocr_single(
     lang_mode: str,
     trace: Optional[List[str]] = None,
     diagnostics: Optional[Dict[str, object]] = None,
+    diagnostic_request_id: Optional[str] = None,
 ) -> Tuple[str, pd.DataFrame, object, float]:
     if diagnostics is not None:
         diagnostics["run_paddle_ocr_single_calls"] = int(diagnostics.get("run_paddle_ocr_single_calls", 0)) + 1
@@ -762,11 +779,23 @@ def run_paddle_ocr_single(
         diagnostics["ocr_backend"] = "PaddleOCR"
         diagnostics["paddle_actual_loaded_image_size"] = "Not exposed by current PaddleOCR API"
     _ocr_trace_event(trace, "save temp PNG")
+    temp_preparation_start = time.perf_counter()
+    if diagnostic_request_id:
+        log_app_ocr_timing(
+            diagnostic_request_id,
+            "temp_image_preparation_begin",
+        )
     try:
         image_path = _save_image_temp(image)
     except Exception as error:
         _log_paddle_failure("temp_png_save", error, image)
         raise
+    if diagnostic_request_id:
+        log_app_ocr_timing(
+            diagnostic_request_id,
+            "temp_image_preparation_end",
+            elapsed_seconds=time.perf_counter() - temp_preparation_start,
+        )
     _ocr_trace_event(trace, "temp PNG saved")
     if diagnostics is not None:
         try:
@@ -780,7 +809,11 @@ def run_paddle_ocr_single(
             diagnostics["temp_png_image"] = "Not captured"
     try:
         _ocr_trace_event(trace, "PaddleOCR call start")
-        worker_result = ocr_runtime_engine.get_process_ocr_manager().run_ocr(image_path, lang)
+        worker_result = ocr_runtime_engine.get_process_ocr_manager().run_ocr(
+            image_path,
+            lang,
+            diagnostic_request_id=diagnostic_request_id,
+        )
         _ocr_trace_event(trace, "PaddleOCR call end")
     except Exception as error:
         failure_stage = getattr(error, "stage", "worker")
@@ -812,6 +845,7 @@ def run_primary_ocr(
     compare_easyocr: bool = False,
     trace: Optional[List[str]] = None,
     diagnostics: Optional[Dict[str, object]] = None,
+    diagnostic_request_id: Optional[str] = None,
 ) -> Dict[str, object]:
     """Use PaddleOCR as primary. Optionally run EasyOCR for debug comparison."""
     if diagnostics is not None:
@@ -823,6 +857,7 @@ def run_primary_ocr(
         lang_mode,
         trace=trace,
         diagnostics=diagnostics,
+        diagnostic_request_id=diagnostic_request_id,
     )
     paddle_metrics = _ocr_candidate_metrics(paddle_rows)
     comparison_rows = [{"Engine": "PaddleOCR", **paddle_metrics}]
@@ -2233,6 +2268,8 @@ def init_rc3_state():
     st.session_state.setdefault("rc10b_last_button_click_rerun", None)
     st.session_state.setdefault("rc10b_last_ocr_block_rerun_delta", None)
     st.session_state.setdefault("rc10b_last_cropper_box", None)
+    st.session_state.setdefault("ocr_timing_request_id", None)
+    st.session_state.setdefault("ocr_timing_action_started", None)
 
 
 def request_ocr_run():
@@ -2243,9 +2280,14 @@ def request_ocr_run():
             duplicate_ocr_run_ignored_count=st.session_state.get("duplicate_ocr_run_ignored_count"),
         )
         return
+    diagnostic_request_id = uuid.uuid4().hex
+    action_started = time.perf_counter()
+    st.session_state["ocr_timing_request_id"] = diagnostic_request_id
+    st.session_state["ocr_timing_action_started"] = action_started
     st.session_state["rc10b_run_button_click_count"] = st.session_state.get("rc10b_run_button_click_count", 0) + 1
     st.session_state["rc10b_last_button_click_rerun"] = st.session_state.get("rc10b_rerun_count")
     st.session_state["pending_ocr_run"] = True
+    log_app_ocr_timing(diagnostic_request_id, "translation_action_accepted")
     rc10b_log_event(
         "Run OCR button clicked",
         run_button_click_count=st.session_state.get("rc10b_run_button_click_count"),
@@ -3030,6 +3072,21 @@ if image_file is not None:
     )
 
     if st.session_state.get("pending_ocr_run"):
+        diagnostic_request_id = str(
+            st.session_state.get("ocr_timing_request_id") or uuid.uuid4().hex
+        )
+        st.session_state["ocr_timing_request_id"] = diagnostic_request_id
+        action_started = st.session_state.get("ocr_timing_action_started")
+        click_to_pending_seconds = (
+            time.perf_counter() - action_started
+            if isinstance(action_started, (int, float))
+            else None
+        )
+        log_app_ocr_timing(
+            diagnostic_request_id,
+            "pending_run_begin",
+            elapsed_seconds=click_to_pending_seconds,
+        )
         last_click_rerun = st.session_state.get("rc10b_last_button_click_rerun")
         current_rerun = st.session_state.get("rc10b_rerun_count")
         rerun_delta = None
@@ -3074,6 +3131,16 @@ if image_file is not None:
                     "total": None,
                     "ocr_resize_test": ocr_resize_test,
                 }
+                preparation_start = time.perf_counter()
+                log_app_ocr_timing(
+                    diagnostic_request_id,
+                    "pre_ocr_preparation_begin",
+                    elapsed_seconds=(
+                        preparation_start - action_started
+                        if isinstance(action_started, (int, float))
+                        else None
+                    ),
+                )
                 preprocessing_start = time.perf_counter()
                 ocr_input_image, downscale_diagnostics = prepare_experimental_ocr_image(
                     working_image,
@@ -3093,6 +3160,11 @@ if image_file is not None:
                     crop_box,
                     downscale_diagnostics=downscale_diagnostics,
                 )
+                log_app_ocr_timing(
+                    diagnostic_request_id,
+                    "pre_ocr_preparation_end",
+                    elapsed_seconds=time.perf_counter() - preparation_start,
+                )
                 ocr_stage_start = time.perf_counter()
                 candidate_result = run_primary_ocr(
                     ocr_input_image,
@@ -3100,6 +3172,7 @@ if image_file is not None:
                     compare_easyocr=False,
                     trace=ocr_call_trace,
                     diagnostics=ocr_call_diagnostics,
+                    diagnostic_request_id=diagnostic_request_id,
                 )
                 ocr_seconds = time.perf_counter() - ocr_stage_start
                 runtime_profile["ocr"] = ocr_seconds
@@ -3127,6 +3200,11 @@ if image_file is not None:
                 previous_translation_profile = TRANSLATION_PROFILE
                 TRANSLATION_PROFILE = translation_profile
                 try:
+                    log_app_ocr_timing(
+                        diagnostic_request_id,
+                        "downstream_translation_begin",
+                        elapsed_seconds=time.perf_counter() - ocr_execution_start,
+                    )
                     translation_start = time.perf_counter()
                     line_df = ocr_lines_engine.build_ocr_line_translations(
                         ocr_rows,
@@ -3280,6 +3358,18 @@ if image_file is not None:
                 }
                 st.session_state["rc3_ocr_result_signature"] = current_ocr_signature
                 st.session_state["pending_ocr_run"] = False
+                log_app_ocr_timing(
+                    diagnostic_request_id,
+                    "translation_run_end",
+                    elapsed_seconds=(
+                        time.perf_counter() - action_started
+                        if isinstance(action_started, (int, float))
+                        else time.perf_counter() - ocr_execution_start
+                    ),
+                    outcome="success",
+                )
+                st.session_state["ocr_timing_request_id"] = None
+                st.session_state["ocr_timing_action_started"] = None
                 st.session_state["debug_report_ready"] = False
                 st.session_state["last_successful_download_key"] = None
                 translation_no = get_session_translation_no(st.session_state)
@@ -3317,6 +3407,20 @@ if image_file is not None:
                     translate_to=output_mode if "output_mode" in locals() else "",
                 )
                 st.session_state["pending_ocr_run"] = False
+                log_app_ocr_timing(
+                    diagnostic_request_id,
+                    "translation_run_end",
+                    elapsed_seconds=(
+                        time.perf_counter() - action_started
+                        if isinstance(action_started, (int, float))
+                        else time.perf_counter() - ocr_execution_start
+                        if "ocr_execution_start" in locals()
+                        else None
+                    ),
+                    outcome="failed",
+                )
+                st.session_state["ocr_timing_request_id"] = None
+                st.session_state["ocr_timing_action_started"] = None
                 st.error(t("ocr_failed"))
                 st.stop()
 
