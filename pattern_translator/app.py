@@ -55,6 +55,7 @@ from pattern_translator.engine import overlay as overlay_engine
 from pattern_translator.engine import pattern_document as pattern_document_engine
 from pattern_translator.engine import ocr_lines as ocr_lines_engine
 from pattern_translator.engine import ocr_cleanup as ocr_cleanup_engine
+from pattern_translator.engine import ocr_runtime as ocr_runtime_engine
 from pattern_translator.engine import llm_fallback as llm_fallback_engine
 
 APP_VERSION = "Pattern OCR Translator (Beta RC26)"
@@ -840,7 +841,7 @@ def run_paddle_ocr_single(
     _ocr_trace_event(trace, "run_paddle_ocr_single start")
     lang = paddle_lang_from_mode(lang_mode)
     try:
-        ocr = get_paddle_reader(lang)
+        ocr = ocr_runtime_engine.run_serialized(get_paddle_reader, lang)
     except Exception as error:
         _log_paddle_failure("reader_init", error, image)
         raise
@@ -874,14 +875,18 @@ def run_paddle_ocr_single(
         try:
             _ocr_trace_event(trace, "PaddleOCR call start")
             inference_start = time.perf_counter()
-            raw_result = ocr.predict(image_path)
+            raw_result = ocr_runtime_engine.run_serialized(ocr.predict, image_path)
             inference_seconds = time.perf_counter() - inference_start
             _ocr_trace_event(trace, "PaddleOCR call end")
         except AttributeError:
             inference_stage = "legacy_ocr"
             _ocr_trace_event(trace, "PaddleOCR call start")
             inference_start = time.perf_counter()
-            raw_result = ocr.ocr(image_path, cls=False)
+            raw_result = ocr_runtime_engine.run_serialized(
+                ocr.ocr,
+                image_path,
+                cls=False,
+            )
             inference_seconds = time.perf_counter() - inference_start
             _ocr_trace_event(trace, "PaddleOCR call end")
     except Exception as error:
@@ -3411,7 +3416,6 @@ if image_file is not None:
                 )
                 st.session_state["pending_ocr_run"] = False
                 st.error(t("ocr_failed"))
-                st.exception(e)
                 st.stop()
 
     result = st.session_state.get("rc3_ocr_result")
