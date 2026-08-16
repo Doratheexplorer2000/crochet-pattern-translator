@@ -24,6 +24,9 @@ let selectedPayload = null;
 let reading = false;
 let backendImagePresent = false;
 let backendImageName = "";
+let acceptedGeneration = 0;
+let nextGeneration = 0;
+let selectedGeneration = 0;
 
 function text(key) {
   return String(strings[key] || "");
@@ -100,7 +103,10 @@ function validateFile(file) {
   return "";
 }
 
-function finishReading() {
+function finishReading(generation) {
+  if (generation !== selectedGeneration) {
+    return;
+  }
   reading = false;
   renderActiveFileName();
   setState(hasActiveImage() ? "selected" : "empty");
@@ -117,6 +123,9 @@ function processFile(file) {
   }
 
   selectedFile = file;
+  const generation = Math.max(nextGeneration, acceptedGeneration) + 1;
+  nextGeneration = generation;
+  selectedGeneration = generation;
   fileName.textContent = file.name;
   clearError();
   reading = true;
@@ -124,14 +133,20 @@ function processFile(file) {
 
   const reader = new FileReader();
   reader.onerror = () => {
+    if (generation !== selectedGeneration) {
+      return;
+    }
     selectedFile = previousFile;
     selectedPayload = previousPayload;
     renderActiveFileName();
     input.value = "";
-    finishReading();
+    finishReading(generation);
     showError("error_unreadable");
   };
   reader.onload = () => {
+    if (generation !== selectedGeneration) {
+      return;
+    }
     const result = String(reader.result || "");
     const commaIndex = result.indexOf(",");
     if (commaIndex < 0) {
@@ -139,7 +154,7 @@ function processFile(file) {
       selectedPayload = previousPayload;
       renderActiveFileName();
       input.value = "";
-      finishReading();
+      finishReading(generation);
       showError("error_unreadable");
       return;
     }
@@ -149,9 +164,10 @@ function processFile(file) {
       size: file.size,
       data_base64: result.slice(commaIndex + 1),
       action_id: createActionId(),
+      generation,
     };
     Streamlit.setComponentValue(selectedPayload);
-    finishReading();
+    finishReading(generation);
   };
   reader.readAsDataURL(file);
 }
@@ -191,11 +207,25 @@ function onRender(event) {
   backendImagePresent = Boolean(args.active_image_present);
   backendImageName = String(args.active_image_name || "");
   const acceptedActionId = String(args.accepted_action_id || "");
-  if (selectedPayload && acceptedActionId === selectedPayload.action_id) {
-    selectedFile = null;
+  const backendAcceptedGeneration = Number(args.accepted_generation || 0);
+  if (Number.isSafeInteger(backendAcceptedGeneration)) {
+    acceptedGeneration = Math.max(acceptedGeneration, backendAcceptedGeneration);
+    nextGeneration = Math.max(nextGeneration, acceptedGeneration);
+  }
+  if (
+    selectedPayload &&
+    acceptedGeneration >= selectedPayload.generation
+  ) {
+    if (selectedGeneration <= acceptedGeneration) {
+      selectedFile = null;
+      selectedGeneration = acceptedGeneration;
+      input.value = "";
+    }
     selectedPayload = null;
-    input.value = "";
-    Streamlit.setComponentValue({ acknowledged_action_id: acceptedActionId });
+    Streamlit.setComponentValue({
+      acknowledged_action_id: acceptedActionId,
+      generation: acceptedGeneration,
+    });
   }
   applyTheme(event.detail.theme);
   renderStrings();
@@ -210,6 +240,9 @@ removeButton.addEventListener("click", () => {
   if (reading) {
     return;
   }
+  const generation = Math.max(nextGeneration, acceptedGeneration) + 1;
+  nextGeneration = generation;
+  selectedGeneration = generation;
   selectedFile = null;
   selectedPayload = null;
   backendImagePresent = false;
@@ -218,7 +251,11 @@ removeButton.addEventListener("click", () => {
   fileName.textContent = "";
   clearError();
   setState("empty");
-  Streamlit.setComponentValue({ removed: true, action_id: Date.now() });
+  Streamlit.setComponentValue({
+    removed: true,
+    action_id: createActionId(),
+    generation,
+  });
 });
 
 input.addEventListener("change", () => {

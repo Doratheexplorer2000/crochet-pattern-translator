@@ -2,6 +2,7 @@
 set -euo pipefail
 
 APP_PORT="${PORT:-8501}"
+export STREAMLIT_SERVER_DISCONNECTED_SESSION_TTL="${STREAMLIT_SERVER_DISCONNECTED_SESSION_TTL:-900}"
 
 if [[ -n "${GCP_SERVICE_ACCOUNT_JSON_B64:-}" ]]; then
   mkdir -p .streamlit
