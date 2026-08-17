@@ -310,13 +310,44 @@ class CustomUploadTests(unittest.TestCase):
             Path(custom_upload.__file__).resolve().parents[2] / "app.py"
         ).read_text(encoding="utf-8")
         self.assertIn(
-            'if st.session_state.get("pending_ocr_run") or st.session_state.get("ocr_running"):',
+            'or ocr_request_lifecycle_engine.is_active(',
             app_source,
         )
         self.assertIn(
             'st.session_state["duplicate_ocr_run_ignored_count"]', app_source
         )
         self.assertIn("        return\n", app_source)
+
+    def test_app_claims_pending_request_before_ocr_and_finishes_it(self):
+        app_source = (
+            Path(custom_upload.__file__).resolve().parents[2] / "app.py"
+        ).read_text(encoding="utf-8")
+        claim_position = app_source.index(
+            "lifecycle, request_claimed = ocr_request_lifecycle_engine.claim_request("
+        )
+        pending_log_position = app_source.index('"pending_run_begin"', claim_position)
+        ocr_position = app_source.index("candidate_result = run_primary_ocr(", claim_position)
+        result_position = app_source.index(
+            'st.session_state["rc3_ocr_result"] = {', ocr_position
+        )
+        finish_position = app_source.index(
+            "ocr_request_lifecycle_engine.finish_request(", result_position
+        )
+        success_ui_position = app_source.index(
+            'ocr_status_placeholder.success("🟢 OCR completed.")', finish_position
+        )
+
+        self.assertLess(claim_position, pending_log_position)
+        self.assertLess(pending_log_position, ocr_position)
+        self.assertLess(ocr_position, result_position)
+        self.assertLess(result_position, finish_position)
+        self.assertLess(finish_position, success_ui_position)
+        self.assertEqual(app_source.count('"pending_run_begin"'), 1)
+        self.assertIn(
+            'st.session_state["pending_ocr_run"] = False\n'
+            '            if not request_claimed:',
+            app_source[claim_position:pending_log_position],
+        )
 
     def test_production_retains_disconnected_sessions_for_mobile_resume(self):
         start_script = (

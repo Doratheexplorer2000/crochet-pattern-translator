@@ -57,6 +57,9 @@ from pattern_translator.engine import pattern_document as pattern_document_engin
 from pattern_translator.engine import ocr_lines as ocr_lines_engine
 from pattern_translator.engine import ocr_cleanup as ocr_cleanup_engine
 from pattern_translator.engine import ocr_runtime as ocr_runtime_engine
+from pattern_translator.engine import (
+    ocr_request_lifecycle as ocr_request_lifecycle_engine,
+)
 from pattern_translator.engine import llm_fallback as llm_fallback_engine
 
 APP_VERSION = "Pattern OCR Translator (Beta RC26)"
@@ -2270,10 +2273,17 @@ def init_rc3_state():
     st.session_state.setdefault("rc10b_last_cropper_box", None)
     st.session_state.setdefault("ocr_timing_request_id", None)
     st.session_state.setdefault("ocr_timing_action_started", None)
+    st.session_state.setdefault("ocr_request_lifecycle", None)
 
 
 def request_ocr_run():
-    if st.session_state.get("pending_ocr_run") or st.session_state.get("ocr_running"):
+    if (
+        st.session_state.get("pending_ocr_run")
+        or st.session_state.get("ocr_running")
+        or ocr_request_lifecycle_engine.is_active(
+            st.session_state.get("ocr_request_lifecycle")
+        )
+    ):
         st.session_state["duplicate_ocr_run_ignored_count"] = st.session_state.get("duplicate_ocr_run_ignored_count", 0) + 1
         rc10b_log_event(
             "Run OCR request ignored because OCR already running",
@@ -2284,6 +2294,9 @@ def request_ocr_run():
     action_started = time.perf_counter()
     st.session_state["ocr_timing_request_id"] = diagnostic_request_id
     st.session_state["ocr_timing_action_started"] = action_started
+    st.session_state["ocr_request_lifecycle"] = (
+        ocr_request_lifecycle_engine.new_request(diagnostic_request_id)
+    )
     st.session_state["rc10b_run_button_click_count"] = st.session_state.get("rc10b_run_button_click_count", 0) + 1
     st.session_state["rc10b_last_button_click_rerun"] = st.session_state.get("rc10b_rerun_count")
     st.session_state["pending_ocr_run"] = True
@@ -3082,27 +3095,47 @@ if image_file is not None:
             if isinstance(action_started, (int, float))
             else None
         )
-        log_app_ocr_timing(
-            diagnostic_request_id,
-            "pending_run_begin",
-            elapsed_seconds=click_to_pending_seconds,
-        )
-        last_click_rerun = st.session_state.get("rc10b_last_button_click_rerun")
-        current_rerun = st.session_state.get("rc10b_rerun_count")
-        rerun_delta = None
-        if isinstance(last_click_rerun, int) and isinstance(current_rerun, int):
-            rerun_delta = current_rerun - last_click_rerun
-        st.session_state["rc10b_last_ocr_block_rerun_delta"] = rerun_delta
-        rc10b_log_event(
-            "Pending OCR block reached",
-            current_rerun=current_rerun,
-            last_click_rerun=last_click_rerun,
-            reruns_between_click_and_ocr_block=rerun_delta,
-        )
         ocr_status_placeholder.info("🔵 OCR started...")
         with st.spinner(t("running_ocr")):
+            ocr_status_placeholder.warning("🟡 OCR running...")
+            lifecycle, request_claimed = ocr_request_lifecycle_engine.claim_request(
+                st.session_state.get("ocr_request_lifecycle"),
+                diagnostic_request_id,
+            )
+            st.session_state["ocr_request_lifecycle"] = lifecycle
+            st.session_state["pending_ocr_run"] = False
+            if not request_claimed:
+                st.session_state["duplicate_ocr_run_ignored_count"] = (
+                    st.session_state.get("duplicate_ocr_run_ignored_count", 0) + 1
+                )
+                log_app_ocr_timing(
+                    diagnostic_request_id,
+                    "pending_run_replay_ignored",
+                    outcome="already_consumed",
+                )
+                st.stop()
+
+            # No Streamlit UI calls occur after this transition until the request
+            # result is stored and its lifecycle is terminal.
+            st.session_state["ocr_running"] = True
+            log_app_ocr_timing(
+                diagnostic_request_id,
+                "pending_run_begin",
+                elapsed_seconds=click_to_pending_seconds,
+            )
+            last_click_rerun = st.session_state.get("rc10b_last_button_click_rerun")
+            current_rerun = st.session_state.get("rc10b_rerun_count")
+            rerun_delta = None
+            if isinstance(last_click_rerun, int) and isinstance(current_rerun, int):
+                rerun_delta = current_rerun - last_click_rerun
+            st.session_state["rc10b_last_ocr_block_rerun_delta"] = rerun_delta
+            rc10b_log_event(
+                "Pending OCR block reached",
+                current_rerun=current_rerun,
+                last_click_rerun=last_click_rerun,
+                reruns_between_click_and_ocr_block=rerun_delta,
+            )
             try:
-                st.session_state["ocr_running"] = True
                 st.session_state["ocr_started_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
                 st.session_state["ocr_finished_at"] = None
                 st.session_state["ocr_duration_seconds"] = None
@@ -3111,7 +3144,6 @@ if image_file is not None:
                     "OCR started",
                     ocr_started_at=st.session_state.get("ocr_started_at"),
                 )
-                ocr_status_placeholder.warning("🟡 OCR running...")
                 total_start = time.perf_counter()
                 timings = {
                     "Image load": image_load_seconds,
@@ -3276,17 +3308,12 @@ if image_file is not None:
                 processing_total_before_status = image_load_seconds + crop_extraction_seconds + (time.perf_counter() - total_start)
                 st.session_state["ocr_finished_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
                 st.session_state["ocr_duration_seconds"] = round(time.perf_counter() - ocr_execution_start, 3)
-                st.session_state["ocr_running"] = False
                 rc10b_log_event(
                     "OCR completed",
                     ocr_started_at=st.session_state.get("ocr_started_at"),
                     ocr_finished_at=st.session_state.get("ocr_finished_at"),
                     ocr_duration_seconds=st.session_state.get("ocr_duration_seconds"),
                 )
-                ocr_status_placeholder.success("🟢 OCR completed.")
-                time.sleep(3)
-                ocr_status_placeholder.empty()
-
                 diagnostic_report_start = time.perf_counter()
                 debug_report_txt = build_debug_report_text(
                     line_df,
@@ -3357,7 +3384,14 @@ if image_file is not None:
                     "crop_box": crop_box,
                 }
                 st.session_state["rc3_ocr_result_signature"] = current_ocr_signature
-                st.session_state["pending_ocr_run"] = False
+                st.session_state["ocr_request_lifecycle"] = (
+                    ocr_request_lifecycle_engine.finish_request(
+                        st.session_state.get("ocr_request_lifecycle"),
+                        diagnostic_request_id,
+                        succeeded=True,
+                    )
+                )
+                st.session_state["ocr_running"] = False
                 log_app_ocr_timing(
                     diagnostic_request_id,
                     "translation_run_end",
@@ -3372,6 +3406,9 @@ if image_file is not None:
                 st.session_state["ocr_timing_action_started"] = None
                 st.session_state["debug_report_ready"] = False
                 st.session_state["last_successful_download_key"] = None
+                ocr_status_placeholder.success("🟢 OCR completed.")
+                time.sleep(3)
+                ocr_status_placeholder.empty()
                 translation_no = get_session_translation_no(st.session_state)
                 track_analytics_event(
                     "translation_completed",
@@ -3392,6 +3429,14 @@ if image_file is not None:
                 st.session_state["ocr_finished_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
                 st.session_state["ocr_duration_seconds"] = round(time.perf_counter() - ocr_execution_start, 3) if "ocr_execution_start" in locals() else None
                 st.session_state["ocr_running"] = False
+                st.session_state["pending_ocr_run"] = False
+                st.session_state["ocr_request_lifecycle"] = (
+                    ocr_request_lifecycle_engine.finish_request(
+                        st.session_state.get("ocr_request_lifecycle"),
+                        diagnostic_request_id,
+                        succeeded=False,
+                    )
+                )
                 rc10b_log_event(
                     "OCR failed",
                     ocr_started_at=st.session_state.get("ocr_started_at"),
@@ -3406,7 +3451,6 @@ if image_file is not None:
                     translate_from=source_mode if "source_mode" in locals() else "",
                     translate_to=output_mode if "output_mode" in locals() else "",
                 )
-                st.session_state["pending_ocr_run"] = False
                 log_app_ocr_timing(
                     diagnostic_request_id,
                     "translation_run_end",
