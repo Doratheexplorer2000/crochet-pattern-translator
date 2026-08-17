@@ -4,12 +4,133 @@ from dataclasses import dataclass
 from collections.abc import Callable, MutableMapping
 import threading
 import time
-from typing import Any, Dict, Optional, Tuple
+import sys
+from typing import Any, Dict, Iterable, Optional, Tuple
 
 
 RESULT_STATE_KEY = "rc3_ocr_result"
 DEFAULT_HANDOFF_TTL_SECONDS = 300.0
 DEFAULT_HANDOFF_MAX_ENTRIES = 8
+SIGNATURE_FIELD_NAMES = (
+    "image_signature",
+    "source_language",
+    "target_language",
+    "area_mode",
+    "crop_box",
+)
+SIGNATURE_EXTRA_FIELD_NAMES = (
+    "downscale_flag",
+    "downscale_option",
+    "ocr_resize_option",
+)
+
+
+def _safe_log_token(value: object) -> str:
+    return "".join(
+        character if character.isalnum() or character in "._-" else "_"
+        for character in str(value or "")
+    )[:80] or "unavailable"
+
+
+def differing_signature_fields(
+    stored_signature: object,
+    current_signature: object,
+) -> Tuple[str, ...]:
+    """Return only structural field names whose signature values differ."""
+    if not isinstance(stored_signature, (tuple, list)) or not isinstance(
+        current_signature, (tuple, list)
+    ):
+        return ("signature_shape",)
+
+    differences = []
+    for index, field_name in enumerate(SIGNATURE_FIELD_NAMES):
+        stored_value = stored_signature[index] if index < len(stored_signature) else None
+        current_value = current_signature[index] if index < len(current_signature) else None
+        if stored_value != current_value:
+            differences.append(field_name)
+
+    stored_extra = stored_signature[5] if len(stored_signature) > 5 else ()
+    current_extra = current_signature[5] if len(current_signature) > 5 else ()
+    if not isinstance(stored_extra, (tuple, list)) or not isinstance(
+        current_extra, (tuple, list)
+    ):
+        differences.append("signature_shape")
+    else:
+        for index, field_name in enumerate(SIGNATURE_EXTRA_FIELD_NAMES):
+            stored_value = stored_extra[index] if index < len(stored_extra) else None
+            current_value = current_extra[index] if index < len(current_extra) else None
+            if stored_value != current_value:
+                differences.append(field_name)
+
+    if len(stored_signature) != len(current_signature):
+        differences.append("signature_shape")
+    return tuple(dict.fromkeys(differences))
+
+
+def log_result_state(
+    request_id: str,
+    phase: str,
+    *,
+    session_generation: str,
+    script_run_no: Optional[int],
+    lifecycle: str,
+    result_present: bool,
+    active_image: bool,
+    accepted_upload_generation: Optional[int],
+    action: str = "",
+    reason: str = "",
+    uploader_event: str = "",
+    area_mode: str = "",
+    select_area_editing: Optional[bool] = None,
+    crop_confirmed: Optional[bool] = None,
+    stored_signature_present: Optional[bool] = None,
+    current_signature_present: Optional[bool] = None,
+    signature_match: Optional[bool] = None,
+    mismatch_fields: Iterable[str] = (),
+) -> None:
+    """Emit structural result diagnostics without pattern or signature values."""
+    fields = [
+        f"request_id={_safe_log_token(request_id)}",
+        f"phase={_safe_log_token(phase)}",
+        f"monotonic_ms={time.perf_counter() * 1000:.1f}",
+        f"session_generation={_safe_log_token(session_generation)}",
+        f"lifecycle={_safe_log_token(lifecycle)}",
+        f"result_present={str(bool(result_present)).lower()}",
+        f"active_image={str(bool(active_image)).lower()}",
+    ]
+    if script_run_no is not None:
+        fields.append(f"script_run_no={int(script_run_no)}")
+    if accepted_upload_generation is not None:
+        fields.append(
+            f"accepted_upload_generation={int(accepted_upload_generation)}"
+        )
+    for name, value in (
+        ("action", action),
+        ("reason", reason),
+        ("uploader_event", uploader_event),
+        ("area_mode", area_mode),
+    ):
+        if value:
+            fields.append(f"{name}={_safe_log_token(value)}")
+    for name, value in (
+        ("select_area_editing", select_area_editing),
+        ("crop_confirmed", crop_confirmed),
+        ("stored_signature_present", stored_signature_present),
+        ("current_signature_present", current_signature_present),
+        ("signature_match", signature_match),
+    ):
+        if value is not None:
+            fields.append(f"{name}={str(bool(value)).lower()}")
+    safe_mismatch_fields = [
+        field
+        for field in mismatch_fields
+        if field in SIGNATURE_FIELD_NAMES
+        or field in SIGNATURE_EXTRA_FIELD_NAMES
+        or field == "signature_shape"
+    ]
+    if safe_mismatch_fields:
+        fields.append("mismatch_fields=" + ",".join(safe_mismatch_fields))
+    print("[pattern_result_state] " + " ".join(fields), file=sys.stderr, flush=True)
 
 
 @dataclass(frozen=True)

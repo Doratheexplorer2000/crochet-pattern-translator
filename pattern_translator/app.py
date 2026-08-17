@@ -2312,6 +2312,83 @@ def diagnostic_report_filename() -> str:
     return f"PatternOCR_DiagnosticReport_{safe_version}_{timestamp}.txt"
 
 
+def _result_request_id() -> str:
+    lifecycle = st.session_state.get("ocr_request_lifecycle")
+    if isinstance(lifecycle, dict) and lifecycle.get("request_id"):
+        return str(lifecycle["request_id"])
+    result = st.session_state.get("rc3_ocr_result")
+    if isinstance(result, dict) and result.get("diagnostic_request_id"):
+        return str(result["diagnostic_request_id"])
+    return "none"
+
+
+def _result_lifecycle_state() -> str:
+    lifecycle = st.session_state.get("ocr_request_lifecycle")
+    if isinstance(lifecycle, dict):
+        return str(lifecycle.get("state") or "none")
+    return "none"
+
+
+def _safe_area_mode(value: object = None) -> str:
+    area_mode = value or st.session_state.get("translation_area_mode_radio")
+    return {
+        "Whole Pattern": "whole_pattern",
+        "Select Area": "select_area",
+    }.get(str(area_mode or ""), "unavailable")
+
+
+def log_result_state_event(
+    phase: str,
+    *,
+    action: str = "",
+    reason: str = "",
+    uploader_event: str = "",
+    area_mode: object = None,
+    select_area_editing: Optional[bool] = None,
+    crop_confirmed: Optional[bool] = None,
+    stored_signature_present: Optional[bool] = None,
+    current_signature_present: Optional[bool] = None,
+    signature_match: Optional[bool] = None,
+    mismatch_fields: Tuple[str, ...] = (),
+    callback_receipt: bool = False,
+) -> None:
+    """Record content-free result state without mutating application state."""
+    try:
+        script_run_no = int(st.session_state.get("rc10b_rerun_count", 0) or 0)
+        if callback_receipt:
+            # Callbacks run before the corresponding top-to-bottom script run.
+            script_run_no += 1
+        accepted_generation = int(
+            st.session_state.get("rc3_upload_generation", 0) or 0
+        )
+        result_delivery_engine.log_result_state(
+            _result_request_id(),
+            phase,
+            session_generation=str(
+                st.session_state.get("diagnostic_session_generation")
+                or "unavailable"
+            ),
+            script_run_no=script_run_no,
+            lifecycle=_result_lifecycle_state(),
+            result_present=st.session_state.get("rc3_ocr_result") is not None,
+            active_image=st.session_state.get("rc3_active_image_upload") is not None,
+            accepted_upload_generation=accepted_generation,
+            action=action,
+            reason=reason,
+            uploader_event=uploader_event,
+            area_mode=_safe_area_mode(area_mode),
+            select_area_editing=select_area_editing,
+            crop_confirmed=crop_confirmed,
+            stored_signature_present=stored_signature_present,
+            current_signature_present=current_signature_present,
+            signature_match=signature_match,
+            mismatch_fields=mismatch_fields,
+        )
+    except Exception:
+        # Diagnostics must never change product behavior.
+        return
+
+
 def download_button_rc3(
     label: str,
     data: object,
@@ -2322,9 +2399,16 @@ def download_button_rc3(
     analytics_event_type: Optional[str] = None,
     plausible_event_name: Optional[str] = None,
     prevent_rerun: bool = False,
+    diagnostic_action: str = "",
 ):
     """Render a download button and show a shared public confirmation after click."""
     def mark_download_complete(download_key: str = key) -> None:
+        if diagnostic_action:
+            log_result_state_event(
+                "post_result_action_received",
+                action=diagnostic_action,
+                callback_receipt=True,
+            )
         st.session_state["last_successful_download_key"] = download_key
         if analytics_event_type:
             try:
@@ -2634,6 +2718,11 @@ def claim_and_commit_completed_result(
             session_generation=session_generation,
             request_lifecycle="running",
         )
+        if st.session_state.get("rc3_ocr_result") is not None:
+            log_result_state_event(
+                "result_clear",
+                reason="new_translation_result",
+            )
         result_delivery_engine.store_primary_result(st.session_state, primary_result)
         st.session_state["rc3_ocr_result_signature"] = delivery["result_signature"]
         st.session_state["pending_ocr_run"] = False
@@ -2725,6 +2814,11 @@ if handoff_request_id and (
     )
 mount_plausible_bridge(st.session_state.pop("pending_plausible_v2_event", None))
 st.session_state["rc10b_rerun_count"] = st.session_state.get("rc10b_rerun_count", 0) + 1
+if (
+    st.session_state.get("rc3_ocr_result") is not None
+    or _result_lifecycle_state() == ocr_request_lifecycle_engine.COMPLETED
+):
+    log_result_state_event("result_state_run_begin")
 script_run_started = time.perf_counter()
 script_run_lifecycle = st.session_state.get("ocr_request_lifecycle")
 script_run_request_id = str(
@@ -2922,6 +3016,7 @@ upload_strings = {
 active_image_upload = restore_uploaded_image(
     st.session_state.get("rc3_active_image_upload")
 )
+had_active_image_before_uploader = active_image_upload is not None
 image_file, upload_error, upload_removed = custom_image_uploader(
     upload_strings,
     key="pattern_image_uploader",
@@ -2933,9 +3028,24 @@ image_file, upload_error, upload_removed = custom_image_uploader(
 if upload_error:
     st.error(upload_error)
 
+uploader_event = "none"
+if upload_removed is not None:
+    uploader_event = "remove"
+elif image_file is not None:
+    uploader_event = "replace" if had_active_image_before_uploader else "new"
+if (
+    st.session_state.get("rc3_ocr_result") is not None
+    or _result_lifecycle_state() == ocr_request_lifecycle_engine.COMPLETED
+):
+    log_result_state_event(
+        "uploader_state",
+        uploader_event=uploader_event,
+    )
+
 def reset_uploaded_image_derived_state(
-    image_signature: Optional[str], image_name: str = ""
+    image_signature: Optional[str], image_name: str = "", *, reason: str
 ) -> None:
+    log_result_state_event("result_clear", reason=reason)
     st.session_state["rc3_ocr_result"] = None
     st.session_state["rc3_ocr_result_signature"] = None
     st.session_state["pending_ocr_run"] = False
@@ -2972,7 +3082,7 @@ if upload_removed:
         st.session_state.get("rc3_image_signature") is not None
         or st.session_state.get("rc3_active_image_upload") is not None
     ):
-        reset_uploaded_image_derived_state(None)
+        reset_uploaded_image_derived_state(None, reason="image_removed")
         st.rerun()
 
 if image_file is not None:
@@ -2989,13 +3099,23 @@ image_file = active_image_upload
 
 if image_file is None:
     rc10b_note_image_absent()
+    if (
+        st.session_state.get("rc3_ocr_result") is not None
+        or _result_lifecycle_state() == ocr_request_lifecycle_engine.COMPLETED
+    ):
+        log_result_state_event(
+            "result_render_skipped",
+            reason="no_active_image",
+        )
 
 if image_file is not None:
     current_signature = image_upload_signature(image_file)
     rc10b_note_image_present(current_signature)
     if st.session_state.get("rc3_image_signature") != current_signature:
         reset_uploaded_image_derived_state(
-            current_signature, str(getattr(image_file, "name", ""))
+            current_signature,
+            str(getattr(image_file, "name", "")),
+            reason="new_image",
         )
         track_analytics_event("image_uploaded")
         emit_plausible_event(
@@ -3069,6 +3189,17 @@ if image_file is not None:
     preset_box = get_preset_crop_box(image, area_mode_for_box)
 
     def start_over_select_area() -> None:
+        log_result_state_event(
+            "result_clear",
+            reason="select_area_start_over",
+            area_mode=area_mode,
+            select_area_editing=bool(
+                st.session_state.get("select_area_editing")
+            ),
+            crop_confirmed=(
+                st.session_state.get("select_area_confirmed_crop_box") is not None
+            ),
+        )
         st.session_state["select_area_start_over_pending"] = True
         st.session_state["select_area_confirmed_crop_box"] = None
         st.session_state["select_area_editing"] = False
@@ -3282,6 +3413,15 @@ if image_file is not None:
                 crop_box = (0, 0, image.size[0], image.size[1])
 
         if st.session_state.get("select_area_editing"):
+            log_result_state_event(
+                "result_render_skipped",
+                reason="select_area_editing",
+                area_mode=area_mode,
+                select_area_editing=True,
+                crop_confirmed=(
+                    st.session_state.get("select_area_confirmed_crop_box") is not None
+                ),
+            )
             st.stop()
 
     crop_extract_start = time.perf_counter()
@@ -3350,8 +3490,58 @@ if image_file is not None:
         extra_settings=(experimental_downscale, downscale_max_height_option, ocr_resize_test),
     )
     stored_ocr_signature = st.session_state.get("rc3_ocr_result_signature")
+    result_present_at_signature_guard = (
+        st.session_state.get("rc3_ocr_result") is not None
+    )
+    signature_match = stored_ocr_signature == current_ocr_signature
+    mismatch_fields = (
+        result_delivery_engine.differing_signature_fields(
+            stored_ocr_signature,
+            current_ocr_signature,
+        )
+        if result_present_at_signature_guard and not signature_match
+        else ()
+    )
+    if (
+        result_present_at_signature_guard
+        or _result_lifecycle_state() == ocr_request_lifecycle_engine.COMPLETED
+    ):
+        log_result_state_event(
+            "translation_signature_guard",
+            area_mode=area_mode,
+            select_area_editing=bool(
+                st.session_state.get("select_area_editing")
+            ),
+            crop_confirmed=(
+                st.session_state.get("select_area_confirmed_crop_box") is not None
+            ),
+            stored_signature_present=stored_ocr_signature is not None,
+            current_signature_present=current_ocr_signature is not None,
+            signature_match=signature_match,
+            mismatch_fields=mismatch_fields,
+        )
     if st.session_state.get("rc3_ocr_result") is not None and stored_ocr_signature != current_ocr_signature:
+        log_result_state_event(
+            "result_clear",
+            reason="translation_signature_mismatch",
+            area_mode=area_mode,
+            select_area_editing=bool(
+                st.session_state.get("select_area_editing")
+            ),
+            crop_confirmed=(
+                st.session_state.get("select_area_confirmed_crop_box") is not None
+            ),
+            stored_signature_present=True,
+            current_signature_present=True,
+            signature_match=False,
+            mismatch_fields=mismatch_fields,
+        )
         st.session_state["rc3_ocr_result"] = None
+        log_result_state_event(
+            "result_render_skipped",
+            reason="result_invalidated",
+            area_mode=area_mode,
+        )
         st.warning(t("settings_changed_rerun"))
 
     full_df = load_database()
@@ -3405,6 +3595,11 @@ if image_file is not None:
                     diagnostic_request_id,
                     "pending_run_replay_ignored",
                     outcome="already_consumed",
+                )
+                log_result_state_event(
+                    "result_render_skipped",
+                    reason="pending_request_replay",
+                    area_mode=area_mode,
                 )
                 st.stop()
 
@@ -3757,6 +3952,11 @@ if image_file is not None:
                 st.session_state["ocr_timing_request_id"] = None
                 st.session_state["ocr_timing_action_started"] = None
                 st.error(t("ocr_failed"))
+                log_result_state_event(
+                    "result_render_skipped",
+                    reason="ocr_failure",
+                    area_mode=area_mode,
+                )
                 log_app_ocr_timing(
                     diagnostic_request_id,
                     "script_run_end",
@@ -3771,6 +3971,16 @@ if image_file is not None:
 
     result = st.session_state.get("rc3_ocr_result")
     if result:
+        log_result_state_event(
+            "result_render_enter",
+            area_mode=area_mode,
+            select_area_editing=bool(
+                st.session_state.get("select_area_editing")
+            ),
+            crop_confirmed=(
+                st.session_state.get("select_area_confirmed_crop_box") is not None
+            ),
+        )
         overlay_image = result.get("overlay_image")
         overlay_png = result.get("overlay_png")
         line_df = result.get("line_df")
@@ -3805,6 +4015,7 @@ if image_file is not None:
                 key="download_overlay_png",
                 analytics_event_type="download_png",
                 plausible_event_name="pattern_png_downloaded",
+                diagnostic_action="png",
             )
         elif raw_ocr_text.strip():
             st.info(f"**{t('no_crochet_pattern_title')}**\n\n{t('no_crochet_pattern_body')}")
@@ -3820,6 +4031,7 @@ if image_file is not None:
                 key="download_overlay_translation_txt",
                 analytics_event_type="download_txt",
                 plausible_event_name="pattern_txt_downloaded",
+                diagnostic_action="txt",
             )
         else:
             st.warning(t("no_ocr_lines"))
@@ -3829,9 +4041,23 @@ if image_file is not None:
         st.markdown(f"<div class='report-action'>{html.escape(t('report_download_action'))}</div>", unsafe_allow_html=True)
         st.markdown(f"<div class='report-helper'>{html.escape(t('report_download_helper'))}</div>", unsafe_allow_html=True)
         debug_report_txt = str(result.get("debug_report_txt", "") or "")
+
+        def note_diagnostic_action_received() -> None:
+            log_result_state_event(
+                "post_result_action_received",
+                action="diagnostic",
+                callback_receipt=True,
+            )
+
         if not debug_report_txt and st.button(
-            t("generate_debug_report"), key="generate_debug_report_txt"
+            t("generate_debug_report"),
+            key="generate_debug_report_txt",
+            on_click=note_diagnostic_action_received,
         ):
+            log_result_state_event(
+                "post_result_action_handler_enter",
+                action="diagnostic",
+            )
             report_request_id = str(
                 result.get("diagnostic_request_id") or uuid.uuid4().hex
             )
@@ -3917,6 +4143,18 @@ if image_file is not None:
                         ]
                     )
                     st.dataframe(profile_count_df, use_container_width=True, hide_index=True)
+    elif _result_lifecycle_state() == ocr_request_lifecycle_engine.COMPLETED:
+        log_result_state_event(
+            "result_render_skipped",
+            reason="result_absent",
+            area_mode=area_mode,
+            select_area_editing=bool(
+                st.session_state.get("select_area_editing")
+            ),
+            crop_confirmed=(
+                st.session_state.get("select_area_confirmed_crop_box") is not None
+            ),
+        )
 else:
     pass
 
