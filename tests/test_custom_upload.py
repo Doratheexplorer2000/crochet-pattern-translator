@@ -360,6 +360,13 @@ class CustomUploadTests(unittest.TestCase):
             start_script,
         )
 
+    def test_pattern_runtime_queues_reruns_during_expensive_translation(self):
+        start_script = (
+            Path(custom_upload.__file__).resolve().parents[3] / "railway_start.sh"
+        ).read_text(encoding="utf-8")
+
+        self.assertEqual(start_script.count("--runner.fastReruns=false"), 3)
+
 
 if __name__ == "__main__":
     unittest.main()

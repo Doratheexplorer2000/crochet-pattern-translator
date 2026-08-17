@@ -2612,6 +2612,98 @@ def build_ocr_image_pipeline_diagnostics(
 # -----------------------------
 # UI
 # -----------------------------
+def claim_and_commit_completed_result(
+    session_generation: str,
+    request_id: str,
+) -> Optional[Dict[str, object]]:
+    """Commit one completed result, leaving interrupted claims recoverable."""
+    log_app_ocr_timing(
+        request_id,
+        "result_handoff_claim_attempt",
+        session_generation=session_generation,
+        request_lifecycle="running",
+    )
+
+    def commit_completed_delivery(delivery: Dict[str, object]) -> None:
+        primary_result = delivery["primary_result"]
+        if not isinstance(primary_result, dict):
+            raise TypeError("Completed result payload is malformed")
+        log_app_ocr_timing(
+            request_id,
+            "translation_result_store_attempt",
+            session_generation=session_generation,
+            request_lifecycle="running",
+        )
+        result_delivery_engine.store_primary_result(st.session_state, primary_result)
+        st.session_state["rc3_ocr_result_signature"] = delivery["result_signature"]
+        st.session_state["pending_ocr_run"] = False
+        st.session_state["ocr_running"] = False
+        st.session_state["ocr_finished_at"] = delivery["ocr_finished_at"]
+        st.session_state["ocr_duration_seconds"] = delivery["ocr_duration_seconds"]
+        st.session_state["ocr_timing_request_id"] = None
+        st.session_state["ocr_timing_action_started"] = None
+        st.session_state["debug_report_ready"] = False
+        st.session_state["last_successful_download_key"] = None
+        st.session_state["completed_result_analytics_pending"] = delivery.get(
+            "analytics"
+        )
+        # Keep the lifecycle running until every other result mutation succeeds.
+        st.session_state["ocr_request_lifecycle"] = (
+            ocr_request_lifecycle_engine.finish_request(
+                st.session_state.get("ocr_request_lifecycle"),
+                request_id,
+                succeeded=True,
+            )
+        )
+
+    claimed_delivery, expired_handoff_count = (
+        result_delivery_engine.claim_completed_result(
+            session_generation,
+            request_id,
+            commit_completed_delivery,
+        )
+    )
+    if expired_handoff_count:
+        log_app_ocr_timing(
+            request_id,
+            "result_handoff_expired",
+            session_generation=session_generation,
+            expired_count=expired_handoff_count,
+        )
+    if claimed_delivery is not None:
+        log_app_ocr_timing(
+            request_id,
+            "result_handoff_claim_success",
+            session_generation=session_generation,
+            request_lifecycle="completed",
+        )
+        log_app_ocr_timing(
+            request_id,
+            "translation_result_store_success",
+            session_generation=session_generation,
+            request_lifecycle="completed",
+            outcome="success",
+        )
+        log_app_ocr_timing(
+            request_id,
+            "downstream_translation_end",
+            elapsed_seconds=claimed_delivery.get("downstream_elapsed_seconds"),
+            session_generation=session_generation,
+            outcome="success",
+        )
+        log_app_ocr_timing(
+            request_id,
+            "translation_run_end",
+            elapsed_seconds=claimed_delivery.get(
+                "translation_run_elapsed_seconds"
+            ),
+            session_generation=session_generation,
+            request_lifecycle="completed",
+            outcome="success",
+        )
+    return claimed_delivery
+
+
 init_rc3_state()
 diagnostic_session_generation = str(
     st.session_state.get("diagnostic_session_generation") or "unavailable"
@@ -2627,91 +2719,10 @@ if handoff_request_id and (
     isinstance(handoff_lifecycle, dict)
     and handoff_lifecycle.get("state") == ocr_request_lifecycle_engine.RUNNING
 ):
-    log_app_ocr_timing(
+    claimed_completed_delivery = claim_and_commit_completed_result(
+        diagnostic_session_generation,
         handoff_request_id,
-        "result_handoff_claim_attempt",
-        session_generation=diagnostic_session_generation,
-        request_lifecycle="running",
     )
-
-    def commit_completed_delivery(delivery: Dict[str, object]) -> None:
-        primary_result = delivery["primary_result"]
-        if not isinstance(primary_result, dict):
-            raise TypeError("Completed result payload is malformed")
-        log_app_ocr_timing(
-            handoff_request_id,
-            "translation_result_store_attempt",
-            session_generation=diagnostic_session_generation,
-            request_lifecycle="running",
-        )
-        result_delivery_engine.store_primary_result(st.session_state, primary_result)
-        st.session_state["rc3_ocr_result_signature"] = delivery["result_signature"]
-        st.session_state["ocr_request_lifecycle"] = (
-            ocr_request_lifecycle_engine.finish_request(
-                st.session_state.get("ocr_request_lifecycle"),
-                handoff_request_id,
-                succeeded=True,
-            )
-        )
-        st.session_state["pending_ocr_run"] = False
-        st.session_state["ocr_running"] = False
-        st.session_state["ocr_finished_at"] = delivery["ocr_finished_at"]
-        st.session_state["ocr_duration_seconds"] = delivery["ocr_duration_seconds"]
-        st.session_state["ocr_timing_request_id"] = None
-        st.session_state["ocr_timing_action_started"] = None
-        st.session_state["debug_report_ready"] = False
-        st.session_state["last_successful_download_key"] = None
-        st.session_state["completed_result_analytics_pending"] = delivery.get(
-            "analytics"
-        )
-
-    claimed_completed_delivery, expired_handoff_count = (
-        result_delivery_engine.claim_completed_result(
-            diagnostic_session_generation,
-            handoff_request_id,
-            commit_completed_delivery,
-        )
-    )
-    if expired_handoff_count:
-        log_app_ocr_timing(
-            handoff_request_id,
-            "result_handoff_expired",
-            session_generation=diagnostic_session_generation,
-            expired_count=expired_handoff_count,
-        )
-    if claimed_completed_delivery is not None:
-        log_app_ocr_timing(
-            handoff_request_id,
-            "result_handoff_claim_success",
-            session_generation=diagnostic_session_generation,
-            request_lifecycle="completed",
-        )
-        log_app_ocr_timing(
-            handoff_request_id,
-            "translation_result_store_success",
-            session_generation=diagnostic_session_generation,
-            request_lifecycle="completed",
-            outcome="success",
-        )
-        log_app_ocr_timing(
-            handoff_request_id,
-            "downstream_translation_end",
-            elapsed_seconds=claimed_completed_delivery.get(
-                "downstream_elapsed_seconds"
-            ),
-            session_generation=diagnostic_session_generation,
-            outcome="success",
-        )
-        log_app_ocr_timing(
-            handoff_request_id,
-            "translation_run_end",
-            elapsed_seconds=claimed_completed_delivery.get(
-                "translation_run_elapsed_seconds"
-            ),
-            session_generation=diagnostic_session_generation,
-            request_lifecycle="completed",
-            outcome="success",
-        )
 mount_plausible_bridge(st.session_state.pop("pending_plausible_v2_event", None))
 st.session_state["rc10b_rerun_count"] = st.session_state.get("rc10b_rerun_count", 0) + 1
 script_run_started = time.perf_counter()
@@ -3699,7 +3710,10 @@ if image_file is not None:
                     request_lifecycle="running",
                     outcome="published" if handoff_published else "already_published",
                 )
-                st.rerun()
+                claimed_completed_delivery = claim_and_commit_completed_result(
+                    diagnostic_session_generation,
+                    diagnostic_request_id,
+                )
             except Exception as e:
                 st.session_state["ocr_finished_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
                 st.session_state["ocr_duration_seconds"] = round(time.perf_counter() - ocr_execution_start, 3) if "ocr_execution_start" in locals() else None

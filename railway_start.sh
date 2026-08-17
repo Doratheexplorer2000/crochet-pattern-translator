@@ -47,11 +47,11 @@ PY
 fi
 
 if command -v streamlit >/dev/null 2>&1; then
-  exec streamlit run pattern_translator/app.py --server.address=0.0.0.0 --server.port="${APP_PORT}"
+  exec streamlit run pattern_translator/app.py --server.address=0.0.0.0 --server.port="${APP_PORT}" --runner.fastReruns=false
 fi
 
 if command -v python >/dev/null 2>&1; then
-  exec python -m streamlit run pattern_translator/app.py --server.address=0.0.0.0 --server.port="${APP_PORT}"
+  exec python -m streamlit run pattern_translator/app.py --server.address=0.0.0.0 --server.port="${APP_PORT}" --runner.fastReruns=false
 fi
 
-exec python3 -m streamlit run pattern_translator/app.py --server.address=0.0.0.0 --server.port="${APP_PORT}"
+exec python3 -m streamlit run pattern_translator/app.py --server.address=0.0.0.0 --server.port="${APP_PORT}" --runner.fastReruns=false
