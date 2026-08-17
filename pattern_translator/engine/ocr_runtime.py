@@ -42,6 +42,15 @@ def log_ocr_timing(
     worker_generation: Optional[int] = None,
     queue_seconds: Optional[float] = None,
     outcome: str = "",
+    session_generation: str = "",
+    request_lifecycle: str = "",
+    active_image: Optional[bool] = None,
+    script_run_no: Optional[int] = None,
+    visual_line_count: Optional[int] = None,
+    eligible_line_count: Optional[int] = None,
+    call_ordinal: Optional[int] = None,
+    model: str = "",
+    route: str = "",
 ) -> None:
     """Emit content-free OCR lifecycle timing for production diagnosis."""
     fields = [
@@ -61,6 +70,24 @@ def log_ocr_timing(
         fields.append(f"queue_wait_ms={max(0.0, queue_seconds) * 1000:.1f}")
     if outcome:
         fields.append(f"outcome={_safe_log_token(outcome)}")
+    if session_generation:
+        fields.append(f"session_generation={_safe_log_token(session_generation)}")
+    if request_lifecycle:
+        fields.append(f"request_lifecycle={_safe_log_token(request_lifecycle)}")
+    if active_image is not None:
+        fields.append(f"active_image={str(bool(active_image)).lower()}")
+    if script_run_no is not None:
+        fields.append(f"script_run_no={int(script_run_no)}")
+    if visual_line_count is not None:
+        fields.append(f"visual_line_count={int(visual_line_count)}")
+    if eligible_line_count is not None:
+        fields.append(f"eligible_line_count={int(eligible_line_count)}")
+    if call_ordinal is not None:
+        fields.append(f"call_ordinal={int(call_ordinal)}")
+    if model:
+        fields.append(f"model={_safe_log_token(model)}")
+    if route:
+        fields.append(f"route={_safe_log_token(route)}")
     print("[pattern_ocr_timing] " + " ".join(fields), file=sys.stderr, flush=True)
 
 

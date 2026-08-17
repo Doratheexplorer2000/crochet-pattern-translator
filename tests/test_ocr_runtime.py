@@ -155,6 +155,42 @@ class OCRRuntimeTests(unittest.TestCase):
             self.assertEqual(manager.timeout_seconds, 75.0)
             self.assertEqual(manager.max_jobs_per_worker, 3)
 
+    def test_timing_logger_emits_only_safe_structural_metadata(self):
+        output = io.StringIO()
+        with redirect_stderr(output):
+            ocr_runtime.log_ocr_timing(
+                "safe-request",
+                "ai_eligibility_summary",
+                session_generation="safe-generation",
+                request_lifecycle="running",
+                active_image=True,
+                script_run_no=2,
+                visual_line_count=14,
+                eligible_line_count=3,
+                call_ordinal=1,
+                model="gpt-5.6-luna",
+                route="general",
+                outcome="success",
+            )
+
+        line = output.getvalue()
+        for expected in (
+            "request_id=safe-request",
+            "session_generation=safe-generation",
+            "request_lifecycle=running",
+            "active_image=true",
+            "script_run_no=2",
+            "visual_line_count=14",
+            "eligible_line_count=3",
+            "call_ordinal=1",
+            "model=gpt-5.6-luna",
+            "route=general",
+            "outcome=success",
+        ):
+            self.assertIn(expected, line)
+        for forbidden in ("OCR source text", "translated text", "synthetic-test-key"):
+            self.assertNotIn(forbidden, line)
+
     def test_worker_starts_lazily_and_handles_sequential_requests(self):
         manager = self.manager()
         self.assertIsNone(manager.worker_pid)
@@ -447,15 +483,59 @@ class OCRRuntimeTests(unittest.TestCase):
         self.assertIn("diagnostic_request_id=diagnostic_request_id", app_source)
         for phase in (
             "translation_action_accepted",
+            "script_run_begin",
+            "script_run_end",
             "pending_run_begin",
             "pre_ocr_preparation_begin",
             "pre_ocr_preparation_end",
             "temp_image_preparation_begin",
             "temp_image_preparation_end",
             "downstream_translation_begin",
+            "overlay_begin",
+            "overlay_end",
+            "export_begin",
+            "export_end",
+            "diagnostic_report_begin",
+            "diagnostic_report_end",
+            "translation_result_store_attempt",
+            "translation_result_store_success",
+            "downstream_translation_end",
             "translation_run_end",
         ):
             self.assertIn(f'"{phase}"', app_source)
+        self.assertIn('st.session_state.setdefault("diagnostic_session_generation"', app_source)
+
+        line_source = (
+            Path(__file__).resolve().parents[1]
+            / "pattern_translator"
+            / "engine"
+            / "ocr_lines.py"
+        ).read_text(encoding="utf-8")
+        for phase in (
+            "deterministic_translation_begin",
+            "deterministic_translation_end",
+            "semantic_context_begin",
+            "semantic_context_end",
+            "ai_eligibility_summary",
+            "line_translation_end",
+            "line_reconstruction_end",
+        ):
+            self.assertIn(f'"{phase}"', line_source)
+
+        llm_source = (
+            Path(__file__).resolve().parents[1]
+            / "pattern_translator"
+            / "engine"
+            / "llm_fallback.py"
+        ).read_text(encoding="utf-8")
+        for phase in (
+            "ai_request_begin",
+            "http_open_begin",
+            "http_headers_received",
+            "response_parse_end",
+            "ai_request_end",
+        ):
+            self.assertIn(f'"{phase}"', llm_source)
         self.assertIn("finally:\n        try:\n            os.remove(image_path)", app_source)
 
         worker_source = (

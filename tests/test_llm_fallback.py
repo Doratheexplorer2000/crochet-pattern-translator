@@ -140,6 +140,143 @@ class LlmFallbackTests(unittest.TestCase):
         self.assertNotIn("PREVIOUS:", prompt)
         self.assertNotIn("NEXT:", prompt)
 
+    def test_downstream_timing_is_content_free_and_does_not_add_provider_calls(self):
+        source_text = "we will not fill the body"
+        translated_text = "我們不會填充身體"
+        rows = pd.DataFrame([
+            {
+                "text": source_text,
+                "confidence": 0.99,
+                "min_x": 0,
+                "max_x": 240,
+                "min_y": 0,
+                "max_y": 20,
+            }
+        ])
+        events = []
+        provider_calls = 0
+
+        def diagnostic_logger(phase, **fields):
+            events.append((phase, fields))
+
+        def provider(_context, _current, _following, _target):
+            nonlocal provider_calls
+            provider_calls += 1
+            return translated_text
+
+        result = ocr_lines.build_ocr_line_translations(
+            rows,
+            self.english_index,
+            self.df,
+            "Traditional Chinese",
+            llm_provider=provider,
+            diagnostic_logger=diagnostic_logger,
+        )
+
+        self.assertEqual(result.loc[0, "Translation"], translated_text)
+        self.assertEqual(provider_calls, 1)
+        phases = [phase for phase, _fields in events]
+        for phase in (
+            "deterministic_translation_begin",
+            "deterministic_translation_end",
+            "semantic_context_begin",
+            "semantic_context_end",
+            "ai_eligibility_summary",
+            "ai_request_begin",
+            "ai_request_end",
+            "line_translation_end",
+            "line_reconstruction_end",
+        ):
+            self.assertIn(phase, phases)
+        summary = next(fields for phase, fields in events if phase == "ai_eligibility_summary")
+        self.assertEqual(summary["visual_line_count"], 1)
+        self.assertEqual(summary["eligible_line_count"], 1)
+        serialized_events = json.dumps(events, ensure_ascii=False)
+        self.assertNotIn(source_text, serialized_events)
+        self.assertNotIn(translated_text, serialized_events)
+
+    def test_provider_timing_covers_http_boundary_without_extra_request(self):
+        events = []
+        urlopen_calls = 0
+
+        class FakeResponse(io.BytesIO):
+            status = 200
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                self.close()
+
+        response = FakeResponse(json.dumps({
+            "output": [{
+                "content": [{"type": "output_text", "text": "我們不會填充身體"}]
+            }]
+        }).encode("utf-8"))
+
+        def urlopen(_request, timeout):
+            nonlocal urlopen_calls
+            urlopen_calls += 1
+            self.assertEqual(timeout, llm_fallback.DEFAULT_TIMEOUT_SECONDS)
+            return response
+
+        provider = llm_fallback.create_openai_provider("synthetic-test-key")
+        with mock.patch.object(llm_fallback.urllib.request, "urlopen", side_effect=urlopen):
+            result = llm_fallback.apply_llm_fallback(
+                "we will not fill the body",
+                "we will not fill the body",
+                "",
+                "",
+                "Traditional Chinese",
+                self.df,
+                provider,
+                diagnostic_logger=lambda phase, **fields: events.append((phase, fields)),
+                call_ordinal=1,
+            )
+
+        self.assertEqual(result, "我們不會填充身體")
+        self.assertEqual(urlopen_calls, 1)
+        phases = [phase for phase, _fields in events]
+        self.assertEqual(phases.count("ai_request_begin"), 1)
+        self.assertEqual(phases.count("http_open_begin"), 1)
+        self.assertEqual(phases.count("http_headers_received"), 1)
+        self.assertEqual(phases.count("response_parse_end"), 1)
+        self.assertEqual(phases.count("ai_request_end"), 1)
+        request_end = next(fields for phase, fields in events if phase == "ai_request_end")
+        self.assertEqual(request_end["outcome"], "success")
+        self.assertEqual(request_end["model"], llm_fallback.GENERAL_MODEL)
+        self.assertEqual(request_end["route"], "general")
+
+    def test_provider_timeout_timing_preserves_deterministic_fallback(self):
+        events = []
+        provider_calls = 0
+
+        def provider(*_args):
+            nonlocal provider_calls
+            provider_calls += 1
+            raise TimeoutError()
+
+        deterministic = "剪出兩隻眼睛"
+        result = llm_fallback.apply_llm_fallback(
+            deterministic,
+            deterministic,
+            "",
+            "",
+            "English — US",
+            self.df,
+            provider,
+            diagnostic_logger=lambda phase, **fields: events.append((phase, fields)),
+            call_ordinal=1,
+        )
+
+        self.assertEqual(result, deterministic)
+        self.assertEqual(provider_calls, 1)
+        self.assertEqual(
+            [fields["outcome"] for phase, fields in events if phase == "ai_request_end"],
+            ["timeout"],
+        )
+        self.assertNotIn(deterministic, json.dumps(events, ensure_ascii=False))
+
     def test_title_provider_uses_strict_mode_b_contract(self):
         captured = {}
 

@@ -170,6 +170,7 @@ def build_ocr_line_translations(
     df: pd.DataFrame,
     output_mode: str,
     llm_provider: Optional[llm_fallback.Provider] = None,
+    diagnostic_logger: Optional[llm_fallback.DiagnosticLogger] = None,
 ) -> pd.DataFrame:
     if ocr_rows is None or ocr_rows.empty:
         return pd.DataFrame()
@@ -178,6 +179,9 @@ def build_ocr_line_translations(
     rows["confidence"] = pd.to_numeric(rows.get("confidence", 0), errors="coerce").fillna(0)
     rows = rows.sort_values(["min_y", "min_x"]).reset_index(drop=True)
     _profile_count("merged OCR lines", len(rows))
+    deterministic_start = time.perf_counter()
+    if diagnostic_logger is not None:
+        diagnostic_logger("deterministic_translation_begin")
     prepared = []
     for _, row in rows.iterrows():
         original = str(row.get("text", "")).strip()
@@ -187,6 +191,13 @@ def build_ocr_line_translations(
         cleaned = line_translation.clean_single_ocr_line(original)
         translated = line_translation.translate_ocr_line(cleaned, index, df, output_mode)
         prepared.append((row, cleaned, translated))
+    if diagnostic_logger is not None:
+        diagnostic_logger(
+            "deterministic_translation_end",
+            elapsed_seconds=time.perf_counter() - deterministic_start,
+            visual_line_count=len(prepared),
+            outcome="success",
+        )
 
     title_contexts = []
     for position, (_row, cleaned, _translated) in enumerate(prepared):
@@ -202,6 +213,9 @@ def build_ocr_line_translations(
     llm_df = df
     llm_inputs = [translated for _row, _cleaned, translated in prepared]
     semantic_context = ""
+    semantic_context_start = time.perf_counter()
+    if diagnostic_logger is not None:
+        diagnostic_logger("semantic_context_begin")
     if llm_provider is not None:
         llm_index, llm_df = llm_fallback.structural_terminology_view(index, df)
         structural_inputs = [
@@ -215,11 +229,36 @@ def build_ocr_line_translations(
         semantic_context = llm_fallback.build_translation_scope_context(
             structural_inputs, llm_df, output_mode
         )
+    if diagnostic_logger is not None:
+        diagnostic_logger(
+            "semantic_context_end",
+            elapsed_seconds=time.perf_counter() - semantic_context_start,
+            outcome="success" if llm_provider is not None else "disabled",
+        )
 
+    eligible_positions = {
+        position
+        for position, (_row, cleaned, _translated) in enumerate(prepared)
+        if llm_fallback.should_use_llm(cleaned, llm_inputs[position], output_mode)
+    }
+    if diagnostic_logger is not None:
+        diagnostic_logger(
+            "ai_eligibility_summary",
+            visual_line_count=len(prepared),
+            eligible_line_count=len(eligible_positions),
+            outcome="enabled" if llm_provider is not None else "disabled",
+        )
+
+    line_translation_start = time.perf_counter()
     out = []
+    llm_call_ordinal = 0
     for position, (row, cleaned, translated) in enumerate(prepared):
         previous = prepared[position - 1][1] if position > 0 else ""
         following = prepared[position + 1][1] if position + 1 < len(prepared) else ""
+        call_ordinal = None
+        if llm_provider is not None and position in eligible_positions:
+            llm_call_ordinal += 1
+            call_ordinal = llm_call_ordinal
         translated = llm_fallback.apply_llm_fallback(
             source=cleaned,
             deterministic=translated,
@@ -232,6 +271,8 @@ def build_ocr_line_translations(
             semantic_context=semantic_context,
             llm_input_text=llm_inputs[position],
             llm_df=df if title_contexts[position] else llm_df,
+            diagnostic_logger=diagnostic_logger,
+            call_ordinal=call_ordinal,
         )
         changed = terminology.norm_text(cleaned) != terminology.norm_text(translated)
         out.append({
@@ -244,4 +285,21 @@ def build_ocr_line_translations(
             "min_y": float(row.get("min_y", row.get("y", 0))),
             "max_y": float(row.get("max_y", row.get("y", 0) + 20)),
         })
-    return pd.DataFrame(out)
+    if diagnostic_logger is not None:
+        diagnostic_logger(
+            "line_translation_end",
+            elapsed_seconds=time.perf_counter() - line_translation_start,
+            visual_line_count=len(prepared),
+            eligible_line_count=len(eligible_positions),
+            outcome="success",
+        )
+    reconstruction_start = time.perf_counter()
+    result = pd.DataFrame(out)
+    if diagnostic_logger is not None:
+        diagnostic_logger(
+            "line_reconstruction_end",
+            elapsed_seconds=time.perf_counter() - reconstruction_start,
+            visual_line_count=len(result),
+            outcome="success",
+        )
+    return result

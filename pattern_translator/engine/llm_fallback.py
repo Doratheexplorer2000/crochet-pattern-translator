@@ -4,8 +4,10 @@ import json
 import os
 import re
 import sys
+import time
 import urllib.error
 import urllib.request
+from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Mapping, Optional, Tuple, Union
 
@@ -30,10 +32,40 @@ class TitleTranslationRequest:
 
 ProviderInput = Union[str, TitleTranslationRequest]
 Provider = Callable[[str, ProviderInput, str, str], str]
+DiagnosticLogger = Callable[..., None]
+
+
+@dataclass(frozen=True)
+class _ProviderDiagnosticContext:
+    logger: DiagnosticLogger
+    call_ordinal: int
+    model: str
+    route: str
+
+
+_PROVIDER_DIAGNOSTIC_CONTEXT: ContextVar[Optional[_ProviderDiagnosticContext]] = (
+    ContextVar("pattern_llm_provider_diagnostic_context", default=None)
+)
 
 
 class _DiagnosedMalformedResponse(ValueError):
     """Internal marker for a malformed provider result already safely diagnosed."""
+
+
+def _emit_timing(phase: str, **fields: object) -> None:
+    context = _PROVIDER_DIAGNOSTIC_CONTEXT.get()
+    if context is None:
+        return
+    try:
+        context.logger(
+            phase,
+            call_ordinal=context.call_ordinal,
+            model=context.model,
+            route=context.route,
+            **fields,
+        )
+    except Exception:
+        pass
 
 _TRUE_VALUES = {"1", "true", "yes", "on"}
 _ENGLISH_OUTPUTS = {"English — US", "English — UK", "English US terms", "English UK terms"}
@@ -355,10 +387,23 @@ def create_openai_provider(api_key: str, timeout_seconds: float = DEFAULT_TIMEOU
                 method="POST",
             )
             failure_stage = "http_open"
+            http_open_start = time.perf_counter()
+            _emit_timing("http_open_begin")
             with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
                 http_status = getattr(response, "status", None)
+                _emit_timing(
+                    "http_headers_received",
+                    elapsed_seconds=time.perf_counter() - http_open_start,
+                    outcome="success",
+                )
                 failure_stage = "json_parse"
+                response_parse_start = time.perf_counter()
                 payload = json.load(response)
+                _emit_timing(
+                    "response_parse_end",
+                    elapsed_seconds=time.perf_counter() - response_parse_start,
+                    outcome="success",
+                )
                 failure_stage = "extract_output"
                 text = _extract_output_text(payload, http_status=http_status)
                 if not text:
@@ -367,6 +412,12 @@ def create_openai_provider(api_key: str, timeout_seconds: float = DEFAULT_TIMEOU
         except _DiagnosedMalformedResponse:
             raise
         except ValueError as error:
+            if failure_stage == "json_parse":
+                _emit_timing(
+                    "response_parse_end",
+                    elapsed_seconds=time.perf_counter() - response_parse_start,
+                    outcome="parse_error",
+                )
             _debug_response_structure(
                 None,
                 http_status=http_status,
@@ -544,6 +595,8 @@ def apply_llm_fallback(
     semantic_context: Optional[str] = None,
     llm_input_text: Optional[str] = None,
     llm_df: Optional[pd.DataFrame] = None,
+    diagnostic_logger: Optional[DiagnosticLogger] = None,
+    call_ordinal: Optional[int] = None,
 ) -> str:
     """Return a validated improvement or the unchanged deterministic result."""
     candidate_input = deterministic if llm_input_text is None else llm_input_text
@@ -561,6 +614,47 @@ def apply_llm_fallback(
     embedded_prose = (
         None if title_subject else _single_embedded_prose_span(protected, output_mode)
     )
+    route = "title" if title_subject else "general"
+    model = TITLE_MODEL if title_subject else GENERAL_MODEL
+    provider_context_token = None
+    ai_request_started = time.perf_counter()
+    ai_request_finished = False
+
+    def finish_ai_request(outcome: str) -> None:
+        nonlocal ai_request_finished
+        if ai_request_finished or diagnostic_logger is None or call_ordinal is None:
+            return
+        ai_request_finished = True
+        try:
+            diagnostic_logger(
+                "ai_request_end",
+                elapsed_seconds=time.perf_counter() - ai_request_started,
+                call_ordinal=call_ordinal,
+                model=model,
+                route=route,
+                outcome=outcome,
+            )
+        except Exception:
+            pass
+
+    if diagnostic_logger is not None and call_ordinal is not None:
+        try:
+            diagnostic_logger(
+                "ai_request_begin",
+                call_ordinal=call_ordinal,
+                model=model,
+                route=route,
+            )
+        except Exception:
+            pass
+        provider_context_token = _PROVIDER_DIAGNOSTIC_CONTEXT.set(
+            _ProviderDiagnosticContext(
+                logger=diagnostic_logger,
+                call_ordinal=call_ordinal,
+                model=model,
+                route=route,
+            )
+        )
     failure_stage = "provider_call"
     try:
         provider_input: ProviderInput = (
@@ -578,6 +672,7 @@ def apply_llm_fallback(
                 failure_stage="provider_empty_result",
             )
             _debug_outcome("malformed_response")
+            finish_ai_request("parse_error")
             return deterministic
         failure_stage = "validation"
         candidate = raw
@@ -585,6 +680,7 @@ def apply_llm_fallback(
             translated_subject = _parse_title_result(raw, title_subject)
             if translated_subject is None:
                 _debug_outcome("validation_rejected")
+                finish_ai_request("validation_rejected")
                 return deterministic
             candidate = protected.replace(title_subject, translated_subject, 1)
         elif embedded_prose:
@@ -596,25 +692,31 @@ def apply_llm_fallback(
         restored = _restore_if_valid(candidate, protected, llm_input, replacements)
         if restored is None:
             _debug_outcome("validation_rejected")
+            finish_ai_request("validation_rejected")
             return deterministic
         if _has_unsupported_latin_output(
             restored, source, deterministic, output_mode
         ):
             _debug_outcome("validation_rejected")
+            finish_ai_request("validation_rejected")
             return deterministic
         if outer_parentheses is not None:
             restored = f"{outer_parentheses[0]}{restored}{outer_parentheses[1]}"
         outcome = "called_no_improvement" if restored.strip() == deterministic.strip() else "called_accepted"
         _debug_outcome(outcome)
+        finish_ai_request("fallback_used" if outcome == "called_no_improvement" else "success")
         return restored
     except TimeoutError:
         _debug_outcome("timeout")
+        finish_ai_request("timeout")
         return deterministic
     except urllib.error.URLError:
         _debug_outcome("api_error")
+        finish_ai_request("network_error")
         return deterministic
     except _DiagnosedMalformedResponse:
         _debug_outcome("malformed_response")
+        finish_ai_request("parse_error")
         return deterministic
     except ValueError:
         _debug_response_structure(
@@ -623,10 +725,16 @@ def apply_llm_fallback(
             failure_stage=f"{failure_stage}_value_error",
         )
         _debug_outcome("malformed_response")
+        finish_ai_request("parse_error")
         return deterministic
     except OSError:
         _debug_outcome("api_error")
+        finish_ai_request("network_error")
         return deterministic
     except Exception:
         _debug_outcome("api_error")
+        finish_ai_request("provider_error")
         return deterministic
+    finally:
+        if provider_context_token is not None:
+            _PROVIDER_DIAGNOSTIC_CONTEXT.reset(provider_context_token)

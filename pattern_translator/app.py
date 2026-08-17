@@ -83,12 +83,30 @@ def log_app_ocr_timing(
     *,
     elapsed_seconds: Optional[float] = None,
     outcome: str = "",
+    session_generation: str = "",
+    request_lifecycle: str = "",
+    active_image: Optional[bool] = None,
+    script_run_no: Optional[int] = None,
+    visual_line_count: Optional[int] = None,
+    eligible_line_count: Optional[int] = None,
+    call_ordinal: Optional[int] = None,
+    model: str = "",
+    route: str = "",
 ) -> None:
     ocr_runtime_engine.log_ocr_timing(
         request_id,
         phase,
         elapsed_seconds=elapsed_seconds,
         outcome=outcome,
+        session_generation=session_generation,
+        request_lifecycle=request_lifecycle,
+        active_image=active_image,
+        script_run_no=script_run_no,
+        visual_line_count=visual_line_count,
+        eligible_line_count=eligible_line_count,
+        call_ordinal=call_ordinal,
+        model=model,
+        route=route,
     )
 
 
@@ -2274,6 +2292,7 @@ def init_rc3_state():
     st.session_state.setdefault("ocr_timing_request_id", None)
     st.session_state.setdefault("ocr_timing_action_started", None)
     st.session_state.setdefault("ocr_request_lifecycle", None)
+    st.session_state.setdefault("diagnostic_session_generation", uuid.uuid4().hex)
 
 
 def request_ocr_run():
@@ -2300,7 +2319,15 @@ def request_ocr_run():
     st.session_state["rc10b_run_button_click_count"] = st.session_state.get("rc10b_run_button_click_count", 0) + 1
     st.session_state["rc10b_last_button_click_rerun"] = st.session_state.get("rc10b_rerun_count")
     st.session_state["pending_ocr_run"] = True
-    log_app_ocr_timing(diagnostic_request_id, "translation_action_accepted")
+    log_app_ocr_timing(
+        diagnostic_request_id,
+        "translation_action_accepted",
+        session_generation=str(
+            st.session_state.get("diagnostic_session_generation") or "unavailable"
+        ),
+        request_lifecycle="pending",
+        active_image=st.session_state.get("rc3_active_image_upload") is not None,
+    )
     rc10b_log_event(
         "Run OCR button clicked",
         run_button_click_count=st.session_state.get("rc10b_run_button_click_count"),
@@ -2481,6 +2508,28 @@ def build_ocr_image_pipeline_diagnostics(
 init_rc3_state()
 mount_plausible_bridge(st.session_state.pop("pending_plausible_v2_event", None))
 st.session_state["rc10b_rerun_count"] = st.session_state.get("rc10b_rerun_count", 0) + 1
+script_run_started = time.perf_counter()
+diagnostic_session_generation = str(
+    st.session_state.get("diagnostic_session_generation") or "unavailable"
+)
+script_run_lifecycle = st.session_state.get("ocr_request_lifecycle")
+script_run_request_id = str(
+    script_run_lifecycle.get("request_id")
+    if isinstance(script_run_lifecycle, dict) and script_run_lifecycle.get("request_id")
+    else st.session_state.get("ocr_timing_request_id") or "none"
+)
+log_app_ocr_timing(
+    script_run_request_id,
+    "script_run_begin",
+    session_generation=diagnostic_session_generation,
+    request_lifecycle=(
+        str(script_run_lifecycle.get("state") or "none")
+        if isinstance(script_run_lifecycle, dict)
+        else "none"
+    ),
+    active_image=st.session_state.get("rc3_active_image_upload") is not None,
+    script_run_no=st.session_state.get("rc10b_rerun_count"),
+)
 
 CANONICAL_INTERFACE_LANGUAGES = {
     "en": "English",
@@ -3122,6 +3171,9 @@ if image_file is not None:
                 diagnostic_request_id,
                 "pending_run_begin",
                 elapsed_seconds=click_to_pending_seconds,
+                session_generation=diagnostic_session_generation,
+                request_lifecycle="running",
+                active_image=st.session_state.get("rc3_active_image_upload") is not None,
             )
             last_click_rerun = st.session_state.get("rc10b_last_button_click_rerun")
             current_rerun = st.session_state.get("rc10b_rerun_count")
@@ -3231,9 +3283,20 @@ if image_file is not None:
                 translation_profile = make_translation_profile()
                 previous_translation_profile = TRANSLATION_PROFILE
                 TRANSLATION_PROFILE = translation_profile
+                def log_downstream_timing(phase: str, **fields: object) -> None:
+                    try:
+                        log_app_ocr_timing(
+                            diagnostic_request_id,
+                            phase,
+                            session_generation=diagnostic_session_generation,
+                            **fields,
+                        )
+                    except Exception:
+                        pass
+
                 try:
-                    log_app_ocr_timing(
-                        diagnostic_request_id,
+                    downstream_start = time.perf_counter()
+                    log_downstream_timing(
                         "downstream_translation_begin",
                         elapsed_seconds=time.perf_counter() - ocr_execution_start,
                     )
@@ -3244,13 +3307,22 @@ if image_file is not None:
                         df,
                         output_mode,
                         llm_provider=llm_fallback_engine.get_openai_provider_from_env(),
+                        diagnostic_logger=log_downstream_timing,
                     )
                     translation_seconds = time.perf_counter() - translation_start
 
                     overlay_start = time.perf_counter()
+                    log_downstream_timing("overlay_begin")
                     overlay_image, overlay_legend, overlay_legend_df = overlay_engine.make_line_translation_overlay(working_image, line_df, output_mode)
                     overlay_seconds = time.perf_counter() - overlay_start
+                    log_downstream_timing(
+                        "overlay_end",
+                        elapsed_seconds=overlay_seconds,
+                        outcome="success",
+                    )
 
+                    export_start = time.perf_counter()
+                    log_downstream_timing("export_begin")
                     translation_start = time.perf_counter()
                     matches_df, unmatched = find_matches(clean_text, df, index)
                     readable_translation = line_translation_engine.build_readable_line_translation(line_df) if line_df is not None and not line_df.empty else ""
@@ -3263,6 +3335,11 @@ if image_file is not None:
                     txt_start = time.perf_counter()
                     translation_txt = line_translation_engine.build_overlay_export_text(line_df)
                     txt_seconds = time.perf_counter() - txt_start
+                    log_downstream_timing(
+                        "export_end",
+                        elapsed_seconds=time.perf_counter() - export_start,
+                        outcome="success",
+                    )
                 finally:
                     TRANSLATION_PROFILE = previous_translation_profile
                 runtime_profile["translation"] = translation_seconds
@@ -3274,6 +3351,8 @@ if image_file is not None:
                 timings["PNG encoding"] = png_seconds
                 timings["Translation TXT generation"] = txt_seconds
                 timings["Total runtime"] = image_load_seconds + crop_extraction_seconds + (time.perf_counter() - total_start)
+                diagnostic_report_start = time.perf_counter()
+                log_downstream_timing("diagnostic_report_begin")
                 rc11c_translation_diagnostics = diagnostic_report_engine.build_rc11c_translation_diagnostics(
                     translation_profile,
                     timings,
@@ -3314,7 +3393,6 @@ if image_file is not None:
                     ocr_finished_at=st.session_state.get("ocr_finished_at"),
                     ocr_duration_seconds=st.session_state.get("ocr_duration_seconds"),
                 )
-                diagnostic_report_start = time.perf_counter()
                 debug_report_txt = build_debug_report_text(
                     line_df,
                     overlay_legend,
@@ -3357,6 +3435,20 @@ if image_file is not None:
                     diagnostic_report_engine.format_runtime_profile(runtime_profile),
                     "",
                 ])
+                log_downstream_timing(
+                    "diagnostic_report_end",
+                    elapsed_seconds=diagnostic_report_seconds,
+                    outcome="success",
+                )
+                log_downstream_timing(
+                    "downstream_translation_end",
+                    elapsed_seconds=time.perf_counter() - downstream_start,
+                    outcome="success",
+                )
+                log_downstream_timing(
+                    "translation_result_store_attempt",
+                    request_lifecycle="running",
+                )
                 st.session_state["rc3_ocr_result"] = {
                     "overlay_image": overlay_image,
                     "overlay_png": overlay_png,
@@ -3392,6 +3484,11 @@ if image_file is not None:
                     )
                 )
                 st.session_state["ocr_running"] = False
+                log_downstream_timing(
+                    "translation_result_store_success",
+                    request_lifecycle="completed",
+                    outcome="success",
+                )
                 log_app_ocr_timing(
                     diagnostic_request_id,
                     "translation_run_end",
@@ -3401,6 +3498,8 @@ if image_file is not None:
                         else time.perf_counter() - ocr_execution_start
                     ),
                     outcome="success",
+                    session_generation=diagnostic_session_generation,
+                    request_lifecycle="completed",
                 )
                 st.session_state["ocr_timing_request_id"] = None
                 st.session_state["ocr_timing_action_started"] = None
@@ -3424,6 +3523,16 @@ if image_file is not None:
                 stage_plausible_event(st.session_state, "pattern_translation_completed")
                 increment_session_translation_no(st.session_state)
                 # Redraw the button from the cleared busy state after storing the result.
+                log_app_ocr_timing(
+                    diagnostic_request_id,
+                    "script_run_end",
+                    elapsed_seconds=time.perf_counter() - script_run_started,
+                    outcome="rerun_after_success",
+                    session_generation=diagnostic_session_generation,
+                    request_lifecycle="completed",
+                    active_image=True,
+                    script_run_no=st.session_state.get("rc10b_rerun_count"),
+                )
                 st.rerun()
             except Exception as e:
                 st.session_state["ocr_finished_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
@@ -3462,10 +3571,22 @@ if image_file is not None:
                         else None
                     ),
                     outcome="failed",
+                    session_generation=diagnostic_session_generation,
+                    request_lifecycle="failed",
                 )
                 st.session_state["ocr_timing_request_id"] = None
                 st.session_state["ocr_timing_action_started"] = None
                 st.error(t("ocr_failed"))
+                log_app_ocr_timing(
+                    diagnostic_request_id,
+                    "script_run_end",
+                    elapsed_seconds=time.perf_counter() - script_run_started,
+                    outcome="stopped_after_failure",
+                    session_generation=diagnostic_session_generation,
+                    request_lifecycle="failed",
+                    active_image=st.session_state.get("rc3_active_image_upload") is not None,
+                    script_run_no=st.session_state.get("rc10b_rerun_count"),
+                )
                 st.stop()
 
     result = st.session_state.get("rc3_ocr_result")
@@ -3581,3 +3702,27 @@ else:
 
 if DEBUG_MODE:
     render_rc10b_diagnostics()
+
+try:
+    final_lifecycle = st.session_state.get("ocr_request_lifecycle")
+    final_request_id = str(
+        final_lifecycle.get("request_id")
+        if isinstance(final_lifecycle, dict) and final_lifecycle.get("request_id")
+        else script_run_request_id
+    )
+    log_app_ocr_timing(
+        final_request_id,
+        "script_run_end",
+        elapsed_seconds=time.perf_counter() - script_run_started,
+        outcome="completed",
+        session_generation=diagnostic_session_generation,
+        request_lifecycle=(
+            str(final_lifecycle.get("state") or "none")
+            if isinstance(final_lifecycle, dict)
+            else "none"
+        ),
+        active_image=st.session_state.get("rc3_active_image_upload") is not None,
+        script_run_no=st.session_state.get("rc10b_rerun_count"),
+    )
+except Exception:
+    pass
