@@ -57,6 +57,7 @@ from pattern_translator.engine import pattern_document as pattern_document_engin
 from pattern_translator.engine import ocr_lines as ocr_lines_engine
 from pattern_translator.engine import ocr_cleanup as ocr_cleanup_engine
 from pattern_translator.engine import ocr_runtime as ocr_runtime_engine
+from pattern_translator.engine import result_delivery as result_delivery_engine
 from pattern_translator.engine import (
     ocr_request_lifecycle as ocr_request_lifecycle_engine,
 )
@@ -1488,6 +1489,108 @@ def build_debug_report_text(
     )
 
 
+def build_deferred_diagnostic_report(result: Dict[str, object]) -> str:
+    """Build the optional report after the primary result is already stored."""
+    inputs = result.get("diagnostic_report_inputs", {})
+    if not isinstance(inputs, dict):
+        inputs = {}
+    timings = result.get("timings", {})
+    if not isinstance(timings, dict):
+        timings = {}
+    runtime_profile = result.get("runtime_profile", {})
+    if not isinstance(runtime_profile, dict):
+        runtime_profile = {}
+    translation_profile = result.get("translation_profile", {})
+    if not isinstance(translation_profile, dict):
+        translation_profile = {}
+
+    report_start = time.perf_counter()
+    line_df = result.get("line_df")
+    ocr_rows = result.get("ocr_rows")
+    overlay_legend_df = result.get("overlay_legend_df")
+    readable_translation = str(result.get("readable_translation", "") or "")
+    rc11c_translation_diagnostics = (
+        diagnostic_report_engine.build_rc11c_translation_diagnostics(
+            translation_profile,
+            timings,
+            ocr_rows,
+            line_df,
+            overlay_legend_df,
+        )
+    )
+    rc11d_validation_diagnostics = (
+        diagnostic_report_engine.build_rc11d_validation_diagnostics(
+            translation_profile,
+            rc11c_translation_diagnostics,
+        )
+    )
+    rc11e_normalization_diagnostics = (
+        diagnostic_report_engine.build_rc11e_normalization_diagnostics(
+            translation_profile,
+            df,
+        )
+    )
+    rc11f_cache_diagnostics = build_rc11f_cache_diagnostics(
+        translation_profile,
+        timings,
+        readable_translation,
+    )
+    rc11g_lookup_index_diagnostics = build_rc11g_lookup_index_diagnostics(
+        translation_profile,
+        timings,
+        readable_translation,
+    )
+    report_text = build_debug_report_text(
+        line_df,
+        str(result.get("overlay_legend", "") or ""),
+        clean_text=str(result.get("clean_text", "") or ""),
+        raw_text=str(result.get("raw_ocr_text", "") or ""),
+        source_mode=str(result.get("source_mode", "") or ""),
+        output_mode=str(result.get("output_mode", "") or ""),
+        area_mode=str(result.get("area_mode", "") or ""),
+        crop_box=result.get("crop_box"),
+        matches_df=result.get("matches_df"),
+        unmatched=result.get("unmatched"),
+        ocr_engine=str(inputs.get("ocr_engine", "") or ""),
+        image_quality_status=str(inputs.get("image_quality_status", "") or ""),
+        quality_metrics=result.get("quality_metrics"),
+        session_diagnostics=inputs.get("session_diagnostics"),
+        events=inputs.get("events"),
+        timings=timings,
+        ocr_workload_diagnostics=inputs.get("ocr_workload_diagnostics"),
+        ocr_box_rows=inputs.get("ocr_box_rows"),
+        ocr_call_diagnostics=inputs.get("ocr_call_diagnostics"),
+        ocr_call_trace=inputs.get("ocr_call_trace"),
+        downscale_diagnostics=inputs.get("downscale_diagnostics"),
+        ocr_resize_test=str(inputs.get("ocr_resize_test", "Auto") or "Auto"),
+        interface_language=str(inputs.get("interface_language", "") or ""),
+        platform=str(inputs.get("platform", "Not captured") or "Not captured"),
+        rc11c_translation_diagnostics=rc11c_translation_diagnostics,
+        rc11d_validation_diagnostics=rc11d_validation_diagnostics,
+        rc11e_normalization_diagnostics=rc11e_normalization_diagnostics,
+        rc11f_cache_diagnostics=rc11f_cache_diagnostics,
+        rc11g_lookup_index_diagnostics=rc11g_lookup_index_diagnostics,
+    )
+    report_seconds = time.perf_counter() - report_start
+    runtime_profile["diagnostic_report_generation"] = report_seconds
+    try:
+        runtime_profile["total"] = (
+            float(runtime_profile.get("total") or 0.0) + report_seconds
+        )
+    except Exception:
+        pass
+    timings["Diagnostic Report generation"] = report_seconds
+    if runtime_profile.get("total") is not None:
+        timings["Total runtime"] = runtime_profile["total"]
+    return "\n".join([
+        report_text.rstrip(),
+        "",
+        "=== Performance: Runtime Profile ===",
+        diagnostic_report_engine.format_runtime_profile(runtime_profile),
+        "",
+    ])
+
+
 
 
 # -----------------------------
@@ -1767,6 +1870,7 @@ INTERFACE_LANGUAGES = {
         "report_feedback_helper": "Describe the problem. You may optionally attach your Diagnostic Report or screenshots.",
         "generate_debug_report": "Generate Diagnostic Report",
         "debug_report_generated": "✅ Diagnostic Report generated successfully.",
+        "debug_report_failed": "The Diagnostic Report could not be generated. Your translation is still available.",
         "download_debug_report": "Download Diagnostic Report",
         "send_feedback": "Open Feedback Form",
         "download_success": "✅ File downloaded successfully.\n\n📁 On most phones and tablets, downloaded files are usually saved in your Downloads folder.",
@@ -1893,6 +1997,7 @@ INTERFACE_LANGUAGES = {
         "report_feedback_helper": "請描述問題，也可以附上診斷報告或截圖。",
         "generate_debug_report": "產生診斷報告",
         "debug_report_generated": "✅ 診斷報告已成功產生。",
+        "debug_report_failed": "無法產生診斷報告。你的翻譯結果仍然可用。",
         "download_debug_report": "下載診斷報告",
         "send_feedback": "開啟意見表單",
         "download_success": "✅ 檔案已成功下載。\n\n📁 在大部分手機和平板電腦上，下載的檔案通常會儲存在「下載」資料夾。",
@@ -2019,6 +2124,7 @@ INTERFACE_LANGUAGES = {
         "report_feedback_helper": "请描述问题，也可以附上诊断报告或截图。",
         "generate_debug_report": "生成诊断报告",
         "debug_report_generated": "✅ 诊断报告已成功生成。",
+        "debug_report_failed": "无法生成诊断报告。你的翻译结果仍然可用。",
         "download_debug_report": "下载诊断报告",
         "send_feedback": "打开反馈表单",
         "download_success": "✅ 文件已成功下载。\n\n📁 在大部分手机和平板电脑上，下载的文件通常会保存在“下载”文件夹。",
@@ -2145,6 +2251,7 @@ INTERFACE_LANGUAGES = {
         "report_feedback_helper": "問題の内容を入力し、必要に応じて診断レポートやスクリーンショットを添付してください。",
         "generate_debug_report": "診断レポートを生成",
         "debug_report_generated": "✅ 診断レポートを生成しました。",
+        "debug_report_failed": "診断レポートを生成できませんでした。翻訳結果は引き続き利用できます。",
         "download_debug_report": "診断レポートをダウンロード",
         "send_feedback": "フィードバックフォームを開く",
         "download_success": "✅ ファイルをダウンロードしました。\n\n📁 ほとんどのスマートフォンやタブレットでは、ダウンロードしたファイルは通常「ダウンロード」フォルダに保存されます。",
@@ -2606,7 +2713,12 @@ def get_request_headers() -> Dict[str, object]:
         return {}
 
 
-ensure_analytics_session(st.session_state, headers=get_request_headers())
+request_headers = get_request_headers()
+ensure_analytics_session(st.session_state, headers=request_headers)
+st.session_state.setdefault(
+    "diagnostic_platform",
+    str(request_headers.get("user-agent", "") or "Not captured"),
+)
 
 
 def track_analytics_event(event_type: str, **fields) -> None:
@@ -3351,33 +3463,6 @@ if image_file is not None:
                 timings["PNG encoding"] = png_seconds
                 timings["Translation TXT generation"] = txt_seconds
                 timings["Total runtime"] = image_load_seconds + crop_extraction_seconds + (time.perf_counter() - total_start)
-                diagnostic_report_start = time.perf_counter()
-                log_downstream_timing("diagnostic_report_begin")
-                rc11c_translation_diagnostics = diagnostic_report_engine.build_rc11c_translation_diagnostics(
-                    translation_profile,
-                    timings,
-                    ocr_rows,
-                    line_df,
-                    overlay_legend_df,
-                )
-                rc11d_validation_diagnostics = diagnostic_report_engine.build_rc11d_validation_diagnostics(
-                    translation_profile,
-                    rc11c_translation_diagnostics,
-                )
-                rc11e_normalization_diagnostics = diagnostic_report_engine.build_rc11e_normalization_diagnostics(
-                    translation_profile,
-                    df,
-                )
-                rc11f_cache_diagnostics = build_rc11f_cache_diagnostics(
-                    translation_profile,
-                    timings,
-                    readable_translation,
-                )
-                rc11g_lookup_index_diagnostics = build_rc11g_lookup_index_diagnostics(
-                    translation_profile,
-                    timings,
-                    readable_translation,
-                )
                 ocr_workload_diagnostics = build_ocr_workload_diagnostics(
                     working_image,
                     detected_ocr_rows,
@@ -3385,6 +3470,8 @@ if image_file is not None:
                     overlay_legend_df,
                 )
                 processing_total_before_status = image_load_seconds + crop_extraction_seconds + (time.perf_counter() - total_start)
+                runtime_profile["total"] = processing_total_before_status
+                timings["Total runtime"] = processing_total_before_status
                 st.session_state["ocr_finished_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
                 st.session_state["ocr_duration_seconds"] = round(time.perf_counter() - ocr_execution_start, 3)
                 rc10b_log_event(
@@ -3393,63 +3480,11 @@ if image_file is not None:
                     ocr_finished_at=st.session_state.get("ocr_finished_at"),
                     ocr_duration_seconds=st.session_state.get("ocr_duration_seconds"),
                 )
-                debug_report_txt = build_debug_report_text(
-                    line_df,
-                    overlay_legend,
-                    clean_text=clean_text,
-                    raw_text=raw_ocr_text,
-                    source_mode=source_mode,
-                    output_mode=output_mode,
-                    area_mode=area_mode,
-                    crop_box=crop_box,
-                    matches_df=matches_df,
-                    unmatched=unmatched,
-                    ocr_engine=str(candidate_result.get("selected_name", "")),
-                    image_quality_status=quality_label,
-                    quality_metrics=quality_metrics,
-                    session_diagnostics=rc10b_diagnostic_snapshot(),
-                    events=st.session_state.get("rc10b_diagnostic_events", []),
-                    timings=timings,
-                    ocr_workload_diagnostics=ocr_workload_diagnostics,
-                    ocr_box_rows=detected_ocr_rows,
-                    ocr_call_diagnostics=ocr_call_diagnostics,
-                    ocr_call_trace=ocr_call_trace,
-                    downscale_diagnostics=downscale_diagnostics,
-                    ocr_resize_test=ocr_resize_test,
-                    interface_language=interface_language,
-                    rc11c_translation_diagnostics=rc11c_translation_diagnostics,
-                    rc11d_validation_diagnostics=rc11d_validation_diagnostics,
-                    rc11e_normalization_diagnostics=rc11e_normalization_diagnostics,
-                    rc11f_cache_diagnostics=rc11f_cache_diagnostics,
-                    rc11g_lookup_index_diagnostics=rc11g_lookup_index_diagnostics,
-                )
-                diagnostic_report_seconds = time.perf_counter() - diagnostic_report_start
-                runtime_profile["diagnostic_report_generation"] = diagnostic_report_seconds
-                runtime_profile["total"] = processing_total_before_status + diagnostic_report_seconds
-                timings["Diagnostic Report generation"] = diagnostic_report_seconds
-                timings["Total runtime"] = float(runtime_profile["total"])
-                debug_report_txt = "\n".join([
-                    debug_report_txt.rstrip(),
-                    "",
-                    "=== Performance: Runtime Profile ===",
-                    diagnostic_report_engine.format_runtime_profile(runtime_profile),
-                    "",
-                ])
-                log_downstream_timing(
-                    "diagnostic_report_end",
-                    elapsed_seconds=diagnostic_report_seconds,
-                    outcome="success",
-                )
-                log_downstream_timing(
-                    "downstream_translation_end",
-                    elapsed_seconds=time.perf_counter() - downstream_start,
-                    outcome="success",
-                )
                 log_downstream_timing(
                     "translation_result_store_attempt",
                     request_lifecycle="running",
                 )
-                st.session_state["rc3_ocr_result"] = {
+                primary_result = {
                     "overlay_image": overlay_image,
                     "overlay_png": overlay_png,
                     "overlay_legend": overlay_legend,
@@ -3463,7 +3498,6 @@ if image_file is not None:
                     "unmatched": unmatched,
                     "readable_translation": readable_translation,
                     "translation_txt": translation_txt,
-                    "debug_report_txt": debug_report_txt,
                     "quality_metrics": quality_metrics,
                     "quality_errors": quality_errors,
                     "quality_warnings": quality_warnings,
@@ -3474,7 +3508,28 @@ if image_file is not None:
                     "output_mode": output_mode,
                     "area_mode": area_mode,
                     "crop_box": crop_box,
+                    "diagnostic_request_id": diagnostic_request_id,
+                    "diagnostic_session_generation": diagnostic_session_generation,
+                    "diagnostic_report_inputs": {
+                        "ocr_engine": str(candidate_result.get("selected_name", "")),
+                        "image_quality_status": quality_label,
+                        "session_diagnostics": rc10b_diagnostic_snapshot(),
+                        "events": list(st.session_state.get("rc10b_diagnostic_events", [])),
+                        "ocr_workload_diagnostics": ocr_workload_diagnostics,
+                        "ocr_box_rows": detected_ocr_rows,
+                        "ocr_call_diagnostics": ocr_call_diagnostics,
+                        "ocr_call_trace": list(ocr_call_trace),
+                        "downscale_diagnostics": downscale_diagnostics,
+                        "ocr_resize_test": ocr_resize_test,
+                        "interface_language": interface_language,
+                        "platform": st.session_state.get(
+                            "diagnostic_platform", "Not captured"
+                        ),
+                    },
                 }
+                result_delivery_engine.store_primary_result(
+                    st.session_state, primary_result
+                )
                 st.session_state["rc3_ocr_result_signature"] = current_ocr_signature
                 st.session_state["ocr_request_lifecycle"] = (
                     ocr_request_lifecycle_engine.finish_request(
@@ -3487,6 +3542,11 @@ if image_file is not None:
                 log_downstream_timing(
                     "translation_result_store_success",
                     request_lifecycle="completed",
+                    outcome="success",
+                )
+                log_downstream_timing(
+                    "downstream_translation_end",
+                    elapsed_seconds=time.perf_counter() - downstream_start,
                     outcome="success",
                 )
                 log_app_ocr_timing(
@@ -3648,15 +3708,55 @@ if image_file is not None:
         st.markdown(t("report_intro"))
         st.markdown(f"<div class='report-action'>{html.escape(t('report_download_action'))}</div>", unsafe_allow_html=True)
         st.markdown(f"<div class='report-helper'>{html.escape(t('report_download_helper'))}</div>", unsafe_allow_html=True)
-        download_button_rc3(
-            t("download_debug_report"),
-            data=result.get("debug_report_txt", ""),
-            file_name=diagnostic_report_filename(),
-            mime="text/plain",
-            key="download_debug_report_txt",
-            success_message=t("diagnostic_download_success"),
-            prevent_rerun=True,
-        )
+        debug_report_txt = str(result.get("debug_report_txt", "") or "")
+        if not debug_report_txt and st.button(
+            t("generate_debug_report"), key="generate_debug_report_txt"
+        ):
+            report_request_id = str(
+                result.get("diagnostic_request_id") or uuid.uuid4().hex
+            )
+            report_generation_start = time.perf_counter()
+            log_app_ocr_timing(
+                report_request_id,
+                "diagnostic_report_begin",
+                session_generation=str(
+                    result.get("diagnostic_session_generation") or "unavailable"
+                ),
+                request_lifecycle="completed",
+            )
+            generated, report_outcome = (
+                result_delivery_engine.generate_optional_diagnostic_report(
+                    result,
+                    lambda: build_deferred_diagnostic_report(result),
+                )
+            )
+            report_seconds = time.perf_counter() - report_generation_start
+            log_app_ocr_timing(
+                report_request_id,
+                "diagnostic_report_end",
+                elapsed_seconds=report_seconds,
+                outcome=report_outcome,
+                session_generation=str(
+                    result.get("diagnostic_session_generation") or "unavailable"
+                ),
+                request_lifecycle="completed",
+            )
+            if generated:
+                st.session_state["debug_report_ready"] = True
+                st.success(t("debug_report_generated"))
+                debug_report_txt = str(result.get("debug_report_txt", "") or "")
+            else:
+                st.warning(t("debug_report_failed"))
+        if debug_report_txt:
+            download_button_rc3(
+                t("download_debug_report"),
+                data=debug_report_txt,
+                file_name=diagnostic_report_filename(),
+                mime="text/plain",
+                key="download_debug_report_txt",
+                success_message=t("diagnostic_download_success"),
+                prevent_rerun=True,
+            )
         st.markdown(f"<div class='report-action'>{html.escape(t('report_feedback_action'))}</div>", unsafe_allow_html=True)
         st.markdown(f"<div class='report-helper'>{html.escape(t('report_feedback_helper'))}</div>", unsafe_allow_html=True)
         feedback_link_rendered = plausible_link_button(

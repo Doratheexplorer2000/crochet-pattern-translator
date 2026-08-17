@@ -328,7 +328,7 @@ class CustomUploadTests(unittest.TestCase):
         pending_log_position = app_source.index('"pending_run_begin"', claim_position)
         ocr_position = app_source.index("candidate_result = run_primary_ocr(", claim_position)
         result_position = app_source.index(
-            'st.session_state["rc3_ocr_result"] = {', ocr_position
+            "result_delivery_engine.store_primary_result(", ocr_position
         )
         finish_position = app_source.index(
             "ocr_request_lifecycle_engine.finish_request(", result_position
