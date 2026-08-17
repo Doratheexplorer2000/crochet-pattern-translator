@@ -318,30 +318,32 @@ class CustomUploadTests(unittest.TestCase):
         )
         self.assertIn("        return\n", app_source)
 
-    def test_app_claims_pending_request_before_ocr_and_finishes_it(self):
+    def test_app_claims_pending_request_once_and_publishes_completed_result(self):
         app_source = (
             Path(custom_upload.__file__).resolve().parents[2] / "app.py"
         ).read_text(encoding="utf-8")
+        handoff_claim_position = app_source.index(
+            "result_delivery_engine.claim_completed_result("
+        )
         claim_position = app_source.index(
             "lifecycle, request_claimed = ocr_request_lifecycle_engine.claim_request("
         )
         pending_log_position = app_source.index('"pending_run_begin"', claim_position)
         ocr_position = app_source.index("candidate_result = run_primary_ocr(", claim_position)
-        result_position = app_source.index(
-            "result_delivery_engine.store_primary_result(", ocr_position
+        publish_position = app_source.index(
+            "result_delivery_engine.publish_completed_result(", ocr_position
         )
-        finish_position = app_source.index(
-            "ocr_request_lifecycle_engine.finish_request(", result_position
-        )
-        success_ui_position = app_source.index(
-            'ocr_status_placeholder.success("🟢 OCR completed.")', finish_position
+        finish_position = app_source.rfind(
+            "ocr_request_lifecycle_engine.finish_request(",
+            0,
+            handoff_claim_position,
         )
 
+        self.assertLess(handoff_claim_position, claim_position)
+        self.assertLess(finish_position, claim_position)
         self.assertLess(claim_position, pending_log_position)
         self.assertLess(pending_log_position, ocr_position)
-        self.assertLess(ocr_position, result_position)
-        self.assertLess(result_position, finish_position)
-        self.assertLess(finish_position, success_ui_position)
+        self.assertLess(ocr_position, publish_position)
         self.assertEqual(app_source.count('"pending_run_begin"'), 1)
         self.assertIn(
             'st.session_state["pending_ocr_run"] = False\n'

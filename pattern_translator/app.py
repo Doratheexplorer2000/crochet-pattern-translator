@@ -2613,12 +2613,108 @@ def build_ocr_image_pipeline_diagnostics(
 # UI
 # -----------------------------
 init_rc3_state()
-mount_plausible_bridge(st.session_state.pop("pending_plausible_v2_event", None))
-st.session_state["rc10b_rerun_count"] = st.session_state.get("rc10b_rerun_count", 0) + 1
-script_run_started = time.perf_counter()
 diagnostic_session_generation = str(
     st.session_state.get("diagnostic_session_generation") or "unavailable"
 )
+handoff_lifecycle = st.session_state.get("ocr_request_lifecycle")
+handoff_request_id = str(
+    handoff_lifecycle.get("request_id")
+    if isinstance(handoff_lifecycle, dict) and handoff_lifecycle.get("request_id")
+    else ""
+)
+claimed_completed_delivery = None
+if handoff_request_id and (
+    isinstance(handoff_lifecycle, dict)
+    and handoff_lifecycle.get("state") == ocr_request_lifecycle_engine.RUNNING
+):
+    log_app_ocr_timing(
+        handoff_request_id,
+        "result_handoff_claim_attempt",
+        session_generation=diagnostic_session_generation,
+        request_lifecycle="running",
+    )
+
+    def commit_completed_delivery(delivery: Dict[str, object]) -> None:
+        primary_result = delivery["primary_result"]
+        if not isinstance(primary_result, dict):
+            raise TypeError("Completed result payload is malformed")
+        log_app_ocr_timing(
+            handoff_request_id,
+            "translation_result_store_attempt",
+            session_generation=diagnostic_session_generation,
+            request_lifecycle="running",
+        )
+        result_delivery_engine.store_primary_result(st.session_state, primary_result)
+        st.session_state["rc3_ocr_result_signature"] = delivery["result_signature"]
+        st.session_state["ocr_request_lifecycle"] = (
+            ocr_request_lifecycle_engine.finish_request(
+                st.session_state.get("ocr_request_lifecycle"),
+                handoff_request_id,
+                succeeded=True,
+            )
+        )
+        st.session_state["pending_ocr_run"] = False
+        st.session_state["ocr_running"] = False
+        st.session_state["ocr_finished_at"] = delivery["ocr_finished_at"]
+        st.session_state["ocr_duration_seconds"] = delivery["ocr_duration_seconds"]
+        st.session_state["ocr_timing_request_id"] = None
+        st.session_state["ocr_timing_action_started"] = None
+        st.session_state["debug_report_ready"] = False
+        st.session_state["last_successful_download_key"] = None
+        st.session_state["completed_result_analytics_pending"] = delivery.get(
+            "analytics"
+        )
+
+    claimed_completed_delivery, expired_handoff_count = (
+        result_delivery_engine.claim_completed_result(
+            diagnostic_session_generation,
+            handoff_request_id,
+            commit_completed_delivery,
+        )
+    )
+    if expired_handoff_count:
+        log_app_ocr_timing(
+            handoff_request_id,
+            "result_handoff_expired",
+            session_generation=diagnostic_session_generation,
+            expired_count=expired_handoff_count,
+        )
+    if claimed_completed_delivery is not None:
+        log_app_ocr_timing(
+            handoff_request_id,
+            "result_handoff_claim_success",
+            session_generation=diagnostic_session_generation,
+            request_lifecycle="completed",
+        )
+        log_app_ocr_timing(
+            handoff_request_id,
+            "translation_result_store_success",
+            session_generation=diagnostic_session_generation,
+            request_lifecycle="completed",
+            outcome="success",
+        )
+        log_app_ocr_timing(
+            handoff_request_id,
+            "downstream_translation_end",
+            elapsed_seconds=claimed_completed_delivery.get(
+                "downstream_elapsed_seconds"
+            ),
+            session_generation=diagnostic_session_generation,
+            outcome="success",
+        )
+        log_app_ocr_timing(
+            handoff_request_id,
+            "translation_run_end",
+            elapsed_seconds=claimed_completed_delivery.get(
+                "translation_run_elapsed_seconds"
+            ),
+            session_generation=diagnostic_session_generation,
+            request_lifecycle="completed",
+            outcome="success",
+        )
+mount_plausible_bridge(st.session_state.pop("pending_plausible_v2_event", None))
+st.session_state["rc10b_rerun_count"] = st.session_state.get("rc10b_rerun_count", 0) + 1
+script_run_started = time.perf_counter()
 script_run_lifecycle = st.session_state.get("ocr_request_lifecycle")
 script_run_request_id = str(
     script_run_lifecycle.get("request_id")
@@ -2737,6 +2833,31 @@ def track_analytics_event(event_type: str, **fields) -> None:
 if not st.session_state.get("analytics_app_open_logged"):
     track_analytics_event("app_open")
     st.session_state["analytics_app_open_logged"] = True
+
+completed_result_analytics = st.session_state.pop(
+    "completed_result_analytics_pending", None
+)
+if isinstance(completed_result_analytics, dict):
+    try:
+        translation_no = get_session_translation_no(st.session_state)
+        track_analytics_event(
+            "translation_completed",
+            workflow_mode=completed_result_analytics["area_mode"],
+            success=True,
+            translate_from=completed_result_analytics["source_mode"],
+            translate_to=completed_result_analytics["output_mode"],
+            ocr_box_count=completed_result_analytics["ocr_box_count"],
+            ocr_time_sec=completed_result_analytics["ocr_time_sec"],
+            translation_time_sec=completed_result_analytics[
+                "translation_time_sec"
+            ],
+            session_translation_no=translation_no,
+        )
+        stage_plausible_event(st.session_state, "pattern_translation_completed")
+        increment_session_translation_no(st.session_state)
+    except Exception as exc:
+        print(f"[analytics] completed translation event failed: {exc}")
+    st.rerun()
 
 LANGUAGE_OPTION_LABEL_KEYS = {
     "English — US": "language_english_us",
@@ -3300,13 +3421,21 @@ if image_file is not None:
                 reruns_between_click_and_ocr_block=rerun_delta,
             )
             try:
-                st.session_state["ocr_started_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+                ocr_started_at_text = time.strftime("%Y-%m-%d %H:%M:%S")
+                st.session_state["ocr_started_at"] = ocr_started_at_text
                 st.session_state["ocr_finished_at"] = None
                 st.session_state["ocr_duration_seconds"] = None
                 ocr_execution_start = time.perf_counter()
                 rc10b_log_event(
                     "OCR started",
                     ocr_started_at=st.session_state.get("ocr_started_at"),
+                )
+                delivery_session_diagnostics = rc10b_diagnostic_snapshot()
+                delivery_diagnostic_events = list(
+                    st.session_state.get("rc10b_diagnostic_events", [])
+                )
+                delivery_diagnostic_platform = st.session_state.get(
+                    "diagnostic_platform", "Not captured"
                 )
                 total_start = time.perf_counter()
                 timings = {
@@ -3472,17 +3601,18 @@ if image_file is not None:
                 processing_total_before_status = image_load_seconds + crop_extraction_seconds + (time.perf_counter() - total_start)
                 runtime_profile["total"] = processing_total_before_status
                 timings["Total runtime"] = processing_total_before_status
-                st.session_state["ocr_finished_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
-                st.session_state["ocr_duration_seconds"] = round(time.perf_counter() - ocr_execution_start, 3)
-                rc10b_log_event(
-                    "OCR completed",
-                    ocr_started_at=st.session_state.get("ocr_started_at"),
-                    ocr_finished_at=st.session_state.get("ocr_finished_at"),
-                    ocr_duration_seconds=st.session_state.get("ocr_duration_seconds"),
+                ocr_finished_at_text = time.strftime("%Y-%m-%d %H:%M:%S")
+                ocr_duration_seconds = round(
+                    time.perf_counter() - ocr_execution_start, 3
                 )
-                log_downstream_timing(
-                    "translation_result_store_attempt",
-                    request_lifecycle="running",
+                delivery_session_diagnostics.update(
+                    {
+                        "pending_ocr_run": False,
+                        "ocr_running": False,
+                        "ocr_started_at": ocr_started_at_text,
+                        "ocr_finished_at": ocr_finished_at_text,
+                        "ocr_duration_seconds": ocr_duration_seconds,
+                    }
                 )
                 primary_result = {
                     "overlay_image": overlay_image,
@@ -3513,8 +3643,8 @@ if image_file is not None:
                     "diagnostic_report_inputs": {
                         "ocr_engine": str(candidate_result.get("selected_name", "")),
                         "image_quality_status": quality_label,
-                        "session_diagnostics": rc10b_diagnostic_snapshot(),
-                        "events": list(st.session_state.get("rc10b_diagnostic_events", [])),
+                        "session_diagnostics": delivery_session_diagnostics,
+                        "events": delivery_diagnostic_events,
                         "ocr_workload_diagnostics": ocr_workload_diagnostics,
                         "ocr_box_rows": detected_ocr_rows,
                         "ocr_call_diagnostics": ocr_call_diagnostics,
@@ -3522,76 +3652,52 @@ if image_file is not None:
                         "downscale_diagnostics": downscale_diagnostics,
                         "ocr_resize_test": ocr_resize_test,
                         "interface_language": interface_language,
-                        "platform": st.session_state.get(
-                            "diagnostic_platform", "Not captured"
-                        ),
+                        "platform": delivery_diagnostic_platform,
                     },
                 }
-                result_delivery_engine.store_primary_result(
-                    st.session_state, primary_result
-                )
-                st.session_state["rc3_ocr_result_signature"] = current_ocr_signature
-                st.session_state["ocr_request_lifecycle"] = (
-                    ocr_request_lifecycle_engine.finish_request(
-                        st.session_state.get("ocr_request_lifecycle"),
-                        diagnostic_request_id,
-                        succeeded=True,
-                    )
-                )
-                st.session_state["ocr_running"] = False
-                log_downstream_timing(
-                    "translation_result_store_success",
-                    request_lifecycle="completed",
-                    outcome="success",
-                )
-                log_downstream_timing(
-                    "downstream_translation_end",
-                    elapsed_seconds=time.perf_counter() - downstream_start,
-                    outcome="success",
-                )
-                log_app_ocr_timing(
-                    diagnostic_request_id,
-                    "translation_run_end",
-                    elapsed_seconds=(
+                completed_delivery = {
+                    "primary_result": primary_result,
+                    "result_signature": current_ocr_signature,
+                    "ocr_finished_at": ocr_finished_at_text,
+                    "ocr_duration_seconds": ocr_duration_seconds,
+                    "downstream_elapsed_seconds": time.perf_counter()
+                    - downstream_start,
+                    "translation_run_elapsed_seconds": (
                         time.perf_counter() - action_started
                         if isinstance(action_started, (int, float))
                         else time.perf_counter() - ocr_execution_start
                     ),
-                    outcome="success",
-                    session_generation=diagnostic_session_generation,
-                    request_lifecycle="completed",
+                    "analytics": {
+                        "area_mode": area_mode,
+                        "source_mode": source_mode,
+                        "output_mode": output_mode,
+                        "ocr_box_count": (
+                            int(len(detected_ocr_rows))
+                            if detected_ocr_rows is not None
+                            else ""
+                        ),
+                        "ocr_time_sec": round(float(ocr_seconds), 3),
+                        "translation_time_sec": round(
+                            float(translation_seconds), 3
+                        ),
+                    },
+                }
+                handoff_published, expired_handoff_count = (
+                    result_delivery_engine.publish_completed_result(
+                        diagnostic_session_generation,
+                        diagnostic_request_id,
+                        completed_delivery,
+                    )
                 )
-                st.session_state["ocr_timing_request_id"] = None
-                st.session_state["ocr_timing_action_started"] = None
-                st.session_state["debug_report_ready"] = False
-                st.session_state["last_successful_download_key"] = None
-                ocr_status_placeholder.success("🟢 OCR completed.")
-                time.sleep(3)
-                ocr_status_placeholder.empty()
-                translation_no = get_session_translation_no(st.session_state)
-                track_analytics_event(
-                    "translation_completed",
-                    workflow_mode=area_mode,
-                    success=True,
-                    translate_from=source_mode,
-                    translate_to=output_mode,
-                    ocr_box_count=int(len(detected_ocr_rows)) if detected_ocr_rows is not None else "",
-                    ocr_time_sec=round(float(ocr_seconds), 3),
-                    translation_time_sec=round(float(translation_seconds), 3),
-                    session_translation_no=translation_no,
-                )
-                stage_plausible_event(st.session_state, "pattern_translation_completed")
-                increment_session_translation_no(st.session_state)
-                # Redraw the button from the cleared busy state after storing the result.
-                log_app_ocr_timing(
-                    diagnostic_request_id,
-                    "script_run_end",
-                    elapsed_seconds=time.perf_counter() - script_run_started,
-                    outcome="rerun_after_success",
-                    session_generation=diagnostic_session_generation,
-                    request_lifecycle="completed",
-                    active_image=True,
-                    script_run_no=st.session_state.get("rc10b_rerun_count"),
+                if expired_handoff_count:
+                    log_downstream_timing(
+                        "result_handoff_expired",
+                        expired_count=expired_handoff_count,
+                    )
+                log_downstream_timing(
+                    "result_handoff_publish",
+                    request_lifecycle="running",
+                    outcome="published" if handoff_published else "already_published",
                 )
                 st.rerun()
             except Exception as e:

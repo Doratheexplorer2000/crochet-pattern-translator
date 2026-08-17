@@ -3,12 +3,206 @@ import unittest
 from pathlib import Path
 
 import pandas as pd
+from streamlit.runtime.scriptrunner_utils.exceptions import RerunException
+from streamlit.runtime.scriptrunner_utils.script_requests import RerunData
+from streamlit.runtime.state import SafeSessionState, SessionState
 
 from pattern_translator.engine import diagnostic_report
+from pattern_translator.engine import ocr_request_lifecycle
 from pattern_translator.engine import result_delivery
 
 
 class ResultDeliveryTests(unittest.TestCase):
+    def test_streamlit_rerun_after_publish_preserves_result_for_next_run(self):
+        handoff = result_delivery.CompletedResultHandoff()
+        payload = {"primary_result": {"readable_translation": "translated"}}
+        published, _ = handoff.publish("session-a", "request-a", payload)
+        self.assertTrue(published)
+
+        interrupted_state = SafeSessionState(
+            SessionState(),
+            lambda: (_ for _ in ()).throw(RerunException(RerunData())),
+        )
+        with self.assertRaises(RerunException):
+            handoff.claim(
+                "session-a",
+                "request-a",
+                lambda delivery: result_delivery.store_primary_result(
+                    interrupted_state, delivery["primary_result"]
+                ),
+            )
+
+        self.assertEqual(handoff.entry_count(), 1)
+        next_run_state = {}
+        claimed, _ = handoff.claim(
+            "session-a",
+            "request-a",
+            lambda delivery: result_delivery.store_primary_result(
+                next_run_state, delivery["primary_result"]
+            ),
+        )
+        self.assertIs(claimed, payload)
+        self.assertEqual(
+            next_run_state["rc3_ocr_result"]["readable_translation"],
+            "translated",
+        )
+        self.assertEqual(handoff.entry_count(), 0)
+
+    def test_completed_result_is_claimed_exactly_once(self):
+        handoff = result_delivery.CompletedResultHandoff()
+        payload = {"primary_result": {"value": "complete"}}
+        handoff.publish("session-a", "request-a", payload)
+        deliveries = []
+
+        first, _ = handoff.claim(
+            "session-a", "request-a", deliveries.append
+        )
+        second, _ = handoff.claim(
+            "session-a", "request-a", deliveries.append
+        )
+
+        self.assertIs(first, payload)
+        self.assertIsNone(second)
+        self.assertEqual(deliveries, [payload])
+
+    def test_concurrent_claimers_deliver_only_once(self):
+        handoff = result_delivery.CompletedResultHandoff()
+        payload = {"primary_result": {"value": "complete"}}
+        handoff.publish("session-a", "request-a", payload)
+        delivery_started = threading.Event()
+        release_delivery = threading.Event()
+        delivered = []
+        claim_results = []
+
+        def deliver(delivery):
+            delivered.append(delivery)
+            delivery_started.set()
+            release_delivery.wait(timeout=2)
+
+        def claim():
+            claim_results.append(
+                handoff.claim("session-a", "request-a", deliver)[0]
+            )
+
+        first = threading.Thread(target=claim)
+        second = threading.Thread(target=claim)
+        first.start()
+        self.assertTrue(delivery_started.wait(timeout=1))
+        second.start()
+        release_delivery.set()
+        first.join(timeout=1)
+        second.join(timeout=1)
+
+        self.assertEqual(delivered, [payload])
+        self.assertEqual(sum(result is payload for result in claim_results), 1)
+        self.assertEqual(sum(result is None for result in claim_results), 1)
+
+    def test_session_generations_and_request_ids_are_isolated(self):
+        handoff = result_delivery.CompletedResultHandoff()
+        payload = {"primary_result": {"value": "complete"}}
+        handoff.publish("session-a", "request-a", payload)
+
+        wrong_session, _ = handoff.claim(
+            "session-b", "request-a", lambda delivery: None
+        )
+        wrong_request, _ = handoff.claim(
+            "session-a", "request-b", lambda delivery: None
+        )
+        correct, _ = handoff.claim(
+            "session-a", "request-a", lambda delivery: None
+        )
+
+        self.assertIsNone(wrong_session)
+        self.assertIsNone(wrong_request)
+        self.assertIs(correct, payload)
+
+    def test_successful_claim_finishes_request_lifecycle(self):
+        handoff = result_delivery.CompletedResultHandoff()
+        request_id = "request-a"
+        session_state = {
+            "ocr_request_lifecycle": {
+                "request_id": request_id,
+                "state": ocr_request_lifecycle.RUNNING,
+            }
+        }
+        payload = {"primary_result": {"value": "complete"}}
+        handoff.publish("session-a", request_id, payload)
+
+        def deliver(delivery):
+            result_delivery.store_primary_result(
+                session_state, delivery["primary_result"]
+            )
+            session_state["ocr_request_lifecycle"] = (
+                ocr_request_lifecycle.finish_request(
+                    session_state["ocr_request_lifecycle"],
+                    request_id,
+                    succeeded=True,
+                )
+            )
+
+        handoff.claim("session-a", request_id, deliver)
+
+        self.assertEqual(
+            session_state["ocr_request_lifecycle"]["state"],
+            ocr_request_lifecycle.COMPLETED,
+        )
+
+    def test_completed_delivery_cannot_replay_expensive_work(self):
+        handoff = result_delivery.CompletedResultHandoff()
+        payload = {"primary_result": {"area_mode": "Whole Pattern"}}
+        handoff.publish("session-a", "request-a", payload)
+        delivery_count = 0
+
+        def deliver(delivery):
+            nonlocal delivery_count
+            delivery_count += 1
+
+        handoff.claim("session-a", "request-a", deliver)
+        handoff.claim("session-a", "request-a", deliver)
+
+        self.assertEqual(delivery_count, 1)
+
+    def test_whole_pattern_and_select_area_use_same_handoff(self):
+        for area_mode in ("Whole Pattern", "Select Area"):
+            with self.subTest(area_mode=area_mode):
+                handoff = result_delivery.CompletedResultHandoff()
+                payload = {"primary_result": {"area_mode": area_mode}}
+                handoff.publish("session-a", area_mode, payload)
+                delivered = []
+                handoff.claim("session-a", area_mode, delivered.append)
+                self.assertEqual(
+                    delivered[0]["primary_result"]["area_mode"], area_mode
+                )
+
+    def test_expired_entries_are_removed(self):
+        now = [10.0]
+        handoff = result_delivery.CompletedResultHandoff(
+            ttl_seconds=5.0,
+            clock=lambda: now[0],
+        )
+        handoff.publish("session-a", "request-a", {"value": "old"})
+        now[0] = 15.0
+
+        self.assertEqual(handoff.cleanup_expired(), 1)
+        self.assertEqual(handoff.entry_count(), 0)
+
+    def test_handoff_has_a_hard_entry_bound(self):
+        now = [0.0]
+        handoff = result_delivery.CompletedResultHandoff(
+            ttl_seconds=100.0,
+            max_entries=2,
+            clock=lambda: now[0],
+        )
+        for request_id in ("request-a", "request-b", "request-c"):
+            handoff.publish("session-a", request_id, {"request": request_id})
+            now[0] += 1.0
+
+        self.assertEqual(handoff.entry_count(), 2)
+        oldest, _ = handoff.claim(
+            "session-a", "request-a", lambda delivery: None
+        )
+        self.assertIsNone(oldest)
+
     def test_primary_result_is_stored_without_diagnostic_report(self):
         session_state = {}
         result = {"readable_translation": "translated", "overlay_png": b"png"}
@@ -105,6 +299,33 @@ class ResultDeliveryTests(unittest.TestCase):
         self.assertLess(store_position, store_success_position)
         self.assertLess(store_success_position, report_button_position)
         self.assertLess(report_button_position, report_begin_position)
+
+    def test_app_publishes_before_any_post_export_streamlit_access(self):
+        app_source = (
+            Path(__file__).resolve().parents[1] / "pattern_translator" / "app.py"
+        ).read_text(encoding="utf-8")
+        export_position = app_source.index('"export_end"')
+        publish_position = app_source.index(
+            "result_delivery_engine.publish_completed_result(", export_position
+        )
+        post_export_before_publish = app_source[export_position:publish_position]
+
+        self.assertNotIn("st.", post_export_before_publish)
+        self.assertNotIn("st.session_state", post_export_before_publish)
+        self.assertNotIn("rc10b_log_event(", post_export_before_publish)
+
+    def test_app_claims_handoff_before_pending_request_consumption(self):
+        app_source = (
+            Path(__file__).resolve().parents[1] / "pattern_translator" / "app.py"
+        ).read_text(encoding="utf-8")
+        handoff_claim_position = app_source.index(
+            "result_delivery_engine.claim_completed_result("
+        )
+        pending_claim_position = app_source.index(
+            "ocr_request_lifecycle_engine.claim_request("
+        )
+
+        self.assertLess(handoff_claim_position, pending_claim_position)
 
 
 if __name__ == "__main__":
