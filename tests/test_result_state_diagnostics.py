@@ -175,7 +175,7 @@ class ResultStateDiagnosticsTests(unittest.TestCase):
 
     def test_diagnostic_receipt_and_handler_entry_are_distinct(self):
         diagnostic_position = self.app_source.index(
-            'key="generate_debug_report_txt"'
+            'key="prepare_debug_report_download"'
         )
         nearby_source = self.app_source[
             diagnostic_position - 500:diagnostic_position + 900

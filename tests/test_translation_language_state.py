@@ -18,6 +18,38 @@ def signature(target: str, *, source: str = "Traditional Chinese", area: str = "
 
 
 class TranslationLanguageStateTests(unittest.TestCase):
+    def test_source_and_target_widgets_have_no_session_default_warning(self):
+        app = AppTest.from_string(
+            """
+import streamlit as st
+from pattern_translator.engine import translation_language_state
+
+translation_language_state.reconcile_translation_languages(st.session_state)
+st.selectbox(
+    "Source",
+    translation_language_state.LANGUAGE_OPTIONS,
+    index=None,
+    key=translation_language_state.SOURCE_WIDGET_KEY,
+)
+st.selectbox(
+    "Target",
+    translation_language_state.LANGUAGE_OPTIONS,
+    index=None,
+    key=translation_language_state.TARGET_WIDGET_KEY,
+)
+"""
+        ).run()
+
+        self.assertEqual(list(app.warning), [])
+        self.assertEqual(
+            app.session_state[translation_language_state.SOURCE_WIDGET_KEY],
+            translation_language_state.DEFAULT_LANGUAGE,
+        )
+        self.assertEqual(
+            app.session_state[translation_language_state.TARGET_WIDGET_KEY],
+            translation_language_state.DEFAULT_LANGUAGE,
+        )
+
     def test_streamlit_151_short_circuit_rerun_restores_target_widget(self):
         app = AppTest.from_string(
             """
@@ -30,7 +62,7 @@ if st.button("post-result action"):
 st.selectbox(
     "Target",
     translation_language_state.LANGUAGE_OPTIONS,
-    index=2,
+    index=None,
     key=translation_language_state.TARGET_WIDGET_KEY,
 )
 """
@@ -45,6 +77,7 @@ st.selectbox(
             app.session_state[translation_language_state.TARGET_STATE_KEY],
             "English — UK",
         )
+        self.assertEqual(list(app.warning), [])
 
         app.button[0].click().run()
 
@@ -56,6 +89,7 @@ st.selectbox(
             app.session_state[translation_language_state.TARGET_STATE_KEY],
             "English — UK",
         )
+        self.assertEqual(list(app.warning), [])
 
     def test_all_target_languages_survive_widget_cleanup_rerun(self):
         for target in translation_language_state.LANGUAGE_OPTIONS:
@@ -198,6 +232,18 @@ st.selectbox(
 
         self.assertLess(reconciliation, analytics_rerun)
         self.assertLess(analytics_rerun, target_widget)
+
+    def test_production_language_widgets_use_session_state_without_defaults(self):
+        source = (
+            Path(__file__).resolve().parents[1]
+            / "pattern_translator"
+            / "app.py"
+        ).read_text(encoding="utf-8")
+
+        source_widget = source.index('key="source_language_selector"')
+        target_widget = source.index('key="target_language_selector"')
+        self.assertIn("index=None", source[source_widget - 180:source_widget])
+        self.assertIn("index=None", source[target_widget - 180:target_widget])
 
 
 if __name__ == "__main__":

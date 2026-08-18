@@ -62,6 +62,9 @@ from pattern_translator.engine import (
     translation_language_state as translation_language_state_engine,
 )
 from pattern_translator.engine import (
+    translation_area_state as translation_area_state_engine,
+)
+from pattern_translator.engine import (
     ocr_request_lifecycle as ocr_request_lifecycle_engine,
 )
 from pattern_translator.engine import llm_fallback as llm_fallback_engine
@@ -2798,6 +2801,7 @@ def claim_and_commit_completed_result(
 
 init_rc3_state()
 translation_language_state_engine.reconcile_translation_languages(st.session_state)
+translation_area_state_engine.reconcile_translation_area(st.session_state)
 diagnostic_session_generation = str(
     st.session_state.get("diagnostic_session_generation") or "unavailable"
 )
@@ -3136,7 +3140,7 @@ if image_file is not None:
     source_mode = st.selectbox(
         t("source_label"),
         LANGUAGE_OPTIONS,
-        index=2,
+        index=None,
         key="source_language_selector",
         help=t("source_help"),
         format_func=lambda value: t(LANGUAGE_OPTION_LABEL_KEYS.get(value, value)),
@@ -3149,7 +3153,7 @@ if image_file is not None:
     output_mode = st.selectbox(
         t("output_label"),
         LANGUAGE_OPTIONS,
-        index=2,
+        index=None,
         key="target_language_selector",
         format_func=lambda value: t(LANGUAGE_OPTION_LABEL_KEYS.get(value, value)),
     )
@@ -3162,18 +3166,18 @@ if image_file is not None:
 
     st.subheader(t("translation_area"))
 
-    area_options = ["Whole Pattern", "Select Area"]
+    area_options = translation_area_state_engine.AREA_OPTIONS
     if st.session_state.pop("select_area_start_over_pending", False):
-        st.session_state["translation_area_mode_radio"] = "Whole Pattern"
+        translation_area_state_engine.set_translation_area(
+            st.session_state, "Whole Pattern"
+        )
         st.session_state["select_area_last_area_mode"] = "Whole Pattern"
-    if st.session_state.get("translation_area_mode_radio") not in area_options:
-        st.session_state["translation_area_mode_radio"] = "Whole Pattern"
     area_mode = st.radio(
         t("area_label"),
         area_options,
         key="translation_area_mode_radio",
         horizontal=True,
-        index=area_options.index(st.session_state["translation_area_mode_radio"]),
+        index=None,
         format_func=lambda value: t(AREA_LABEL_KEYS.get(value, value)),
     )
     previous_area_mode = st.session_state.get("select_area_last_area_mode")
@@ -4053,11 +4057,15 @@ if image_file is not None:
                 callback_receipt=True,
             )
 
-        if not debug_report_txt and st.button(
-            t("generate_debug_report"),
-            key="generate_debug_report_txt",
-            on_click=note_diagnostic_action_received,
-        ):
+        diagnostic_download_slot = st.empty()
+        diagnostic_requested = False
+        if not debug_report_txt:
+            diagnostic_requested = diagnostic_download_slot.button(
+                t("download_debug_report"),
+                key="prepare_debug_report_download",
+                on_click=note_diagnostic_action_received,
+            )
+        if diagnostic_requested:
             log_result_state_event(
                 "post_result_action_handler_enter",
                 action="diagnostic",
@@ -4098,14 +4106,13 @@ if image_file is not None:
             else:
                 st.warning(t("debug_report_failed"))
         if debug_report_txt:
-            download_button_rc3(
+            diagnostic_download_slot.download_button(
                 t("download_debug_report"),
                 data=debug_report_txt,
                 file_name=diagnostic_report_filename(),
                 mime="text/plain",
                 key="download_debug_report_txt",
-                success_message=t("diagnostic_download_success"),
-                prevent_rerun=True,
+                on_click="ignore",
             )
         st.markdown(f"<div class='report-action'>{html.escape(t('report_feedback_action'))}</div>", unsafe_allow_html=True)
         st.markdown(f"<div class='report-helper'>{html.escape(t('report_feedback_helper'))}</div>", unsafe_allow_html=True)

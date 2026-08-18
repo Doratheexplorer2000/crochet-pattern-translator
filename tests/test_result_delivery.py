@@ -316,7 +316,7 @@ class ResultDeliveryTests(unittest.TestCase):
             '"translation_result_store_success"', store_position
         )
         report_button_position = app_source.index(
-            'key="generate_debug_report_txt"', store_success_position
+            'key="prepare_debug_report_download"', store_success_position
         )
         report_begin_position = app_source.index(
             '"diagnostic_report_begin"', report_button_position
@@ -325,6 +325,25 @@ class ResultDeliveryTests(unittest.TestCase):
         self.assertLess(store_position, store_success_position)
         self.assertLess(store_success_position, report_button_position)
         self.assertLess(report_button_position, report_begin_position)
+
+    def test_diagnostic_report_uses_one_localized_action_slot(self):
+        app_source = (
+            Path(__file__).resolve().parents[1] / "pattern_translator" / "app.py"
+        ).read_text(encoding="utf-8")
+        diagnostic_start = app_source.index("diagnostic_download_slot = st.empty()")
+        diagnostic_end = app_source.index(
+            'st.markdown(f"<div class=\'report-action\'>', diagnostic_start
+        )
+        diagnostic_source = app_source[diagnostic_start:diagnostic_end]
+
+        self.assertEqual(diagnostic_source.count('t("download_debug_report")'), 2)
+        self.assertNotIn('t("generate_debug_report")', diagnostic_source)
+        self.assertIn("if diagnostic_requested:", diagnostic_source)
+        self.assertIn(
+            "result_delivery_engine.generate_optional_diagnostic_report(",
+            diagnostic_source,
+        )
+        self.assertIn("diagnostic_download_slot.download_button(", diagnostic_source)
 
     def test_app_publishes_before_any_post_export_streamlit_access(self):
         app_source = (
