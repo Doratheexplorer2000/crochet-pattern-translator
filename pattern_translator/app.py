@@ -59,6 +59,9 @@ from pattern_translator.engine import ocr_cleanup as ocr_cleanup_engine
 from pattern_translator.engine import ocr_runtime as ocr_runtime_engine
 from pattern_translator.engine import result_delivery as result_delivery_engine
 from pattern_translator.engine import (
+    translation_language_state as translation_language_state_engine,
+)
+from pattern_translator.engine import (
     ocr_request_lifecycle as ocr_request_lifecycle_engine,
 )
 from pattern_translator.engine import llm_fallback as llm_fallback_engine
@@ -2794,6 +2797,7 @@ def claim_and_commit_completed_result(
 
 
 init_rc3_state()
+translation_language_state_engine.reconcile_translation_languages(st.session_state)
 diagnostic_session_generation = str(
     st.session_state.get("diagnostic_session_generation") or "unavailable"
 )
@@ -2989,7 +2993,7 @@ st.markdown('<div class="product-kicker">Crochet Intelligence</div>', unsafe_all
 st.title(t("app_title"))
 st.caption(t("app_subtitle"))
 
-LANGUAGE_OPTIONS = ["English — US", "English — UK", "Traditional Chinese", "Simplified Chinese", "Japanese"]
+LANGUAGE_OPTIONS = translation_language_state_engine.LANGUAGE_OPTIONS
 
 upload_strings = {
     "html_lang": {
