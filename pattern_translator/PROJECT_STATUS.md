@@ -1,10 +1,10 @@
 # Crochet Pattern Translator Project Status
 
-Last updated: 2026-08-10
+Last updated: 2026-08-27
 
 ## Current Version
 
-Current production baseline: Contextual LLM translation (`cddd55cf06bea39b6879add00d8db0416e109092`)
+Current production baseline: Canonical translation-state ownership (`a215fa38bebe1ac71d5cd2e251e67328275dc7ec`)
 
 Validated rollback baseline: `RC28`
 
@@ -18,7 +18,7 @@ pattern_translator/app.py
 
 ## Current Production Status
 
-Crochet Pattern OCR Translator is the current OCR-based pattern translation app at `https://pattern.crochetintelligence.com`. Custom-domain migration `22fded0fb39a389b87d767faa494d7ad48d3d799` is deployed to Railway from GitHub `main` and has passed Production Human UAT. It includes the production-validated Portal Centralization, Contextual LLM translation, and completed Components V2 analytics baselines. RC28 remains the validated rollback baseline.
+Crochet Pattern OCR Translator is the current OCR-based pattern translation app at `https://pattern.crochetintelligence.com`. Canonical translation-state ownership `a215fa38bebe1ac71d5cd2e251e67328275dc7ec` is deployed to Railway from GitHub `main` and has passed Production Human UAT. It includes the production-validated Portal Centralization, Contextual LLM translation, completed Components V2 analytics, custom-domain, isolated OCR-worker, and rerun-safe result-delivery baselines. RC28 remains the validated rollback baseline.
 
 RC42 completed the first Engine Extraction by moving the CSV terminology / lookup engine into `pattern_translator/engine/terminology.py`. RC43 extracted pure line-translation logic into `pattern_translator/engine/line_translation.py`. RC44 extracted Diagnostic Report construction and formatting into `pattern_translator/engine/diagnostic_report.py`. RC45 completed Boundary Cleanup. RC46 extracted overlay rendering into `pattern_translator/engine/overlay.py`. RC47 extracted Pattern Document responsibilities into `pattern_translator/engine/pattern_document.py`. RC48 extracted OCR line assembly into `pattern_translator/engine/ocr_lines.py`. RC49 extracted deterministic OCR cleanup into `pattern_translator/engine/ocr_cleanup.py`, completing Engine Migration and Domain Layer extraction. Regression and Human UAT passed with no user-visible behavior changes, and the completed engine layer is included in the current production release.
 
@@ -59,7 +59,7 @@ stitches_1_8e.csv
 
 ## Current Priorities
 
-Current Phase: Pre-Launch infrastructure and custom-domain migration completed; Production Human UAT PASS
+Current Phase: Pattern Translator Soft Launch readiness; canonical translation-state Production Human UAT PASS
 
 Purpose:
 
@@ -68,7 +68,7 @@ Purpose:
 - All five current Pattern Translator Plausible events use the shared Components V2 bridge; no V1 Plausible analytics dependency remains.
 - Preserve the shared browser-side analytics implementation across the Portal and both translators while keeping analytics observational and non-blocking.
 - Keep Google Sheets Product Facts as separately approved future work; they are not implemented.
-- Complete Portal visual refinement and branding, run final product-wide production smoke UAT, then proceed to Soft Launch.
+- Investigate the measured deterministic translation-stage performance anomaly before further Soft Launch work. Do not remove dictionary entries or rewrite translation architecture before establishing the cause.
 
 Roadmap decisions:
 
@@ -98,16 +98,28 @@ The Portal Skeleton is functionally complete and frozen. It is an independent As
 - Pattern source/result language controls remain independent. Pattern's duplicate general Privacy UI was removed, while Stitch's tool-specific Google Forms feedback privacy note remains.
 - Both tools return to the Portal in the same tab with interface-language preservation. Pattern uses the Crochet Intelligence eyebrow and English title `Crochet Pattern Translator`; Stitch Tutorial Search preserves the submitted stitch term across interface languages.
 - All three services run in the Railway project `Crochet Intelligence`. Portal Centralization `5e975741a9a53c1835120f0cdb24a60f5af706b1` and custom-domain migration `22fded0fb39a389b87d767faa494d7ad48d3d799` passed production functional/navigation UAT and Plausible regression validation without analytics changes. RC54 Analytics remains closed with Site Domain `crochetintelligence.com`.
-- Portal visual refinement and branding are the highest-priority remaining Pre-Launch work item, followed by final production smoke UAT and Soft Launch.
+- Portal visual refinement is complete. Pattern Translator deterministic translation performance is the highest-priority remaining Soft Launch investigation.
 
 ## Known Issues
 
+- Translation performance is the next priority. On the same Whole Pattern image and OCR workload, Traditional Chinese to English US measured approximately `41.06s` total / `36.00s` translation, while the same image after changing target measured approximately `6.79s` total / `5.70s` translation; Paddle inference remained approximately `0.88s`. The slow run recorded about `35,502` dictionary lookups, `202k` `norm_text()` calls, and repeated normalized lookup-index builds/cache misses for 21 OCR lines and 108 CSV rows. Audit the cause before changing dictionaries or architecture.
+- OCR status can remain visually stuck at `OCR Running...` after results render even though diagnostics show OCR completed. Defer until after the performance investigation unless execution is affected.
+- Diagnostic Report preparation and download currently require two actions because of Streamlit's download/rerun model. This is functional and non-blocking.
+- Initial upload-preview delay and an occasionally initially invisible Select Area cropper remain observation items only; do not make speculative changes without reproducible evidence.
 - Android overlay font may appear relatively small.
 - Version number is not currently shown in the UI.
 - Minor overlay text box alignment refinement is deferred.
 - JellyCat 元寶 overlay placement has a minor cosmetic placement difference. Translation correctness, anchor position, readability, and functionality are unaffected; this is future overlay placement tuning rather than an RC47 regression.
 
 ## Current Release Notes
+
+### Canonical translation-state ownership (production complete; Human UAT PASS)
+
+- Canonical source language, target language, and translation-area state are the semantic source of truth. Explicit widget callbacks update canonical state; harmless widget omission, cleanup, or remount hydrates presentation state from canonical values.
+- Translation execution, crop/area branching, and compatibility signatures use canonical state. The existing signature guard remains active and still invalidates completed results after genuine source, target, area, crop, or relevant resize changes.
+- Production Human UAT passed for Whole Pattern and Select Area result stability, PNG and TXT downloads without result loss, Diagnostic Report generation/download without result loss, and canonical state survival across harmless Streamlit reruns.
+- Automated validation passed `199 / 199`, including PNG/TXT/Diagnostic early-rerun regressions. Existing OCR and result-state diagnostics remain active.
+- Production revision: `a215fa38bebe1ac71d5cd2e251e67328275dc7ec`.
 
 ### Contextual LLM translation (production complete; Human UAT PASS)
 
@@ -343,10 +355,10 @@ The Portal Skeleton is functionally complete and frozen. It is an independent As
 
 Current platform sequence:
 
-1. Complete Portal visual design and branding.
-2. Run final product-wide production smoke UAT.
-3. Proceed to Soft Launch.
-4. Preserve the completed RC54 analytics and custom-domain baselines; defer new features unless they fix a genuine Launch blocker.
+1. Perform a focused deterministic translation-performance audit using the measured slow/fast Whole Pattern evidence.
+2. Address only evidenced Soft Launch blockers; defer the non-blocking status, Diagnostic Report, preview-delay, and cropper observations unless their priority changes.
+3. Run final product-wide production smoke UAT.
+4. Proceed to Soft Launch while preserving the completed RC54 analytics and custom-domain baselines.
 
 Additional deferred work:
 
