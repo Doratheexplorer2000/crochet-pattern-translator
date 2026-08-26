@@ -2532,6 +2532,18 @@ def request_ocr_run():
     )
 
 
+def accept_source_language_change() -> None:
+    translation_language_state_engine.accept_source_language_change(st.session_state)
+
+
+def accept_target_language_change() -> None:
+    translation_language_state_engine.accept_target_language_change(st.session_state)
+
+
+def accept_translation_area_change() -> None:
+    translation_area_state_engine.accept_translation_area_change(st.session_state)
+
+
 def rc10b_session_state_counts() -> Dict[str, int]:
     keys = [str(key) for key in st.session_state.keys()]
     cropper_keys = [
@@ -2800,8 +2812,14 @@ def claim_and_commit_completed_result(
 
 
 init_rc3_state()
-translation_language_state_engine.reconcile_translation_languages(st.session_state)
-translation_area_state_engine.reconcile_translation_area(st.session_state)
+canonical_translation_languages = (
+    translation_language_state_engine.reconcile_translation_languages(
+        st.session_state
+    )
+)
+canonical_area_mode = translation_area_state_engine.reconcile_translation_area(
+    st.session_state
+)
 diagnostic_session_generation = str(
     st.session_state.get("diagnostic_session_generation") or "unavailable"
 )
@@ -3137,26 +3155,30 @@ if image_file is not None:
     image_load_seconds = time.perf_counter() - image_load_start
     st.image(image, caption=t("original_image"), use_container_width=True)
 
-    source_mode = st.selectbox(
+    st.selectbox(
         t("source_label"),
         LANGUAGE_OPTIONS,
         index=None,
         key="source_language_selector",
         help=t("source_help"),
         format_func=lambda value: t(LANGUAGE_OPTION_LABEL_KEYS.get(value, value)),
+        on_change=accept_source_language_change,
     )
+    source_mode = canonical_translation_languages["source"]
     if source_mode == "English — US":
         st.caption(t("source_hint_us"))
     elif source_mode == "English — UK":
         st.caption(t("source_hint_uk"))
 
-    output_mode = st.selectbox(
+    st.selectbox(
         t("output_label"),
         LANGUAGE_OPTIONS,
         index=None,
         key="target_language_selector",
         format_func=lambda value: t(LANGUAGE_OPTION_LABEL_KEYS.get(value, value)),
+        on_change=accept_target_language_change,
     )
+    output_mode = canonical_translation_languages["target"]
     if output_mode == "English — US":
         st.caption(t("output_hint_us"))
     elif output_mode == "English — UK":
@@ -3172,13 +3194,18 @@ if image_file is not None:
             st.session_state, "Whole Pattern"
         )
         st.session_state["select_area_last_area_mode"] = "Whole Pattern"
-    area_mode = st.radio(
+    st.radio(
         t("area_label"),
         area_options,
         key="translation_area_mode_radio",
         horizontal=True,
         index=None,
         format_func=lambda value: t(AREA_LABEL_KEYS.get(value, value)),
+        on_change=accept_translation_area_change,
+    )
+    area_mode = str(
+        st.session_state.get(translation_area_state_engine.AREA_STATE_KEY)
+        or canonical_area_mode
     )
     previous_area_mode = st.session_state.get("select_area_last_area_mode")
     entered_select_area = area_mode == "Select Area" and previous_area_mode != "Select Area"
@@ -3567,11 +3594,17 @@ if image_file is not None:
     ocr_busy = bool(st.session_state.get("pending_ocr_run")) or ocr_running
     run_button_label = "⏳ OCR Running..." if ocr_busy else t("run_ocr")
     ocr_status_placeholder = st.empty()
+    translation_languages_missing = source_mode is None or output_mode is None
     st.button(
         run_button_label,
         key="run_ocr_overlay_translation_button",
         type="primary",
-        disabled=ocr_busy or select_area_needs_confirmation or (bool(quality_errors) and not force_run),
+        disabled=(
+            ocr_busy
+            or translation_languages_missing
+            or select_area_needs_confirmation
+            or (bool(quality_errors) and not force_run)
+        ),
         on_click=request_ocr_run,
     )
 

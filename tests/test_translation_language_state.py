@@ -1,12 +1,13 @@
 import unittest
 from pathlib import Path
 
-from pattern_translator.engine import result_delivery
-from pattern_translator.engine import translation_language_state
 from streamlit.testing.v1 import AppTest
 
+from pattern_translator.engine import result_delivery
+from pattern_translator.engine import translation_language_state
 
-def signature(target: str, *, source: str = "Traditional Chinese", area: str = "Whole Pattern"):
+
+def signature(target, *, source=None, area="Whole Pattern"):
     return (
         "image-signature",
         source,
@@ -18,11 +19,58 @@ def signature(target: str, *, source: str = "Traditional Chinese", area: str = "
 
 
 class TranslationLanguageStateTests(unittest.TestCase):
-    def test_source_and_target_widgets_have_no_session_default_warning(self):
+    def test_initial_no_selection_is_canonical_and_rendered(self):
         app = AppTest.from_string(
             """
 import streamlit as st
 from pattern_translator.engine import translation_language_state
+
+def source_changed():
+    translation_language_state.accept_source_language_change(st.session_state)
+
+def target_changed():
+    translation_language_state.accept_target_language_change(st.session_state)
+
+canonical = translation_language_state.reconcile_translation_languages(st.session_state)
+st.write(canonical)
+st.selectbox(
+    "Source",
+    translation_language_state.LANGUAGE_OPTIONS,
+    index=None,
+    key=translation_language_state.SOURCE_WIDGET_KEY,
+    on_change=source_changed,
+)
+st.selectbox(
+    "Target",
+    translation_language_state.LANGUAGE_OPTIONS,
+    index=None,
+    key=translation_language_state.TARGET_WIDGET_KEY,
+    on_change=target_changed,
+)
+"""
+        ).run()
+
+        self.assertIsNone(
+            app.session_state[translation_language_state.SOURCE_STATE_KEY]
+        )
+        self.assertIsNone(
+            app.session_state[translation_language_state.TARGET_STATE_KEY]
+        )
+        self.assertIsNone(app.selectbox[0].value)
+        self.assertIsNone(app.selectbox[1].value)
+        self.assertEqual(list(app.warning), [])
+
+    def test_genuine_widget_changes_update_canonical_state(self):
+        app = AppTest.from_string(
+            """
+import streamlit as st
+from pattern_translator.engine import translation_language_state
+
+def source_changed():
+    translation_language_state.accept_source_language_change(st.session_state)
+
+def target_changed():
+    translation_language_state.accept_target_language_change(st.session_state)
 
 translation_language_state.reconcile_translation_languages(st.session_state)
 st.selectbox(
@@ -30,196 +78,151 @@ st.selectbox(
     translation_language_state.LANGUAGE_OPTIONS,
     index=None,
     key=translation_language_state.SOURCE_WIDGET_KEY,
+    on_change=source_changed,
 )
 st.selectbox(
     "Target",
     translation_language_state.LANGUAGE_OPTIONS,
     index=None,
     key=translation_language_state.TARGET_WIDGET_KEY,
+    on_change=target_changed,
 )
 """
         ).run()
 
-        self.assertEqual(list(app.warning), [])
-        self.assertEqual(
-            app.session_state[translation_language_state.SOURCE_WIDGET_KEY],
-            translation_language_state.DEFAULT_LANGUAGE,
-        )
-        self.assertEqual(
-            app.session_state[translation_language_state.TARGET_WIDGET_KEY],
-            translation_language_state.DEFAULT_LANGUAGE,
-        )
-
-    def test_streamlit_151_short_circuit_rerun_restores_target_widget(self):
-        app = AppTest.from_string(
-            """
-import streamlit as st
-from pattern_translator.engine import translation_language_state
-
-translation_language_state.reconcile_translation_languages(st.session_state)
-if st.button("post-result action"):
-    st.rerun()
-st.selectbox(
-    "Target",
-    translation_language_state.LANGUAGE_OPTIONS,
-    index=None,
-    key=translation_language_state.TARGET_WIDGET_KEY,
-)
-"""
-        ).run()
-        app.selectbox[0].select("English — UK").run()
+        app.selectbox[0].select("Japanese").run()
+        app.selectbox[1].select("English — UK").run()
 
         self.assertEqual(
-            app.session_state[translation_language_state.TARGET_WIDGET_KEY],
-            "English — UK",
+            app.session_state[translation_language_state.SOURCE_STATE_KEY],
+            "Japanese",
         )
         self.assertEqual(
             app.session_state[translation_language_state.TARGET_STATE_KEY],
             "English — UK",
         )
-        self.assertEqual(list(app.warning), [])
 
-        app.button[0].click().run()
-
-        self.assertEqual(
-            app.session_state[translation_language_state.TARGET_WIDGET_KEY],
-            "English — UK",
-        )
-        self.assertEqual(
-            app.session_state[translation_language_state.TARGET_STATE_KEY],
-            "English — UK",
-        )
-        self.assertEqual(list(app.warning), [])
-
-    def test_all_target_languages_survive_widget_cleanup_rerun(self):
-        for target in translation_language_state.LANGUAGE_OPTIONS:
-            with self.subTest(target=target):
-                state = {
-                    translation_language_state.TARGET_WIDGET_KEY: target,
-                    translation_language_state.SOURCE_WIDGET_KEY: "Japanese",
-                }
-                translation_language_state.reconcile_translation_languages(state)
-                stored_signature = signature(target, source="Japanese")
-
-                # Streamlit removes widget keys after a run exits before rendering them.
-                state.pop(translation_language_state.TARGET_WIDGET_KEY)
-                state.pop(translation_language_state.SOURCE_WIDGET_KEY)
-                restored = translation_language_state.reconcile_translation_languages(state)
-                current_signature = signature(
-                    restored["target"], source=restored["source"]
-                )
-
-                self.assertEqual(stored_signature, current_signature)
-                self.assertEqual(
-                    state[translation_language_state.TARGET_WIDGET_KEY], target
-                )
-                self.assertEqual(
-                    state[translation_language_state.SOURCE_WIDGET_KEY], "Japanese"
-                )
-
-    def test_post_result_actions_preserve_target_signature(self):
-        for action in ("png", "txt", "diagnostic", "harmless_rerun"):
-            for area in ("Whole Pattern", "Select Area"):
-                with self.subTest(action=action, area=area):
-                    state = {
-                        translation_language_state.TARGET_WIDGET_KEY: "English — UK",
-                        translation_language_state.SOURCE_WIDGET_KEY: "Japanese",
-                    }
-                    translation_language_state.reconcile_translation_languages(state)
-                    stored_signature = signature(
-                        "English — UK", source="Japanese", area=area
-                    )
-
-                    # Each action causes a rerun; analytics can short-circuit before widgets.
-                    state.pop(translation_language_state.TARGET_WIDGET_KEY)
-                    state.pop(translation_language_state.SOURCE_WIDGET_KEY)
-                    current = translation_language_state.reconcile_translation_languages(
-                        state
-                    )
-
-                    self.assertEqual(
-                        result_delivery.differing_signature_fields(
-                            stored_signature,
-                            signature(
-                                current["target"],
-                                source=current["source"],
-                                area=area,
-                            ),
-                        ),
-                        (),
-                    )
-
-    def test_genuine_target_change_still_mismatches(self):
+    def test_canonical_languages_survive_widget_omission(self):
         state = {
-            translation_language_state.TARGET_WIDGET_KEY: "English — US",
-            translation_language_state.SOURCE_WIDGET_KEY: "Japanese",
+            translation_language_state.SOURCE_STATE_KEY: "Japanese",
+            translation_language_state.TARGET_STATE_KEY: "English — UK",
         }
-        translation_language_state.reconcile_translation_languages(state)
-        stored_signature = signature("English — US", source="Japanese")
 
-        state[translation_language_state.TARGET_WIDGET_KEY] = "Simplified Chinese"
+        restored = translation_language_state.reconcile_translation_languages(state)
+
+        self.assertEqual(restored, {"source": "Japanese", "target": "English — UK"})
+        self.assertEqual(
+            state[translation_language_state.SOURCE_WIDGET_KEY], "Japanese"
+        )
+        self.assertEqual(
+            state[translation_language_state.TARGET_WIDGET_KEY], "English — UK"
+        )
+
+    def test_remounted_widget_defaults_cannot_overwrite_canonical(self):
+        state = {
+            translation_language_state.SOURCE_STATE_KEY: "Japanese",
+            translation_language_state.TARGET_STATE_KEY: "English — UK",
+            translation_language_state.SOURCE_WIDGET_KEY: "Traditional Chinese",
+            translation_language_state.TARGET_WIDGET_KEY: None,
+        }
+
         current = translation_language_state.reconcile_translation_languages(state)
 
-        self.assertEqual(current["target"], "Simplified Chinese")
+        self.assertEqual(current, {"source": "Japanese", "target": "English — UK"})
+        self.assertEqual(
+            state[translation_language_state.SOURCE_WIDGET_KEY], "Japanese"
+        )
+        self.assertEqual(
+            state[translation_language_state.TARGET_WIDGET_KEY], "English — UK"
+        )
+
+    def test_explicit_source_change_still_changes_signature(self):
+        state = {
+            translation_language_state.SOURCE_STATE_KEY: "Japanese",
+            translation_language_state.TARGET_STATE_KEY: "English — UK",
+        }
+        translation_language_state.reconcile_translation_languages(state)
+        stored = signature("English — UK", source="Japanese")
+
+        state[translation_language_state.SOURCE_WIDGET_KEY] = "Traditional Chinese"
+        translation_language_state.accept_source_language_change(state)
+        current = translation_language_state.reconcile_translation_languages(state)
+
         self.assertEqual(
             result_delivery.differing_signature_fields(
-                stored_signature,
+                stored,
+                signature(current["target"], source=current["source"]),
+            ),
+            ("source_language",),
+        )
+
+    def test_explicit_target_change_still_changes_signature(self):
+        state = {
+            translation_language_state.SOURCE_STATE_KEY: "Japanese",
+            translation_language_state.TARGET_STATE_KEY: "English — UK",
+        }
+        translation_language_state.reconcile_translation_languages(state)
+        stored = signature("English — UK", source="Japanese")
+
+        state[translation_language_state.TARGET_WIDGET_KEY] = "Simplified Chinese"
+        translation_language_state.accept_target_language_change(state)
+        current = translation_language_state.reconcile_translation_languages(state)
+
+        self.assertEqual(
+            result_delivery.differing_signature_fields(
+                stored,
                 signature(current["target"], source=current["source"]),
             ),
             ("target_language",),
         )
 
-    def test_interface_language_does_not_change_translation_target(self):
-        for interface_language in ("en", "zh-Hant", "zh-Hans", "ja"):
-            with self.subTest(interface_language=interface_language):
-                state = {
-                    "ui_lang": interface_language,
-                    translation_language_state.TARGET_WIDGET_KEY: "Japanese",
-                    translation_language_state.SOURCE_WIDGET_KEY: "English — US",
-                }
-                translation_language_state.reconcile_translation_languages(state)
-                state.pop(translation_language_state.TARGET_WIDGET_KEY)
-                state["ui_lang"] = "zh-Hant"
-
-                current = translation_language_state.reconcile_translation_languages(
-                    state
-                )
-
-                self.assertEqual(current["target"], "Japanese")
-
-    def test_source_and_structural_signature_invalidation_remain_unchanged(self):
+    def test_harmless_rerun_keeps_language_signature(self):
+        state = {
+            translation_language_state.SOURCE_STATE_KEY: "Japanese",
+            translation_language_state.TARGET_STATE_KEY: "English — UK",
+        }
         stored = signature("English — UK", source="Japanese")
-        changed_source = signature("English — UK", source="Traditional Chinese")
-        changed_area = signature(
-            "English — UK", source="Japanese", area="Select Area"
-        )
-        changed_image = list(stored)
-        changed_image[0] = "different-image"
-        changed_crop = list(stored)
-        changed_crop[4] = (1, 2, 80, 90)
+
+        current = translation_language_state.reconcile_translation_languages(state)
 
         self.assertEqual(
-            result_delivery.differing_signature_fields(stored, changed_source),
-            ("source_language",),
-        )
-        self.assertEqual(
-            result_delivery.differing_signature_fields(stored, changed_area),
-            ("area_mode",),
-        )
-        self.assertEqual(
-            result_delivery.differing_signature_fields(stored, tuple(changed_image)),
-            ("image_signature",),
-        )
-        self.assertEqual(
-            result_delivery.differing_signature_fields(stored, tuple(changed_crop)),
-            ("crop_box",),
+            result_delivery.differing_signature_fields(
+                stored,
+                signature(current["target"], source=current["source"]),
+            ),
+            (),
         )
 
-    def test_reconciliation_runs_before_analytics_short_circuit_and_widgets(self):
+    def test_interface_language_does_not_change_translation_languages(self):
+        state = {
+            "ui_lang": "en",
+            translation_language_state.SOURCE_STATE_KEY: "English — US",
+            translation_language_state.TARGET_STATE_KEY: "Japanese",
+        }
+        translation_language_state.reconcile_translation_languages(state)
+        state.pop(translation_language_state.SOURCE_WIDGET_KEY)
+        state.pop(translation_language_state.TARGET_WIDGET_KEY)
+        state["ui_lang"] = "zh-Hant"
+
+        current = translation_language_state.reconcile_translation_languages(state)
+
+        self.assertEqual(current, {"source": "English — US", "target": "Japanese"})
+
+    def test_app_uses_callbacks_and_canonical_semantic_values(self):
         source = (
-            Path(__file__).resolve().parents[1]
-            / "pattern_translator"
-            / "app.py"
+            Path(__file__).resolve().parents[1] / "pattern_translator" / "app.py"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("on_change=accept_source_language_change", source)
+        self.assertIn("on_change=accept_target_language_change", source)
+        self.assertIn('source_mode = canonical_translation_languages["source"]', source)
+        self.assertIn('output_mode = canonical_translation_languages["target"]', source)
+        self.assertNotIn("source_mode = st.selectbox(", source)
+        self.assertNotIn("output_mode = st.selectbox(", source)
+
+    def test_reconciliation_precedes_analytics_short_circuit_and_widgets(self):
+        source = (
+            Path(__file__).resolve().parents[1] / "pattern_translator" / "app.py"
         ).read_text(encoding="utf-8")
 
         reconciliation = source.index(
@@ -232,18 +235,6 @@ st.selectbox(
 
         self.assertLess(reconciliation, analytics_rerun)
         self.assertLess(analytics_rerun, target_widget)
-
-    def test_production_language_widgets_use_session_state_without_defaults(self):
-        source = (
-            Path(__file__).resolve().parents[1]
-            / "pattern_translator"
-            / "app.py"
-        ).read_text(encoding="utf-8")
-
-        source_widget = source.index('key="source_language_selector"')
-        target_widget = source.index('key="target_language_selector"')
-        self.assertIn("index=None", source[source_widget - 180:source_widget])
-        self.assertIn("index=None", source[target_widget - 180:target_widget])
 
 
 if __name__ == "__main__":
