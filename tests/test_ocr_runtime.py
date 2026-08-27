@@ -476,16 +476,35 @@ class OCRRuntimeTests(unittest.TestCase):
         app_source = (
             Path(__file__).resolve().parents[1] / "pattern_translator" / "app.py"
         ).read_text(encoding="utf-8")
+        service_source = (
+            Path(__file__).resolve().parents[1]
+            / "pattern_translator"
+            / "translation_service.py"
+        ).read_text(encoding="utf-8")
         self.assertNotIn("from paddleocr import PaddleOCR", app_source)
         self.assertNotIn("get_paddle_reader", app_source)
         self.assertNotIn("reader.predict(", app_source)
-        self.assertIn("ocr_runtime_engine.get_process_ocr_manager().run_ocr(", app_source)
-        self.assertIn("diagnostic_request_id=diagnostic_request_id", app_source)
+        self.assertNotIn("from paddleocr import PaddleOCR", service_source)
+        self.assertNotIn("reader.predict(", service_source)
+        self.assertIn(
+            "ocr_runtime_engine.get_process_ocr_manager().run_ocr(", service_source
+        )
+        self.assertIn("diagnostic_request_id=diagnostic_request_id", service_source)
         for phase in (
             "translation_action_accepted",
             "script_run_begin",
             "script_run_end",
             "pending_run_begin",
+            "translation_result_store_attempt",
+            "translation_result_store_success",
+            "result_handoff_publish",
+            "diagnostic_report_begin",
+            "diagnostic_report_end",
+            "downstream_translation_end",
+            "translation_run_end",
+        ):
+            self.assertIn(f'"{phase}"', app_source)
+        for phase in (
             "pre_ocr_preparation_begin",
             "pre_ocr_preparation_end",
             "temp_image_preparation_begin",
@@ -495,14 +514,8 @@ class OCRRuntimeTests(unittest.TestCase):
             "overlay_end",
             "export_begin",
             "export_end",
-            "diagnostic_report_begin",
-            "diagnostic_report_end",
-            "translation_result_store_attempt",
-            "translation_result_store_success",
-            "downstream_translation_end",
-            "translation_run_end",
         ):
-            self.assertIn(f'"{phase}"', app_source)
+            self.assertIn(f'"{phase}"', service_source)
         self.assertIn('st.session_state.setdefault("diagnostic_session_generation"', app_source)
 
         line_source = (
@@ -536,7 +549,7 @@ class OCRRuntimeTests(unittest.TestCase):
             "ai_request_end",
         ):
             self.assertIn(f'"{phase}"', llm_source)
-        self.assertIn("finally:\n        try:\n            os.remove(image_path)", app_source)
+        self.assertIn("finally:\n        try:\n            os.remove(image_path)", service_source)
 
         worker_source = (
             Path(__file__).resolve().parents[1]

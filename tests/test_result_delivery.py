@@ -1,4 +1,5 @@
 import threading
+import re
 import unittest
 from pathlib import Path
 
@@ -349,23 +350,32 @@ class ResultDeliveryTests(unittest.TestCase):
         app_source = (
             Path(__file__).resolve().parents[1] / "pattern_translator" / "app.py"
         ).read_text(encoding="utf-8")
-        export_position = app_source.index('"export_end"')
-        publish_position = app_source.index(
-            "result_delivery_engine.publish_completed_result(", export_position
-        )
-        post_export_before_publish = app_source[export_position:publish_position]
+        service_source = (
+            Path(__file__).resolve().parents[1]
+            / "pattern_translator"
+            / "translation_service.py"
+        ).read_text(encoding="utf-8")
+        export_position = service_source.index('"export_end"')
+        export_to_return = service_source[export_position:service_source.index("return TranslateImageResult", export_position)]
+        self.assertIsNone(re.search(r"\bst\.", export_to_return))
+        self.assertNotIn("st.session_state", export_to_return)
 
-        self.assertNotIn("st.", post_export_before_publish)
-        self.assertNotIn("st.session_state", post_export_before_publish)
-        self.assertNotIn("rc10b_log_event(", post_export_before_publish)
+        translate_position = app_source.index("translation_result = translate_image(")
+        publish_position = app_source.index(
+            "result_delivery_engine.publish_completed_result(", translate_position
+        )
+        post_translate_before_publish = app_source[translate_position:publish_position]
+        self.assertIsNone(re.search(r"\bst\.", post_translate_before_publish))
+        self.assertNotIn("st.session_state", post_translate_before_publish)
+        self.assertNotIn("rc10b_log_event(", post_translate_before_publish)
 
     def test_producer_claims_in_same_run_without_forced_rerun(self):
         app_source = (
             Path(__file__).resolve().parents[1] / "pattern_translator" / "app.py"
         ).read_text(encoding="utf-8")
-        export_position = app_source.index('"export_end"')
+        translate_position = app_source.index("translation_result = translate_image(")
         publish_position = app_source.index(
-            "result_delivery_engine.publish_completed_result(", export_position
+            "result_delivery_engine.publish_completed_result(", translate_position
         )
         claim_position = app_source.index(
             "claim_and_commit_completed_result(", publish_position

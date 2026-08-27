@@ -329,7 +329,7 @@ class CustomUploadTests(unittest.TestCase):
             "lifecycle, request_claimed = ocr_request_lifecycle_engine.claim_request("
         )
         pending_log_position = app_source.index('"pending_run_begin"', claim_position)
-        ocr_position = app_source.index("candidate_result = run_primary_ocr(", claim_position)
+        ocr_position = app_source.index("translation_result = translate_image(", claim_position)
         publish_position = app_source.index(
             "result_delivery_engine.publish_completed_result(", ocr_position
         )

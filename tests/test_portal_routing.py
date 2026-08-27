@@ -60,19 +60,25 @@ class PortalRoutingTests(unittest.TestCase):
         self.assertNotIn("up.railway.app", source)
 
     def test_pattern_translation_routing_is_independent_from_interface_language(self):
-        source = Path("pattern_translator/app.py").read_text(encoding="utf-8")
+        app_source = Path("pattern_translator/app.py").read_text(encoding="utf-8")
+        service_source = Path(
+            "pattern_translator/translation_service.py"
+        ).read_text(encoding="utf-8")
 
-        self.assertIn("index = build_term_index(df, source_mode)", source)
+        self.assertIn("df, index = prepare_translation_dataframe(full_df, source_mode)", app_source)
+        self.assertIn("output_mode=output_mode,", app_source)
         self.assertIn(
             "ocr_lines_engine.build_ocr_line_translations(\n"
-            "                        ocr_rows,\n"
-            "                        index,\n"
-            "                        df,\n"
-            "                        output_mode,",
-            source,
+            "            ocr_rows,\n"
+            "            index,\n"
+            "            df,\n"
+            "            output_mode,",
+            service_source,
         )
-        self.assertNotIn("output_mode=interface_language", source)
-        self.assertNotIn("source_mode=interface_language", source)
+        self.assertNotIn("output_mode=interface_language", app_source)
+        self.assertNotIn("source_mode=interface_language", app_source)
+        self.assertNotIn("output_mode=interface_language", service_source)
+        self.assertNotIn("source_mode=interface_language", service_source)
 
     def test_pattern_branding_uses_current_product_identity(self):
         source = Path("pattern_translator/app.py").read_text(encoding="utf-8")
