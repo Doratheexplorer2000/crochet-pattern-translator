@@ -2,9 +2,9 @@
 
 Mobile-first OCR translation for crochet pattern images.
 
-Current production baseline: **Canonical translation-state ownership** (`a215fa38bebe1ac71d5cd2e251e67328275dc7ec`)
+Current production baseline: **Known-good pre-cache tree** (`c49755b59686e58298febba445e5ae51a6cb6e05`)
 
-Validated rollback baseline: **RC28**
+Validated equivalent tree: `8dccd17518344d7d2152dc49fc3e13c0e95e3fd0`
 
 Application entry point:
 
@@ -24,7 +24,7 @@ pattern_translator/app.py
 
 ## Current Product Status
 
-The current production revision is canonical translation-state ownership `a215fa38bebe1ac71d5cd2e251e67328275dc7ec`, deployed from GitHub `main` to Railway and publicly available at `https://pattern.crochetintelligence.com`. It includes the production-validated Portal Centralization, Contextual LLM translation, completed RC54 Components V2 analytics, custom-domain, isolated OCR-worker, and rerun-safe result-delivery baselines. RC28 remains the validated rollback baseline.
+The current production revision is revert commit `c49755b59686e58298febba445e5ae51a6cb6e05`, deployed from GitHub `main` to Railway and publicly available at `https://pattern.crochetintelligence.com`. Its tree is byte-identical to the known-good pre-cache tree at `8dccd17518344d7d2152dc49fc3e13c0e95e3fd0`. It includes the production-validated Portal Centralization, Contextual LLM translation, completed RC54 Components V2 analytics, custom-domain, isolated OCR-worker, canonical translation-state, and rerun-safe result-delivery baselines.
 
 Key validated behavior:
 
@@ -90,7 +90,7 @@ Key validated behavior:
 - Engine Migration is complete. The Streamlit-independent Pattern Translator engines are `terminology`, `line_translation`, `diagnostic_report`, `overlay`, `pattern_document`, `ocr_lines`, and `ocr_cleanup`.
 - Remaining `app.py` responsibilities are intentionally application, framework, and runtime concerns: Streamlit UI, application orchestration, OCR runtime/provider lifecycle, session state, downloads, analytics, localization, Cropper / Select Area, and runtime infrastructure.
 - Domain Layer extraction is complete. Application Layer separation is deferred until it provides clear product value.
-- Engine Migration and Domain Layer extraction are included in the current production release. RC28 remains the validated rollback baseline.
+- Engine Migration and Domain Layer extraction are included in the current production release. RC28 remains an important historical Railway baseline; the current rollback tree is identified above.
 - RC50A completed the custom uploader technical spike, and RC50B completed the production Streamlit Components V1 custom uploader.
 - The native Streamlit file uploader was replaced while preserving the boundary `custom uploader -> BytesIO -> image_upload_signature() -> Image.open()` and all downstream OCR, translation, overlay, diagnostics, exports, and analytics-schema behavior.
 - Supported formats are JPG, JPEG, PNG, and WebP. The uploader supports all four interface languages, native mobile image selection, desktop drag-and-drop, Replace and Remove, and light and dark modes.
@@ -117,13 +117,14 @@ Validation passed: Hybrid/Human-UAT automated suite `73 / 73`; feature-flag-OFF 
 
 ## Current Project Status
 
-- Current production baseline: Canonical translation-state ownership (`a215fa38bebe1ac71d5cd2e251e67328275dc7ec`)
-- Validated rollback baseline: `RC28`
+- Current production baseline: known-good pre-cache tree (`c49755b59686e58298febba445e5ae51a6cb6e05`)
+- Validated equivalent tree: `8dccd17518344d7d2152dc49fc3e13c0e95e3fd0`
 - Current app version string: `Pattern OCR Translator (Beta RC26)`
-- Current phase: Pre-Launch infrastructure and custom-domain migration completed; Production Human UAT PASS across all three Railway services.
+- Current phase: staged Pattern Translator Streamlit removal; Portal, analytics, and custom-domain production baselines remain closed and preserved.
 - Latest Pattern Translator analytics milestone: RC54B Analytics Transport Migration completed with Production Human UAT PASS.
 - Current production database: `knowledge_base/data/master_stitches.csv`
-- Current focus: focused deterministic translation-performance audit. A repeated Whole Pattern workload measured approximately 36.00 seconds of translation for Traditional Chinese to English US versus approximately 5.70 seconds after changing target, while OCR remained approximately 0.88 seconds. Establish why lookup, normalization, and normalized-index work is unexpectedly large before changing dictionaries or translation architecture.
+- Current focus: staged removal of Streamlit from Pattern Translator, beginning with a framework-neutral `translate_image()` service that the existing Streamlit app calls. Production testing bounds the active blocker to browser/WebSocket/AppSession delivery; the exact reconnect trigger remains unproven.
+- Translation performance is paused until migration stability. The reverted cache optimization remains useful validated evidence rather than rejected work.
 - Future testing: continue with occasional trusted-user testing and incremental fixes based on production evidence.
 
 Known non-blocking polish items:
@@ -131,7 +132,7 @@ Known non-blocking polish items:
 - Version number is not currently shown in the UI.
 - Minor overlay text box alignment refinement is deferred.
 - JellyCat 元寶 overlay placement has a minor cosmetic placement difference; future overlay placement tuning may improve this.
-- OCR status can remain visually stuck at `OCR Running...` after completed results render; diagnostics show OCR has completed. Investigate after translation performance unless execution is affected.
+- OCR status can remain visually stuck at `OCR Running...` after completed results render; diagnostics show OCR has completed. Defer until the migration is stable unless execution is affected.
 - Diagnostic Report preparation and download currently require two actions because of Streamlit's download/rerun model; this is functional and non-blocking.
 - Initial upload-preview delay and an occasionally initially invisible Select Area cropper remain observation items pending reproducible evidence.
 
@@ -205,9 +206,9 @@ Future RCs should provide raw evidence, not only PASS/FAIL summaries.
 
 ## Future Architecture
 
-RC40 approved a phased post-Streamlit migration for Pattern Translator. The migration starts locally only and should not change GitHub, Railway production, or the Streamlit backup path until validated.
+Pattern Translator now has an approved staged Streamlit-removal path. The first unit extracts one framework-neutral `translate_image()` application service while the current Streamlit app remains the caller. Later reviewed units add a minimal FastAPI API, migrate the browser UI and components, cut the existing Railway service to FastAPI/Uvicorn, and retire Streamlit only after production parity.
 
-The first migration objective is to separate OCR, parser, translation, overlay, diagnostics, analytics integration, and knowledge-base access from Streamlit UI/session code. RC28 on Railway remains the production rollback target throughout migration.
+The migration must preserve the current engines, outputs, privacy and analytics contracts, and Railway service topology. Detailed active status and scope are maintained in `PROJECT_STATUS.md`; broader platform direction remains in the document below.
 
 See:
 

@@ -4,9 +4,9 @@ Last updated: 2026-08-27
 
 ## Current Version
 
-Current production baseline: Canonical translation-state ownership (`a215fa38bebe1ac71d5cd2e251e67328275dc7ec`)
+Current production baseline: known-good pre-cache tree (`c49755b59686e58298febba445e5ae51a6cb6e05`)
 
-Validated rollback baseline: `RC28`
+Validated equivalent tree: `8dccd17518344d7d2152dc49fc3e13c0e95e3fd0`
 
 Application version string: `Pattern OCR Translator (Beta RC26)`
 
@@ -18,7 +18,7 @@ pattern_translator/app.py
 
 ## Current Production Status
 
-Crochet Pattern OCR Translator is the current OCR-based pattern translation app at `https://pattern.crochetintelligence.com`. Canonical translation-state ownership `a215fa38bebe1ac71d5cd2e251e67328275dc7ec` is deployed to Railway from GitHub `main` and has passed Production Human UAT. It includes the production-validated Portal Centralization, Contextual LLM translation, completed Components V2 analytics, custom-domain, isolated OCR-worker, and rerun-safe result-delivery baselines. RC28 remains the validated rollback baseline.
+Crochet Pattern OCR Translator is the current OCR-based pattern translation app at `https://pattern.crochetintelligence.com`. Revert commit `c49755b59686e58298febba445e5ae51a6cb6e05` is deployed from GitHub `main`; its tree is byte-identical to the known-good pre-cache tree at `8dccd17518344d7d2152dc49fc3e13c0e95e3fd0`. It includes the production-validated Portal Centralization, Contextual LLM translation, completed Components V2 analytics, custom-domain, isolated OCR-worker, canonical translation-state, and rerun-safe result-delivery baselines.
 
 RC42 completed the first Engine Extraction by moving the CSV terminology / lookup engine into `pattern_translator/engine/terminology.py`. RC43 extracted pure line-translation logic into `pattern_translator/engine/line_translation.py`. RC44 extracted Diagnostic Report construction and formatting into `pattern_translator/engine/diagnostic_report.py`. RC45 completed Boundary Cleanup. RC46 extracted overlay rendering into `pattern_translator/engine/overlay.py`. RC47 extracted Pattern Document responsibilities into `pattern_translator/engine/pattern_document.py`. RC48 extracted OCR line assembly into `pattern_translator/engine/ocr_lines.py`. RC49 extracted deterministic OCR cleanup into `pattern_translator/engine/ocr_cleanup.py`, completing Engine Migration and Domain Layer extraction. Regression and Human UAT passed with no user-visible behavior changes, and the completed engine layer is included in the current production release.
 
@@ -59,7 +59,7 @@ stitches_1_8e.csv
 
 ## Current Priorities
 
-Current Phase: Pattern Translator Soft Launch readiness; canonical translation-state Production Human UAT PASS
+Current Phase: Pattern Translator staged Streamlit removal; production baseline preserved
 
 Purpose:
 
@@ -68,11 +68,12 @@ Purpose:
 - All five current Pattern Translator Plausible events use the shared Components V2 bridge; no V1 Plausible analytics dependency remains.
 - Preserve the shared browser-side analytics implementation across the Portal and both translators while keeping analytics observational and non-blocking.
 - Keep Google Sheets Product Facts as separately approved future work; they are not implemented.
-- Investigate the measured deterministic translation-stage performance anomaly before further Soft Launch work. Do not remove dictionary entries or rewrite translation architecture before establishing the cause.
+- Replace the unreliable Streamlit browser/session delivery boundary in reversible stages while preserving the validated translation engines and product behavior.
+- Pause deterministic translation-performance work until the migration is stable.
 
 Roadmap decisions:
 
-- Preserve RC28 as the validated Railway rollback target.
+- Preserve `c49755b59686e58298febba445e5ae51a6cb6e05` / the byte-identical `8dccd17518344d7d2152dc49fc3e13c0e95e3fd0` tree as the current Railway rollback target.
 - Preserve the completed Engine Migration and Domain Layer extraction now included in the production release.
 - Preserve the completed RC54B analytics transport baseline.
 - Do not use the unreliable `app_open` event as the basis of platform visitor analytics.
@@ -82,6 +83,24 @@ Roadmap decisions:
 - Continue occasional testing with trusted users and incremental fixes based on real production usage.
 - Keep OCR, parser, overlay, and database changes small and evidence-based.
 - Preserve the shared database strategy with Crochet Stitch Translator.
+
+## Reliability Blocker And Migration Decision
+
+Production testing on the known-good baseline still showed delayed browser updates and Translate actions that did not reach a backend script run. The corresponding upload backend run completed in approximately `246 ms`, while the visible preview took more than five seconds. Railway logs also recorded duplicate Streamlit AppSession connection messages. This bounds the active blocker to the browser/WebSocket/Streamlit AppSession delivery lifecycle rather than OCR, translation, or the reverted terminology cache, although the exact reconnect trigger remains unproven.
+
+The terminology cache optimization `f7a48a076dbda066577e6117752dd859091cc760` reduced the controlled deterministic workload from about `4.21s` to `1.23s` cold and `1.02s` on immediate repeat with `220 / 220` identical output. It was reverted conservatively after the production interaction failure, but the same failure persisted on the byte-identical pre-cache tree. The optimization is paused, not rejected, and must not be reintroduced or investigated further until the migration is stable.
+
+The approved direction is staged removal of Streamlit from Pattern Translator only:
+
+1. Extract one framework-neutral `translate_image()` application service; the existing Streamlit app continues to call it.
+2. Add a minimal FastAPI API that calls the same service.
+3. Migrate the browser UI, uploader, cropper, results, and downloads to the API.
+4. Cut the existing Pattern Translator Railway service over to FastAPI/Uvicorn without adding another service.
+5. Complete Production Human UAT, then retire Streamlit lifecycle code only after parity is proven.
+
+The first implementation unit is service extraction only. It must preserve the isolated OCR worker, deterministic terminology/parser behavior, Luna routing and validation, translation scope, Select Area crop semantics, overlays, PNG/TXT/Diagnostic outputs, analytics events, privacy boundary, safe diagnostics, and current Railway topology. It does not include a new UI, API deployment, performance optimization, or product enhancement.
+
+Implementation workflow for this migration: the Product Owner and ChatGPT define scope and acceptance criteria; Cursor implements and validates the approved unit locally without pushing; Codex independently reviews the exact diff and evidence, runs release gates appropriate to risk, and owns commit/push/deployment only after approval.
 
 ## Portal Status
 
@@ -98,13 +117,15 @@ The Portal Skeleton is functionally complete and frozen. It is an independent As
 - Pattern source/result language controls remain independent. Pattern's duplicate general Privacy UI was removed, while Stitch's tool-specific Google Forms feedback privacy note remains.
 - Both tools return to the Portal in the same tab with interface-language preservation. Pattern uses the Crochet Intelligence eyebrow and English title `Crochet Pattern Translator`; Stitch Tutorial Search preserves the submitted stitch term across interface languages.
 - All three services run in the Railway project `Crochet Intelligence`. Portal Centralization `5e975741a9a53c1835120f0cdb24a60f5af706b1` and custom-domain migration `22fded0fb39a389b87d767faa494d7ad48d3d799` passed production functional/navigation UAT and Plausible regression validation without analytics changes. RC54 Analytics remains closed with Site Domain `crochetintelligence.com`.
-- Portal visual refinement is complete. Pattern Translator deterministic translation performance is the highest-priority remaining Soft Launch investigation.
+- Portal visual refinement is complete. Pattern Translator's staged Streamlit removal is the highest-priority remaining launch work.
 
 ## Known Issues
 
 ### Next Priority
 
-1. **Translation Performance Audit.** On the same Whole Pattern image and essentially the same OCR workload, Traditional Chinese to English US measured approximately `41.06s` total / `36.00s` translation / `0.89s` Paddle inference. After changing target language, the same image measured approximately `6.79s` total / `5.70s` translation / `0.88s` Paddle inference. The slow run recorded 21 OCR text lines, 108 dictionary rows, about `35,502` dictionary lookups, more than `202,000` `norm_text()` calls, and repeated normalized lookup-index builds/cache misses. OCR is not the leading cause in this evidence. Audit repeated lookups and normalization, index rebuilding and cache reuse, target-language-dependent processing, parser/regex workload, semantic-context preparation, and other duplicated deterministic work before changing dictionary coverage or translation architecture. Dictionary size is not yet proven as the cause.
+1. **First Streamlit-removal unit.** Extract a framework-neutral `translate_image()` service from current orchestration and make the existing Streamlit app call it. Preserve byte/semantic output parity and all boundaries listed above. Do not add the FastAPI route or migrate UI in this first unit.
+
+**Paused performance evidence:** the deterministic anomaly measured approximately `41.06s` total / `36.00s` translation with `0.89s` Paddle inference versus `6.79s` total / `5.70s` translation with `0.88s` Paddle inference after changing target. The controlled cache fix materially improved local deterministic timing and preserved output, but production interaction symptoms persisted after its revert. Resume the audit only after migration stability; dictionary size is not proven as the cause.
 
 ### Before Soft Launch
 
@@ -317,7 +338,7 @@ Other non-blocking polish already recorded:
 - Rationale at RC40: RC28 was the stable production baseline, and RC30b had confirmed Streamlit as the primary architectural limitation rather than Railway.
 - Migration rule: start locally only. Do not create a GitHub migration branch, push, deploy, or change production until local extraction work has been reviewed and validated.
 - First objective: separate OCR, parser, translation, overlay, diagnostics, analytics integration, and knowledge-base access from Streamlit UI/session code while preserving current behavior.
-- Rollback target: RC28 Railway production remains the fully recoverable production path.
+- Historical context: RC40's broad extraction direction has since been refined into the staged migration recorded under Current Priorities. The current rollback tree is `c49755b59686e58298febba445e5ae51a6cb6e05` / `8dccd17518344d7d2152dc49fc3e13c0e95e3fd0`, not RC28.
 
 ### External UAT Phase 1
 
@@ -380,11 +401,11 @@ Other non-blocking polish already recorded:
 
 Current platform sequence:
 
-1. Perform a focused deterministic translation-performance audit using the measured slow/fast Whole Pattern evidence.
-2. Implement only performance changes supported by that audit.
-3. Address the remaining Before Soft Launch product/UI work in user-impact order; reproduce observational issues before changing them.
-4. Run final product-wide production smoke UAT.
-5. Proceed to Soft Launch while preserving the completed RC54 analytics and custom-domain baselines.
+1. Extract and validate the framework-neutral `translate_image()` service while Streamlit remains the caller.
+2. Add and validate the minimal FastAPI boundary using that service.
+3. Migrate the Pattern browser UI and components, then cut the existing Railway service to FastAPI/Uvicorn only after parity evidence.
+4. Resume translation-performance work and remaining product/UI items after migration stability.
+5. Run final product-wide production UAT and proceed to Soft Launch while preserving the completed RC54 analytics and custom-domain baselines.
 
 Additional deferred work:
 

@@ -313,9 +313,11 @@ Architecture migration work must preserve the current production baseline as a r
 For the approved post-Streamlit migration:
 
 - begin locally only;
-- do not push migration work to GitHub until the local baseline and first extraction step have been reviewed;
+- preserve `c49755b59686e58298febba445e5ae51a6cb6e05` and its byte-identical `8dccd17518344d7d2152dc49fc3e13c0e95e3fd0` tree as the production rollback baseline;
+- first extract one framework-neutral `translate_image()` service and keep Streamlit as its caller;
+- introduce the FastAPI boundary and browser migration only in later separately reviewed units;
+- do not push migration work to GitHub until the local unit and its evidence have been independently reviewed;
 - do not deploy migration builds to Railway until explicitly approved;
-- keep RC28 Railway production fully recoverable;
 - separate business logic from Streamlit before replacing the frontend;
 - do not rewrite business logic that has already passed Human UAT and regression simply because the presentation layer changes;
 - prefer Git tags and local branches over duplicating the repository.
@@ -362,7 +364,7 @@ Art Director
 ↓
 UI_SPEC.md (Approved Design Specification)
 ↓
-Codex Implementation
+Approved Implementation (normally Cursor)
 ↓
 Human Visual UAT
 ↓
@@ -396,3 +398,27 @@ The Crochet Intelligence Portal Skeleton architecture and Information Architectu
 - Pre-Launch sequence: Portal visual refinement and branding, final product-wide production smoke UAT, then Soft Launch. Do not add features before Soft Launch unless they fix a genuine Launch blocker.
 - Add future tools through the Portal's tool configuration rather than redesigning its Information Architecture.
 - Describe analytics capabilities only after validation is complete. RC54 production-validated shared Plausible analytics across the Portal, Pattern Translator, and Stitch Translator, with Production Human UAT PASS. Google Sheets Product Facts remain unimplemented and require separate approval.
+
+---
+
+# 21. Cursor / Codex Collaboration
+
+Use one active implementation owner at a time. Do not have Cursor and Codex concurrently edit the same unit or independently repair the same diff.
+
+Default responsibilities:
+
+- Product Owner and ChatGPT: define the goal, acceptance criteria, scope, and architectural decision.
+- Cursor: implement the approved unit locally, run the agreed developer validation, and stop with a handoff. Cursor should not commit, push, deploy, or require GitHub/Railway credentials unless the Product Owner explicitly authorizes an exception.
+- Codex: independently inspect the base, working tree, diff, tests, secrets, and scope; request corrections or make only approved review fixes; own release commits, pushes, and deployment verification after approval.
+
+The minimum Cursor handoff is:
+
+- repository path, branch, and base SHA;
+- exact files changed and concise behavior summary;
+- acceptance criteria and preserved invariants;
+- exact test/validation commands and results;
+- current tracked/untracked status and confirmation that secrets/evidence were not added;
+- known limitations, residual risks, and requested review focus;
+- explicit confirmation that no commit, push, deployment, or configuration change occurred unless authorized.
+
+Codex should review the supplied diff and evidence before rereading broad project history. Repeat focused release gates independently; repeat the full suite or expensive benchmarks only when risk, changed scope, inconsistent evidence, or explicit release requirements justify it. This division reduces duplicated work without weakening independent review or production safety.

@@ -1,15 +1,15 @@
-# Future Crochet Intelligence Architecture Proposal
+# Future Crochet Intelligence Architecture
 
-This document is informational only. It is not an implementation plan for the current Streamlit release.
+This document records the broader platform direction. The active staged Pattern Translator migration and its current unit are governed by `pattern_translator/PROJECT_STATUS.md` and `ENGINEERING_RULES.md`.
 
 ## Current Direction
 
-For now, keep two independent applications:
+Keep the two translator products independently deployable:
 
 - Crochet Stitch Translator: direct dictionary lookup
 - Crochet Pattern Translator: OCR pattern translation
 
-Both applications should share one master stitch database, but they should not yet share Python packages or deployment infrastructure.
+Both applications share one master stitch database. Pattern Translator is approved for a staged move from Streamlit to its own browser UI plus FastAPI/Uvicorn service; Stitch Translator remains on its current runtime. This does not authorize shared deployment infrastructure or a cross-tool platform rewrite.
 
 ## Knowledge Base Direction
 
@@ -39,7 +39,7 @@ Applications should consume this knowledge base according to their own product n
 
 ## Future Platform Direction
 
-After leaving the current Streamlit-only deployment model, Crochet Intelligence could evolve into a unified platform:
+As the products leave the Streamlit-only deployment model where justified, Crochet Intelligence could evolve into a more unified platform:
 
 ```text
 Knowledge base
@@ -74,7 +74,7 @@ After platform migration, good candidates for shared modules include:
 - localization resources
 - YouTube tutorial search URL generation
 
-These should not be extracted yet. Premature shared modules would increase deployment risk while both apps are still independent Streamlit applications.
+Cross-tool shared modules remain deferred. The approved Pattern Translator `translate_image()` extraction is an internal application boundary for its staged migration, not authorization to extract shared packages across both tools.
 
 ## Future Database Options
 
