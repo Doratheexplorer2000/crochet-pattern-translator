@@ -59,7 +59,7 @@ stitches_1_8e.csv
 
 ## Current Priorities
 
-Current Phase: Pattern Translator staged Streamlit removal; production baseline preserved
+Current Phase: Phase 2 — minimal FastAPI HTTP boundary over the existing `translate_image()` service; Phase 1 is complete and production baseline preserved
 
 Purpose:
 
@@ -70,6 +70,14 @@ Purpose:
 - Keep Google Sheets Product Facts as separately approved future work; they are not implemented.
 - Replace the unreliable Streamlit browser/session delivery boundary in reversible stages while preserving the validated translation engines and product behavior.
 - Pause deterministic translation-performance work until the migration is stable.
+
+Phase 1 Translation Service Extraction is complete. Commit `8cd522c696b45ba2025e41588e13ea599232c602` added the framework-neutral `pattern_translator/translation_service.py` application-service boundary and `translate_image()`. Streamlit continues to own UI, session state, request lifecycle, result handoff, rendering, and downloads. OCR, deterministic translation, Luna fallback, overlay/output behavior, and engine algorithms were preserved.
+
+Final validation passed: `210 / 210` automated tests, `220 / 220` deterministic corpus parity, and local iPhone Human UAT. Human UAT confirmed deterministic translation, Whole Pattern and Select Area workflows, result rendering, and PNG/TXT output delivery. Luna was not exercised locally because the server lacked the required fallback/API-key environment configuration; this was an environment/setup issue, not a Phase 1 regression. The visible stale `OCR Running` indicators after completed translation were confirmed as pre-existing same-run Streamlit rendering behavior, not fixed in Phase 1 and not a Phase 1 extraction regression. Phase 1 received final Codex approval for Human UAT before completion.
+
+Local `main` and `origin/main` were synchronized at the Phase 1 commit before this documentation update. Phase 1 Railway deployment is intentionally deferred; production remains on the pre-Phase-1 baseline. The existing Streamlit WebSocket/AppSession reliability issue remains unresolved and is a reason to continue the staged Streamlit removal.
+
+Immediate next priority: Phase 2 — minimal FastAPI HTTP boundary over the existing `translate_image()` service. Keep Phase 2 narrow: add only the smallest HTTP/API boundary needed to invoke the existing service independently of Streamlit; preserve current translation behavior; do not migrate the browser UI yet; do not modify Stitch Translator; do not perform Railway migration/deployment; do not resume translation-performance optimization; and do not add Redis, queues, databases, or other infrastructure unless later proven necessary.
 
 Roadmap decisions:
 
@@ -92,8 +100,8 @@ The terminology cache optimization `f7a48a076dbda066577e6117752dd859091cc760` re
 
 The approved direction is staged removal of Streamlit from Pattern Translator only:
 
-1. Extract one framework-neutral `translate_image()` application service; the existing Streamlit app continues to call it.
-2. Add a minimal FastAPI API that calls the same service.
+1. Extract one framework-neutral `translate_image()` application service; the existing Streamlit app continues to call it. **Complete:** commit `8cd522c696b45ba2025e41588e13ea599232c602`.
+2. Add a minimal FastAPI API that calls the same service. **Current Phase 2 priority.**
 3. Migrate the browser UI, uploader, cropper, results, and downloads to the API.
 4. Cut the existing Pattern Translator Railway service over to FastAPI/Uvicorn without adding another service.
 5. Complete Production Human UAT, then retire Streamlit lifecycle code only after parity is proven.
@@ -123,14 +131,14 @@ The Portal Skeleton is functionally complete and frozen. It is an independent As
 
 ### Next Priority
 
-1. **First Streamlit-removal unit.** Extract a framework-neutral `translate_image()` service from current orchestration and make the existing Streamlit app call it. Preserve byte/semantic output parity and all boundaries listed above. Do not add the FastAPI route or migrate UI in this first unit.
+1. **Phase 2 minimal HTTP boundary.** Add the smallest FastAPI boundary over the existing `translate_image()` service. Preserve byte/semantic output parity and all current boundaries. Do not migrate the browser UI, modify Stitch Translator, deploy or migrate Railway, resume performance optimization, or add infrastructure.
 
 **Paused performance evidence:** the deterministic anomaly measured approximately `41.06s` total / `36.00s` translation with `0.89s` Paddle inference versus `6.79s` total / `5.70s` translation with `0.88s` Paddle inference after changing target. The controlled cache fix materially improved local deterministic timing and preserved output, but production interaction symptoms persisted after its revert. Resume the audit only after migration stability; dictionary size is not proven as the cause.
 
 ### Before Soft Launch
 
 2. **Deterministic translation / dictionary simplification.** After the performance audit, review whether ordinary semantic entries such as Body and Head, historical rules added for weaker earlier LLM behavior, redundant regex/parser work, redundant semantic-context processing, and low-value dictionary entries remain necessary with the current Luna route. Protect translation quality; do not remove entries merely to reduce row count.
-3. **OCR progress/status UI.** Correct the presentation lifecycle where a completed Translation Result can coexist with a visible `OCR Running...` status even though runtime diagnostics show OCR has finished.
+3. **OCR progress/status UI.** A completed Translation Result can coexist with a visible `OCR Running...` status because of pre-existing same-run Streamlit rendering behavior. This was investigated during Phase 1 UAT and is not a Phase 1 extraction regression; defer any UI change to a separately scoped task.
 4. **Warning / popup / status-message UX audit.** Review the full page and reduce warnings, popups, success/status notices, OCR notices, settings messages, diagnostic/download notices, AI disclaimers, and repeated AI references unless they materially affect the user's next action. Present the product primarily as a crochet Pattern Translator.
 5. **Image Quality traffic-light calibration.** Reassess red/yellow/green thresholds, Good/acceptable/poor classification, warning severity, crop recommendations, and when users should simply continue, using actual OCR outcomes rather than theoretical strictness.
 6. **Overlay numbered remark mapping.** When long overlay text is replaced by `[1]`, `[2]`, or `[3]`, show the same marker beside the corresponding Line-to-line Translation entry so the PNG marker has an immediate reference.
@@ -401,10 +409,10 @@ Other non-blocking polish already recorded:
 
 Current platform sequence:
 
-1. Extract and validate the framework-neutral `translate_image()` service while Streamlit remains the caller.
+1. **Complete:** Extract and validate the framework-neutral `translate_image()` service while Streamlit remains the caller.
 2. Add and validate the minimal FastAPI boundary using that service.
 3. Migrate the Pattern browser UI and components, then cut the existing Railway service to FastAPI/Uvicorn only after parity evidence.
-4. Resume translation-performance work and remaining product/UI items after migration stability.
+4. Resume translation-performance work and remaining product/UI items after migration stability. Translation-performance / terminology-cache optimization remains paused.
 5. Run final product-wide production UAT and proceed to Soft Launch while preserving the completed RC54 analytics and custom-domain baselines.
 
 Additional deferred work:
