@@ -329,6 +329,8 @@ CSV_TERM_CACHE_STATS = {
     "last_terms_returned": 0,
 }
 
+DERIVED_TERMINOLOGY_CACHE_ATTR = "derived_terminology_cache"
+
 
 def csv_term_cache_key(df: pd.DataFrame) -> Tuple[object, ...]:
     try:
@@ -343,6 +345,95 @@ def csv_term_cache_key(df: pd.DataFrame) -> Tuple[object, ...]:
         tuple(int(v) for v in df.shape),
         content_hash,
     )
+
+
+def prepare_derived_terminology_cache(df: pd.DataFrame) -> Dict[str, object]:
+    """Validate and prepare immutable terminology data once per translation run."""
+    key = csv_term_cache_key(df)
+    existing = df.attrs.get(DERIVED_TERMINOLOGY_CACHE_ATTR)
+    if isinstance(existing, dict) and existing.get("content_key") == key:
+        return existing
+
+    key_text = hashlib.md5(repr(key).encode("utf-8")).hexdigest()
+    CSV_TERM_CACHE_STATS["last_key"] = key_text
+    if key in CSV_TERM_CACHE:
+        CSV_TERM_CACHE_STATS["hits"] += 1
+        terms = CSV_TERM_CACHE[key]
+    else:
+        CSV_TERM_CACHE_STATS["misses"] += 1
+        CSV_TERM_CACHE_STATS["generation_count"] += 1
+        terms = tuple(generate_all_csv_terms_uncached(df))
+        CSV_TERM_CACHE[key] = terms
+
+    cache: Dict[str, object] = {
+        "content_key": key,
+        "searchable_terms": terms,
+        "normalized_term_records": tuple((term, norm_text(term)) for term in terms),
+        "replacement_term_records": {},
+        "target_terms": {},
+    }
+    df.attrs[DERIVED_TERMINOLOGY_CACHE_ATTR] = cache
+    CSV_TERM_CACHE_STATS["last_terms_returned"] = len(terms)
+    return cache
+
+
+def get_normalized_term_records(
+    df: pd.DataFrame, extra_terms: Tuple[str, ...] = ()
+) -> Tuple[Tuple[str, str], ...]:
+    """Return ordered, de-duplicated terms and normalized keys from prepared data."""
+    get_all_csv_terms(df)
+    cache = df.attrs[DERIVED_TERMINOLOGY_CACHE_ATTR]
+    records_cache = cache["replacement_term_records"]
+    if extra_terms in records_cache:
+        return records_cache[extra_terms]
+
+    seen = set()
+    records = []
+    for term, key in cache["normalized_term_records"]:
+        if key not in seen:
+            seen.add(key)
+            records.append((term, key))
+    for term in extra_terms:
+        key = norm_text(term)
+        if key not in seen:
+            seen.add(key)
+            records.append((term, key))
+    records.sort(key=lambda item: len(item[1]), reverse=True)
+    result = tuple(records)
+    records_cache[extra_terms] = result
+    return result
+
+
+def get_target_terms(
+    df: pd.DataFrame, output_mode: str, extra_terms: Tuple[str, ...] = ()
+) -> List[str]:
+    """Return target-language protection terms, built once per output language."""
+    cache = df.attrs.get(DERIVED_TERMINOLOGY_CACHE_ATTR)
+    if not isinstance(cache, dict):
+        cache = prepare_derived_terminology_cache(df)
+    target_cache = cache["target_terms"]
+    cache_key = (output_mode, extra_terms)
+    if cache_key in target_cache:
+        return list(target_cache[cache_key])
+
+    terms: List[str] = []
+    active = get_active_search_df(df)
+    for column in get_source_columns(output_mode):
+        if column not in active.columns:
+            continue
+        for value in active[column].fillna(""):
+            raw = str(value).strip()
+            if raw:
+                terms.append(to_simplified(raw) if output_mode == "Simplified Chinese" else raw)
+            aliases = split_aliases(value)
+            if output_mode == "Simplified Chinese":
+                terms.extend(to_simplified(alias) for alias in aliases)
+            else:
+                terms.extend(aliases)
+    terms.extend(extra_terms)
+    result = tuple(sorted(set(terms), key=len, reverse=True))
+    target_cache[cache_key] = result
+    return list(result)
 
 
 def generate_all_csv_terms_uncached(df: pd.DataFrame) -> List[str]:
@@ -382,23 +473,15 @@ def get_all_csv_terms(df: pd.DataFrame) -> List[str]:
     _profile_count("get_all_csv_terms calls")
     profile_start = time.perf_counter() if _profile_active() else None
     try:
-        key = csv_term_cache_key(df)
-        key_text = hashlib.md5(repr(key).encode("utf-8")).hexdigest()
-        CSV_TERM_CACHE_STATS["last_key"] = key_text
-        if key in CSV_TERM_CACHE:
-            CSV_TERM_CACHE_STATS["hits"] += 1
-            CSV_TERM_CACHE_STATS["served_from_cache_count"] += 1
-            terms = list(CSV_TERM_CACHE[key])
-            CSV_TERM_CACHE_STATS["last_terms_returned"] = len(terms)
-            _profile_count("get_all_csv_terms served from cache")
-            _profile_count("protected terms returned from cache", len(terms))
-            return terms
-        CSV_TERM_CACHE_STATS["misses"] += 1
-        CSV_TERM_CACHE_STATS["generation_count"] += 1
-        terms = generate_all_csv_terms_uncached(df)
-        CSV_TERM_CACHE[key] = tuple(terms)
+        cache = df.attrs.get(DERIVED_TERMINOLOGY_CACHE_ATTR)
+        if not isinstance(cache, dict):
+            cache = prepare_derived_terminology_cache(df)
+        terms = list(cache["searchable_terms"])
+        CSV_TERM_CACHE_STATS["served_from_cache_count"] += 1
         CSV_TERM_CACHE_STATS["last_terms_returned"] = len(terms)
-        return list(terms)
+        _profile_count("get_all_csv_terms served from cache")
+        _profile_count("protected terms returned from cache", len(terms))
+        return terms
     except Exception as e:
         CSV_TERM_CACHE_STATS["last_error"] = str(e)
         terms = generate_all_csv_terms_uncached(df)
@@ -553,20 +636,12 @@ def replace_csv_terms_in_line(
     _profile_count("regex passes estimated")
     out = re.sub(r"(?<![A-Za-z0-9])linc(?![A-Za-z0-9])", lambda m: term_number_repl(type('M', (), {'groups': lambda self: ('inc','1')})()), out, flags=re.I)
 
-    protected_terms = get_all_csv_terms(df)
-    protected_terms.extend([
+    protected_terms = get_normalized_term_records(df, (
         "slst", "sl st", "magic ring", "magic circle", "adjustable ring",
         "stitch", "stitches", "sts", "turn", "fasten off", "weave in ends",
-    ])
-    seen_terms = set()
-    protected_terms = sorted(
-        [t for t in protected_terms if not (norm_text(t) in seen_terms or seen_terms.add(norm_text(t)))],
-        key=lambda x: len(norm_text(x)),
-        reverse=True,
-    )
-    for term in protected_terms:
+    ))
+    for term, key in protected_terms:
         _profile_count("protected terms looped")
-        key = norm_text(term)
         if not key:
             continue
         if re.fullmatch(r"[A-Za-z]", key):

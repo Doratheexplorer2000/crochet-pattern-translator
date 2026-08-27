@@ -178,6 +178,7 @@ def build_ocr_line_translations(
     rows = merge_ocr_boxes_into_visual_lines(ocr_rows)
     rows["confidence"] = pd.to_numeric(rows.get("confidence", 0), errors="coerce").fillna(0)
     rows = rows.sort_values(["min_y", "min_x"]).reset_index(drop=True)
+    terminology.prepare_derived_terminology_cache(df)
     _profile_count("merged OCR lines", len(rows))
     deterministic_start = time.perf_counter()
     if diagnostic_logger is not None:
@@ -218,6 +219,7 @@ def build_ocr_line_translations(
         diagnostic_logger("semantic_context_begin")
     if llm_provider is not None:
         llm_index, llm_df = llm_fallback.structural_terminology_view(index, df)
+        terminology.prepare_derived_terminology_cache(llm_df)
         structural_inputs = [
             line_translation.translate_ocr_line(cleaned, llm_index, llm_df, output_mode)
             for _row, cleaned, _translated in prepared
