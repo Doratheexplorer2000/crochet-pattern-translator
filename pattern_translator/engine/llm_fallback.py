@@ -187,7 +187,22 @@ def _placeholder_name(index: int) -> str:
 def _target_terms(df: pd.DataFrame, output_mode: str) -> List[str]:
     if df is None or df.empty:
         return []
-    return terminology.get_target_terms(df, output_mode, tuple(_KNOWN_ABBREVIATIONS))
+    terms: List[str] = []
+    active = terminology.get_active_search_df(df)
+    for column in terminology.get_source_columns(output_mode):
+        if column not in active.columns:
+            continue
+        for value in active[column].fillna(""):
+            raw = str(value).strip()
+            if raw:
+                terms.append(terminology.to_simplified(raw) if output_mode == "Simplified Chinese" else raw)
+            aliases = terminology.split_aliases(value)
+            if output_mode == "Simplified Chinese":
+                terms.extend(terminology.to_simplified(alias) for alias in aliases)
+            else:
+                terms.extend(aliases)
+    terms.extend(_KNOWN_ABBREVIATIONS)
+    return sorted(set(terms), key=len, reverse=True)
 
 
 def structural_terminology_view(
@@ -198,7 +213,6 @@ def structural_terminology_view(
         return dict(index), df
     categories = df["category"].fillna("").astype(str).map(terminology.norm_text)
     structural_df = df[categories != "pattern_instruction"].copy()
-    structural_df.attrs.pop(terminology.DERIVED_TERMINOLOGY_CACHE_ATTR, None)
     retained_rows = set(structural_df.index)
     structural_index = {
         term: row_index for term, row_index in index.items() if row_index in retained_rows
