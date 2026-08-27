@@ -102,10 +102,35 @@ The Portal Skeleton is functionally complete and frozen. It is an independent As
 
 ## Known Issues
 
-- Translation performance is the next priority. On the same Whole Pattern image and OCR workload, Traditional Chinese to English US measured approximately `41.06s` total / `36.00s` translation, while the same image after changing target measured approximately `6.79s` total / `5.70s` translation; Paddle inference remained approximately `0.88s`. The slow run recorded about `35,502` dictionary lookups, `202k` `norm_text()` calls, and repeated normalized lookup-index builds/cache misses for 21 OCR lines and 108 CSV rows. Audit the cause before changing dictionaries or architecture.
-- OCR status can remain visually stuck at `OCR Running...` after results render even though diagnostics show OCR completed. Defer until after the performance investigation unless execution is affected.
-- Diagnostic Report preparation and download currently require two actions because of Streamlit's download/rerun model. This is functional and non-blocking.
-- Initial upload-preview delay and an occasionally initially invisible Select Area cropper remain observation items only; do not make speculative changes without reproducible evidence.
+### Next Priority
+
+1. **Translation Performance Audit.** On the same Whole Pattern image and essentially the same OCR workload, Traditional Chinese to English US measured approximately `41.06s` total / `36.00s` translation / `0.89s` Paddle inference. After changing target language, the same image measured approximately `6.79s` total / `5.70s` translation / `0.88s` Paddle inference. The slow run recorded 21 OCR text lines, 108 dictionary rows, about `35,502` dictionary lookups, more than `202,000` `norm_text()` calls, and repeated normalized lookup-index builds/cache misses. OCR is not the leading cause in this evidence. Audit repeated lookups and normalization, index rebuilding and cache reuse, target-language-dependent processing, parser/regex workload, semantic-context preparation, and other duplicated deterministic work before changing dictionary coverage or translation architecture. Dictionary size is not yet proven as the cause.
+
+### Before Soft Launch
+
+2. **Deterministic translation / dictionary simplification.** After the performance audit, review whether ordinary semantic entries such as Body and Head, historical rules added for weaker earlier LLM behavior, redundant regex/parser work, redundant semantic-context processing, and low-value dictionary entries remain necessary with the current Luna route. Protect translation quality; do not remove entries merely to reduce row count.
+3. **OCR progress/status UI.** Correct the presentation lifecycle where a completed Translation Result can coexist with a visible `OCR Running...` status even though runtime diagnostics show OCR has finished.
+4. **Warning / popup / status-message UX audit.** Review the full page and reduce warnings, popups, success/status notices, OCR notices, settings messages, diagnostic/download notices, AI disclaimers, and repeated AI references unless they materially affect the user's next action. Present the product primarily as a crochet Pattern Translator.
+5. **Image Quality traffic-light calibration.** Reassess red/yellow/green thresholds, Good/acceptable/poor classification, warning severity, crop recommendations, and when users should simply continue, using actual OCR outcomes rather than theoretical strictness.
+6. **Overlay numbered remark mapping.** When long overlay text is replaced by `[1]`, `[2]`, or `[3]`, show the same marker beside the corresponding Line-to-line Translation entry so the PNG marker has an immediate reference.
+7. **Line-to-line Translation must be read-only.** Keep output readable and preferably selectable/copyable, but not editable. The UI must not imply that manual edits update overlays, downloads, result state, or diagnostics.
+8. **Language placeholder localization.** Preserve explicit no-selection behavior and localize the placeholder as `Choose an option`, `請選擇`, `请选择`, and `選択してください` for English, Traditional Chinese, Simplified Chinese, and Japanese. Do not restore automatic interface-language selection.
+9. **Production Streamlit chrome/top-bar verification.** Before Soft Launch, verify whether unwanted production chrome, top bar, menu, or development controls remain visible and minimize them using the smallest safe supported approach.
+
+### Enhancements / Reproduce Before Fixing
+
+10. **Diagnostic Report UX.** The current safe prepare/generate then download flow is functional. Retain the desired one-action Download Diagnostic Report UX only if it can be achieved without returning report generation to the translation critical path.
+11. **Initial upload-preview delay.** Physical-iPhone UAT occasionally shows several seconds before Pattern Preview appears. Reproduce and measure before changing uploader architecture.
+12. **Select Area cropper first-render issue.** Physical-iPhone UAT previously showed server-side cropper execution without a stable visible cropper until another full rerender. Reproduce after the canonical-state fix before modifying or replacing the cropper.
+
+### Post-Launch / Scale
+
+13. **Genuine Safari/new-AppSession recovery.** Process/session-local recovery cannot guarantee state across a genuinely new Streamlit AppSession, Safari page-process destruction or reload, container/process restart, or handoff expiry. Do not solve pre-launch without evidence of material user impact.
+14. **OCR concurrency/scaling.** The isolated serialized PaddleOCR worker is appropriate for current traffic and has passed reliability testing. At materially higher concurrency, consider a small fixed worker pool or separate OCR service only when traffic justifies it.
+15. **Analytics / Feedback workflow review.** Retain deferred Pattern Translator analytics-schema review, investigation of system/non-user analytics activity, Feedback Form workflow/copy review, and later reuse of appropriate analytics/feedback design for Stitch Translator.
+
+Other non-blocking polish already recorded:
+
 - Android overlay font may appear relatively small.
 - Version number is not currently shown in the UI.
 - Minor overlay text box alignment refinement is deferred.
@@ -356,13 +381,13 @@ The Portal Skeleton is functionally complete and frozen. It is an independent As
 Current platform sequence:
 
 1. Perform a focused deterministic translation-performance audit using the measured slow/fast Whole Pattern evidence.
-2. Address only evidenced Soft Launch blockers; defer the non-blocking status, Diagnostic Report, preview-delay, and cropper observations unless their priority changes.
-3. Run final product-wide production smoke UAT.
-4. Proceed to Soft Launch while preserving the completed RC54 analytics and custom-domain baselines.
+2. Implement only performance changes supported by that audit.
+3. Address the remaining Before Soft Launch product/UI work in user-impact order; reproduce observational issues before changing them.
+4. Run final product-wide production smoke UAT.
+5. Proceed to Soft Launch while preserving the completed RC54 analytics and custom-domain baselines.
 
 Additional deferred work:
 
-- Improve discoverability of editable line-by-line translation before TXT download. The feature already exists, but users may not realise the translation text can be edited before downloading. Consider clearer UI guidance in a future UX enhancement; implementation is not scheduled now.
 - Review the Google Feedback Form questions and workflow.
 
 ### RC23b Hotfix 1
