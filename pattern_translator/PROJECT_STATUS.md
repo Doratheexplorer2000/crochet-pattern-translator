@@ -59,7 +59,7 @@ stitches_1_8e.csv
 
 ## Current Priorities
 
-Current Phase: Phase 2 complete — minimal FastAPI HTTP boundary over the existing `translate_image()` service; Phase 1 is complete and production baseline preserved
+Current Phase: Phase 3A browser UI migration is complete and approved. The approved local baseline is `6c8ab97b0731daa6cd61a4f919aa71cabc856d3b` (`Phase 3A: add FastAPI browser UI`). Phase 3B1 Diagnostic Report parity is next.
 
 Purpose:
 
@@ -77,9 +77,11 @@ Final validation passed: `210 / 210` automated tests, `220 / 220` deterministic 
 
 Local `main` and `origin/main` were synchronized at the Phase 1 commit before this documentation update. Phase 1 Railway deployment is intentionally deferred; production remains on the pre-Phase-1 baseline. The existing Streamlit WebSocket/AppSession reliability issue remains unresolved and is a reason to continue the staged Streamlit removal.
 
-Phase 2 is complete. The minimal FastAPI boundary invokes the existing framework-neutral `translate_image()` service through `POST /api/v1/translate`, with Whole Pattern and Select Area support, multipart image validation, crop validation, downscale parity, JSON translation output, and base64 PNG overlay output. Validation passed with 13 API tests, 30 translation/OCR regression tests, and 223 full-suite tests. Codex independent review returned **PASS WITH NON-BLOCKING NOTES**. Human UAT using the clean `regression/test_pattern_library/Pattern_001_Alien/Pattern_001_Alien_Source.jpeg` passed for both Whole Pattern and Select Area. Whole Pattern retained known non-blocking multi-column OCR/line-merging bleed around the eye-instruction area; Select Area may capture partial neighboring text at crop boundaries. These are existing OCR/layout limitations, not Phase 2 FastAPI regressions. No Railway deployment was performed and Phase 3 has not started.
+Phase 2 is complete. The minimal FastAPI boundary invokes the existing framework-neutral `translate_image()` service through `POST /api/v1/translate`, with Whole Pattern and Select Area support, multipart image validation, crop validation, downscale parity, JSON translation output, and base64 PNG overlay output. Validation passed with 13 API tests, 30 translation/OCR regression tests, and 223 full-suite tests. Codex independent review returned **PASS WITH NON-BLOCKING NOTES**.
 
-Immediate next priority: Phase 3 browser/UI migration planning. Do not start implementation until separately scoped and approved. Preserve the current Streamlit UI and validated translation behavior; do not modify Stitch Translator, deploy or migrate Railway, resume translation-performance optimization, or add infrastructure unless later proven necessary.
+Phase 3A delivered the same-origin FastAPI-served browser UI: Whole Pattern; Select Area cropper and Precision Pad; original-image preview; loading/error recovery; overlay and line-by-line results; PNG/TXT downloads; four-language browser localization; and approved visual/typography parity. Desktop Chrome, iPhone Safari, and Android Chrome Human UAT all passed. Final validation passed `229 / 229` tests. Streamlit production has not been replaced, and no Phase 3A push or deployment occurred.
+
+Deliberate Phase 3A deferrals: Diagnostic Report; image-quality assessment, gating, and force-run; and the download-completion destination popup. The popup absence is accepted as non-blocking/deferred. Image-quality work, gating, and force-run are separate later scope and must not be bundled into Phase 3B1.
 
 Roadmap decisions:
 
@@ -103,12 +105,14 @@ The terminology cache optimization `f7a48a076dbda066577e6117752dd859091cc760` re
 The approved direction is staged removal of Streamlit from Pattern Translator only:
 
 1. Extract one framework-neutral `translate_image()` application service; the existing Streamlit app continues to call it. **Complete:** commit `8cd522c696b45ba2025e41588e13ea599232c602`.
-2. Add a minimal FastAPI API that calls the same service. **Current Phase 2 priority.**
-3. Migrate the browser UI, uploader, cropper, results, and downloads to the API.
-4. Cut the existing Pattern Translator Railway service over to FastAPI/Uvicorn without adding another service.
-5. Complete Production Human UAT, then retire Streamlit lifecycle code only after parity is proven.
+2. Add a minimal FastAPI API that calls the same service. **Complete:** Phase 2.
+3. Migrate the browser UI, uploader, cropper, results, and downloads to the API. **Complete:** Phase 3A, approved local commit `6c8ab97b0731daa6cd61a4f919aa71cabc856d3b`.
+4. **Next:** Phase 3B1 Diagnostic Report parity.
+5. **Later, separate scope:** Phase 3B2 image-quality assessment, gating, and force-run parity.
+6. Cut the existing Pattern Translator Railway service over to FastAPI/Uvicorn without adding another service. **Not started; requires explicit approval.**
+7. Complete Production Human UAT, then retire Streamlit lifecycle code only after parity is proven.
 
-The first implementation unit is service extraction only. It must preserve the isolated OCR worker, deterministic terminology/parser behavior, Luna routing and validation, translation scope, Select Area crop semantics, overlays, PNG/TXT/Diagnostic outputs, analytics events, privacy boundary, safe diagnostics, and current Railway topology. It does not include a new UI, API deployment, performance optimization, or product enhancement.
+Phase 3B1 must begin with Goal, Success Criteria, and Out of Scope, followed by narrow architecture/forensic inspection before implementation. Diagnostic Report was deliberately deferred from Phase 3A; its absence is not a Phase 3A regression. Do not include the separately deferred image-quality assessment, gating, or force-run work in Phase 3B1.
 
 Implementation workflow for this migration: the Product Owner and ChatGPT define scope and acceptance criteria; Cursor implements and validates the approved unit locally without pushing; Codex independently reviews the exact diff and evidence, runs release gates appropriate to risk, and owns commit/push/deployment only after approval.
 
@@ -133,7 +137,7 @@ The Portal Skeleton is functionally complete and frozen. It is an independent As
 
 ### Next Priority
 
-1. **Phase 3 browser/UI migration.** The Phase 2 HTTP boundary is complete and locally validated. Plan the browser uploader, cropper, results, and download migration separately, preserving the existing service and Streamlit behavior until parity is proven. No Railway migration/deployment or infrastructure expansion is approved by Phase 2 closeout.
+1. **Phase 3B1 Diagnostic Report parity.** Begin with Goal, Success Criteria, and Out of Scope, then perform narrow architecture/forensic inspection before implementation. Diagnostic Report was deliberately deferred from Phase 3A, so its absence is not a Phase 3A regression. Do not include image-quality assessment, gating, or force-run; those are deferred Phase 3B2 work.
 
 **Paused performance evidence:** the deterministic anomaly measured approximately `41.06s` total / `36.00s` translation with `0.89s` Paddle inference versus `6.79s` total / `5.70s` translation with `0.88s` Paddle inference after changing target. The controlled cache fix materially improved local deterministic timing and preserved output, but production interaction symptoms persisted after its revert. Resume the audit only after migration stability; dictionary size is not proven as the cause.
 
@@ -168,6 +172,14 @@ Other non-blocking polish already recorded:
 - JellyCat 元寶 overlay placement has a minor cosmetic placement difference. Translation correctness, anchor position, readability, and functionality are unaffected; this is future overlay placement tuning rather than an RC47 regression.
 
 ## Current Release Notes
+
+### Phase 3A FastAPI browser UI migration (complete; approved)
+
+- Approved local baseline: `6c8ab97b0731daa6cd61a4f919aa71cabc856d3b` (`Phase 3A: add FastAPI browser UI`).
+- Delivered a same-origin FastAPI-served browser UI with Whole Pattern; Select Area cropper and Precision Pad; original-image preview; loading/error recovery; overlay and line-by-line results; PNG/TXT downloads; four-language browser localization; and approved visual/typography parity.
+- Human UAT passed on Desktop Chrome, iPhone Safari, and Android Chrome. Final automated validation passed `229 / 229` tests.
+- Diagnostic Report, image-quality assessment/gating/force-run, and the download-completion destination popup were deliberately deferred. The popup absence is accepted as non-blocking/deferred; image-quality work is separate Phase 3B2 scope, not Phase 3B1.
+- Release handling: committed locally only; no Phase 3A push or deployment occurred. Streamlit remains the production service, and Railway cutover to FastAPI/Uvicorn has not started and requires explicit approval.
 
 ### Phase 2 FastAPI HTTP boundary (complete; Human UAT PASS)
 
@@ -420,10 +432,13 @@ Other non-blocking polish already recorded:
 Current platform sequence:
 
 1. **Complete:** Extract and validate the framework-neutral `translate_image()` service while Streamlit remains the caller.
-2. Add and validate the minimal FastAPI boundary using that service.
-3. Migrate the Pattern browser UI and components, then cut the existing Railway service to FastAPI/Uvicorn only after parity evidence.
-4. Resume translation-performance work and remaining product/UI items after migration stability. Translation-performance / terminology-cache optimization remains paused.
-5. Run final product-wide production UAT and proceed to Soft Launch while preserving the completed RC54 analytics and custom-domain baselines.
+2. **Complete:** Add and validate the minimal FastAPI boundary using that service.
+3. **Complete:** Migrate the Pattern browser UI and components in Phase 3A (approved local commit `6c8ab97b0731daa6cd61a4f919aa71cabc856d3b`).
+4. **Next:** Phase 3B1 Diagnostic Report parity, beginning with Goal, Success Criteria, Out of Scope, and narrow architecture/forensic inspection.
+5. **Later, separate scope:** Phase 3B2 image-quality assessment, gating, and force-run parity; do not combine it with Phase 3B1.
+6. **Not started:** Cut the existing Railway service to FastAPI/Uvicorn only after explicit approval and parity evidence. Streamlit production has not yet been replaced.
+7. Resume translation-performance work and remaining product/UI items after migration stability. Translation-performance / terminology-cache optimization remains paused.
+8. Run final product-wide production UAT and proceed to Soft Launch while preserving the completed RC54 analytics and custom-domain baselines.
 
 Additional deferred work:
 
