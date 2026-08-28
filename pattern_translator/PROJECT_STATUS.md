@@ -1,6 +1,6 @@
 # Crochet Pattern Translator Project Status
 
-Last updated: 2026-08-27
+Last updated: 2026-08-28
 
 ## Current Version
 
@@ -59,7 +59,7 @@ stitches_1_8e.csv
 
 ## Current Priorities
 
-Current Phase: Phase 2 — minimal FastAPI HTTP boundary over the existing `translate_image()` service; Phase 1 is complete and production baseline preserved
+Current Phase: Phase 2 complete — minimal FastAPI HTTP boundary over the existing `translate_image()` service; Phase 1 is complete and production baseline preserved
 
 Purpose:
 
@@ -77,7 +77,9 @@ Final validation passed: `210 / 210` automated tests, `220 / 220` deterministic 
 
 Local `main` and `origin/main` were synchronized at the Phase 1 commit before this documentation update. Phase 1 Railway deployment is intentionally deferred; production remains on the pre-Phase-1 baseline. The existing Streamlit WebSocket/AppSession reliability issue remains unresolved and is a reason to continue the staged Streamlit removal.
 
-Immediate next priority: Phase 2 — minimal FastAPI HTTP boundary over the existing `translate_image()` service. Keep Phase 2 narrow: add only the smallest HTTP/API boundary needed to invoke the existing service independently of Streamlit; preserve current translation behavior; do not migrate the browser UI yet; do not modify Stitch Translator; do not perform Railway migration/deployment; do not resume translation-performance optimization; and do not add Redis, queues, databases, or other infrastructure unless later proven necessary.
+Phase 2 is complete. The minimal FastAPI boundary invokes the existing framework-neutral `translate_image()` service through `POST /api/v1/translate`, with Whole Pattern and Select Area support, multipart image validation, crop validation, downscale parity, JSON translation output, and base64 PNG overlay output. Validation passed with 13 API tests, 30 translation/OCR regression tests, and 223 full-suite tests. Codex independent review returned **PASS WITH NON-BLOCKING NOTES**. Human UAT using the clean `regression/test_pattern_library/Pattern_001_Alien/Pattern_001_Alien_Source.jpeg` passed for both Whole Pattern and Select Area. Whole Pattern retained known non-blocking multi-column OCR/line-merging bleed around the eye-instruction area; Select Area may capture partial neighboring text at crop boundaries. These are existing OCR/layout limitations, not Phase 2 FastAPI regressions. No Railway deployment was performed and Phase 3 has not started.
+
+Immediate next priority: Phase 3 browser/UI migration planning. Do not start implementation until separately scoped and approved. Preserve the current Streamlit UI and validated translation behavior; do not modify Stitch Translator, deploy or migrate Railway, resume translation-performance optimization, or add infrastructure unless later proven necessary.
 
 Roadmap decisions:
 
@@ -131,7 +133,7 @@ The Portal Skeleton is functionally complete and frozen. It is an independent As
 
 ### Next Priority
 
-1. **Phase 2 minimal HTTP boundary.** Add the smallest FastAPI boundary over the existing `translate_image()` service. Preserve byte/semantic output parity and all current boundaries. Do not migrate the browser UI, modify Stitch Translator, deploy or migrate Railway, resume performance optimization, or add infrastructure.
+1. **Phase 3 browser/UI migration.** The Phase 2 HTTP boundary is complete and locally validated. Plan the browser uploader, cropper, results, and download migration separately, preserving the existing service and Streamlit behavior until parity is proven. No Railway migration/deployment or infrastructure expansion is approved by Phase 2 closeout.
 
 **Paused performance evidence:** the deterministic anomaly measured approximately `41.06s` total / `36.00s` translation with `0.89s` Paddle inference versus `6.79s` total / `5.70s` translation with `0.88s` Paddle inference after changing target. The controlled cache fix materially improved local deterministic timing and preserved output, but production interaction symptoms persisted after its revert. Resume the audit only after migration stability; dictionary size is not proven as the cause.
 
@@ -166,6 +168,14 @@ Other non-blocking polish already recorded:
 - JellyCat 元寶 overlay placement has a minor cosmetic placement difference. Translation correctness, anchor position, readability, and functionality are unaffected; this is future overlay placement tuning rather than an RC47 regression.
 
 ## Current Release Notes
+
+### Phase 2 FastAPI HTTP boundary (complete; Human UAT PASS)
+
+- Added `pattern_translator/api.py` with `POST /api/v1/translate`, reusing the existing `translate_image()` service without changing translation, OCR, overlay, Streamlit, Stitch Translator, or Railway behavior.
+- Supports validated multipart JPG/JPEG/PNG/WebP input, Whole Pattern and Select Area requests, original-coordinate crop boxes, the existing 25 MB ceiling, and JSON projection of translation text plus base64 PNG overlay output.
+- Automated validation passed: 13 API tests, 30 translation/OCR regression tests, and 223 full-suite tests. Codex independent review returned **PASS WITH NON-BLOCKING NOTES**.
+- Human UAT passed using the clean Pattern 001 source for Whole Pattern and Select Area. Known non-blocking observations are limited to pre-existing multi-column OCR/line-merging bleed, minor label offsets near the eye-instruction area, and partial neighboring text at Select Area crop boundaries.
+- Release handling: committed locally on `main`; no Railway deployment, push, or Phase 3 implementation occurred.
 
 ### Canonical translation-state ownership (production complete; Human UAT PASS)
 

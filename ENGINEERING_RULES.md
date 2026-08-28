@@ -422,3 +422,13 @@ The minimum Cursor handoff is:
 - explicit confirmation that no commit, push, deployment, or configuration change occurred unless authorized.
 
 Codex should review the supplied diff and evidence before rereading broad project history. Repeat focused release gates independently; repeat the full suite or expensive benchmarks only when risk, changed scope, inconsistent evidence, or explicit release requirements justify it. This division reduces duplicated work without weakening independent review or production safety.
+
+### Model cost and handoff metadata
+
+For every Codex or Cursor task, choose the lowest-cost model reasonably capable of completing the work correctly. Reserve higher-reasoning models for complex architecture, difficult debugging, release-critical review, or when cheaper models have failed.
+
+Future agent instructions should explicitly state:
+
+- recommended model;
+- reasoning level where applicable;
+- whether a previous Codex/Cursor handoff report should be included.
