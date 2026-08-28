@@ -4,13 +4,16 @@ from __future__ import annotations
 
 import base64
 import io
+import os
 import re
 import time
 import uuid
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from PIL import Image
 
 from pattern_translator.engine import translation_area_state as translation_area_state_engine
@@ -23,6 +26,8 @@ from pattern_translator.translation_service import (
 )
 
 app = FastAPI(title="Pattern Translator API")
+_WEB_DIRECTORY = Path(__file__).resolve().parent / "web"
+app.mount("/static", StaticFiles(directory=_WEB_DIRECTORY), name="static")
 
 _MAX_UPLOAD_BYTES = 25 * 1024 * 1024
 _SUPPORTED_PIL_FORMATS = {"JPEG", "PNG", "WEBP"}
@@ -220,6 +225,28 @@ def _serialize_success(
             "overlay_generation": timings.get("Overlay generation"),
             "total_runtime": timings.get("Total runtime"),
         },
+    }
+
+
+@app.get("/", include_in_schema=False)
+def browser_ui() -> FileResponse:
+    """Serve the local, framework-free Pattern Translator browser UI."""
+    return FileResponse(_WEB_DIRECTORY / "index.html")
+
+
+@app.get("/health", include_in_schema=False)
+def health() -> Dict[str, str]:
+    return {"status": "ok"}
+
+
+@app.get("/api/v1/browser-config", include_in_schema=False)
+def browser_config() -> Dict[str, str]:
+    """Expose only explicitly public browser configuration."""
+    return {
+        "plausible_script_url": os.getenv(
+            "PUBLIC_PLAUSIBLE_SCRIPT_URL",
+            "",
+        ).strip()
     }
 
 

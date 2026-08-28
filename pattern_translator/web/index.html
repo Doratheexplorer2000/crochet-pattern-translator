@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="/static/styles.css">
+  <title>Crochet Pattern Translator</title>
+</head>
+<body>
+  <main class="ci-page">
+    <a id="portal-link" class="back-link" href="https://crochetintelligence.com">← <span data-i18n="back"></span></a>
+    <header><p class="eyebrow" data-i18n="brand"></p><h1 data-i18n="title"></h1><p class="subtitle" data-i18n="subtitle"></p></header>
+    <section class="uploader-section" aria-label="">
+      <input id="image-input" type="file" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp" hidden>
+      <div id="drop-zone" class="upload-panel">
+        <div id="upload-empty"><p class="upload-title" data-i18n="uploadInstruction"></p><button id="choose-button" class="primary" type="button" data-i18n="choose"></button><p class="drop-hint" data-i18n="dropHint"></p></div>
+        <div id="upload-reading" hidden><span class="spinner" aria-hidden="true"></span><p data-i18n="reading"></p></div>
+        <div id="upload-selected" hidden>
+          <div class="upload-selected-copy"><p class="selected-label" data-i18n="selected"></p><p id="file-name"></p></div>
+          <div class="upload-actions"><button id="replace-button" class="secondary" type="button" data-i18n="replace"></button><button id="remove-button" class="secondary" type="button" data-i18n="remove"></button></div>
+        </div>
+      </div>
+      <p id="error" role="alert" aria-live="assertive"></p>
+    </section>
+    <figure id="original-preview" class="original-preview" hidden>
+      <img id="preview-image" alt="">
+      <figcaption data-i18n="originalImage"></figcaption>
+    </figure>
+    <section id="settings" class="settings" hidden>
+      <label><span data-i18n="source"></span><select id="source-mode"></select></label>
+      <p id="source-hint" class="field-hint" hidden></p>
+      <label><span data-i18n="target"></span><select id="output-mode"></select></label>
+      <p id="target-hint" class="field-hint" hidden></p>
+      <section class="area-controls" aria-labelledby="area-heading">
+        <h2 id="area-heading" data-i18n="area"></h2>
+        <fieldset><legend data-i18n="areaLabel"></legend><label><input type="radio" name="area-mode" value="Whole Pattern" checked> <span data-i18n="whole"></span></label><label><input type="radio" name="area-mode" value="Select Area"> <span data-i18n="select"></span></label></fieldset>
+        <p id="area-tip" class="field-hint" hidden data-i18n="areaTip"></p>
+      </section>
+    </section>
+    <section id="crop-section" class="crop-section" hidden>
+      <h2 data-i18n="select"></h2>
+      <p class="crop-help" data-i18n="cropHelp"></p>
+      <div id="workspace" class="workspace">
+        <img id="source-image" alt="" draggable="false">
+        <div id="selection" class="selection" role="group" tabindex="0">
+          <button class="edge edge-top" data-edge="top" type="button"></button><button class="edge edge-right" data-edge="right" type="button"></button><button class="edge edge-bottom" data-edge="bottom" type="button"></button><button class="edge edge-left" data-edge="left" type="button"></button>
+        </div>
+        <div id="precision-pad" class="precision-pad"><button data-direction="up" type="button">↑</button><button data-direction="left" type="button">←</button><button id="move-pad" type="button" aria-label=""><span aria-hidden="true">✥</span></button><button data-direction="right" type="button">→</button><button data-direction="down" type="button">↓</button></div>
+      </div>
+      <div class="crop-actions"><button id="start-over-button" class="secondary" type="button" data-i18n="startOver"></button><button id="reset-button" class="secondary" type="button" data-i18n="reset"></button><button id="use-area-button" class="primary" type="button" data-i18n="useArea"></button></div>
+    </section>
+    <section id="crop-confirmed" class="crop-confirmed" hidden>
+      <p class="field-hint" data-i18n="cropConfirmed"></p>
+      <img id="crop-preview" alt="">
+      <p class="preview-caption" data-i18n="cropPreviewCaption"></p>
+      <button id="edit-area-button" class="secondary" type="button" data-i18n="editArea"></button>
+    </section>
+    <section id="translation-action" class="translation-action" hidden>
+      <p id="status" class="running-status" role="status" aria-live="polite"></p>
+      <button id="translate-button" class="primary" type="button" data-i18n="translate"></button>
+    </section>
+    <section id="result-section" class="results" hidden>
+      <section class="overlay-result">
+        <h2 data-i18n="overlay"></h2>
+        <img id="overlay-image" alt="">
+        <p class="preview-caption" data-i18n="overlayCaption"></p>
+        <a id="png-download" class="secondary download" download data-i18n="downloadPng"></a>
+      </section>
+      <section class="line-result">
+        <h2 data-i18n="lines"></h2>
+        <p class="result-label" data-i18n="translatedLines"></p>
+        <div id="translation-text" class="translation-surface" tabindex="0"></div>
+        <a id="txt-download" class="secondary download" download data-i18n="downloadTxt"></a>
+      </section>
+      <section class="feedback">
+        <h2 data-i18n="feedback"></h2>
+        <p data-i18n="feedbackHelp"></p>
+        <a id="feedback-link" class="secondary download" href="https://docs.google.com/forms/d/e/1FAIpQLScoDrN0xsyOg800O8Pw7aXAa5GREQIU-RmxlmXIlBOE7y_Q_w/viewform" target="_blank" rel="noopener" data-i18n="feedbackAction"></a>
+      </section>
+    </section>
+  </main>
+  <script type="module" src="/static/app.js"></script>
+</body>
+</html>
