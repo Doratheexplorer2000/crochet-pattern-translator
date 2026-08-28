@@ -1,11 +1,12 @@
 import { displayBoxToOriginal, normalizedCropBox, readExifOrientation, resizeCropBox } from "/static/crop_coordinates.js";
 import { modeLabelFor, resolveUiLang, stringsFor } from "/static/translations.js";
-import { MODE_VALUES, adaptApiError, canTranslate, invalidateRequest, isCurrentImage, isCurrentRequest, translationFormEntries } from "/static/workflow_state.js";
+import { MODE_VALUES, adaptApiError, canTranslate, diagnosticFilename, invalidateRequest, isCurrentDiagnosticRequest, isCurrentImage, isCurrentRequest, postDiagnosticReport, translationFormEntries } from "/static/workflow_state.js";
 
 const MAX_BYTES = 25 * 1024 * 1024;
 const state = {
   file: null, source: "", target: "", area: "Whole Pattern", crop: null, imageState: "empty",
   generation: 0, loading: false, controller: null, imageUrl: null, pngUrl: null, txtUrl: null,
+  diagnosticContext: null, diagnosticLoading: false, diagnosticController: null,
   image: { orientation: 1, rawWidth: 0, rawHeight: 0, width: 1, height: 1 },
   selection: null, initialSelection: null, layout: null, controllerPosition: { left: 0, top: 0 },
   activeEdge: "right", pointer: null, repeatDelay: null, repeatTimer: null,
@@ -34,21 +35,38 @@ function updateTranslateAvailability() {
   translate.textContent = state.loading ? text.runningAction : text.translate;
 }
 
+function updateDiagnosticAvailability() {
+  const button = $("diagnostic-download");
+  button.hidden = !state.diagnosticContext;
+  button.disabled = state.diagnosticLoading || !state.diagnosticContext;
+  button.textContent = state.diagnosticLoading ? text.diagnosticLoading : text.downloadDiagnostic;
+}
+
 function invalidateResultAndRequest() {
   const controller = invalidateRequest(state);
   controller?.abort();
   state.controller = null;
+  state.diagnosticController?.abort();
+  state.diagnosticController = null;
+  state.diagnosticLoading = false;
+  state.diagnosticContext = null;
   clearObjectUrl("pngUrl");
   clearObjectUrl("txtUrl");
   $("result-section").hidden = true;
   $("overlay-image").removeAttribute("src");
+  setDiagnosticMessage();
   setMessage();
+  updateDiagnosticAvailability();
   updateTranslateAvailability();
 }
 
 function setMessage(status = "", error = "") {
   $("status").textContent = status;
   $("error").textContent = error;
+}
+
+function setDiagnosticMessage(message = "") {
+  $("diagnostic-status").textContent = message;
 }
 
 function renderWorkflow() {
@@ -96,6 +114,7 @@ function renderLanguage() {
     const edge = button.dataset.edge;
     button.setAttribute("aria-label", text[`resize${edge[0].toUpperCase()}${edge.slice(1)}`]);
   });
+  updateDiagnosticAvailability();
   updateArrowState();
 }
 
@@ -450,7 +469,61 @@ function showResult(body) {
   $("txt-download").href = state.txtUrl;
   $("txt-download").download = "crochet_translation.txt";
   $("translation-text").textContent = body.readable_translation || body.translation_txt || "";
+  state.diagnosticContext = body.diagnostic_context && typeof body.diagnostic_context === "object"
+    ? body.diagnostic_context
+    : null;
+  setDiagnosticMessage();
+  updateDiagnosticAvailability();
   $("result-section").hidden = false;
+}
+
+async function downloadDiagnostic() {
+  if (!state.diagnosticContext || state.diagnosticLoading) return;
+  const token = state.generation;
+  const diagnosticContext = state.diagnosticContext;
+  const controller = new AbortController();
+  state.diagnosticController = controller;
+  state.diagnosticLoading = true;
+  setDiagnosticMessage(text.diagnosticLoading);
+  updateDiagnosticAvailability();
+  try {
+    const response = await postDiagnosticReport(
+      fetch,
+      diagnosticContext,
+      uiLang,
+      controller.signal,
+    );
+    if (!isCurrentDiagnosticRequest(state, token, diagnosticContext)) return;
+    if (!response.ok) throw new Error("diagnostic request failed");
+    const reportText = await response.text();
+    if (!isCurrentDiagnosticRequest(state, token, diagnosticContext)) return;
+    const reportUrl = URL.createObjectURL(new Blob([reportText], { type: "text/plain;charset=utf-8" }));
+    const anchor = document.createElement("a");
+    anchor.href = reportUrl;
+    anchor.download = diagnosticFilename(response);
+    anchor.hidden = true;
+    document.body.append(anchor);
+    anchor.click();
+    anchor.remove();
+    window.setTimeout(() => URL.revokeObjectURL(reportUrl), 1000);
+    setDiagnosticMessage();
+  } catch (error) {
+    if (
+      isCurrentDiagnosticRequest(state, token, diagnosticContext)
+      && error?.name !== "AbortError"
+    ) {
+      setDiagnosticMessage(text.diagnosticError);
+    }
+  } finally {
+    if (
+      isCurrentDiagnosticRequest(state, token, diagnosticContext)
+      && state.diagnosticController === controller
+    ) {
+      state.diagnosticLoading = false;
+      state.diagnosticController = null;
+      updateDiagnosticAvailability();
+    }
+  }
 }
 
 function track(event) {
@@ -538,6 +611,7 @@ $("edit-area-button").addEventListener("click", () => {
   openCropper();
 });
 $("translate-button").addEventListener("click", translate);
+$("diagnostic-download").addEventListener("click", downloadDiagnostic);
 $("png-download").addEventListener("click", () => track("pattern_png_downloaded"));
 $("txt-download").addEventListener("click", () => track("pattern_txt_downloaded"));
 $("feedback-link").addEventListener("click", () => track("pattern_feedback_clicked"));

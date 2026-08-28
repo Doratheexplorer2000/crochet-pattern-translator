@@ -107,6 +107,121 @@ class PatternBrowserUiTests(unittest.TestCase):
         self.assertFalse(payload["oldImageCurrent"])
         self.assertTrue(payload["newImageCurrent"])
 
+    def test_diagnostic_ui_strings_exist_in_all_four_languages(self):
+        payload = run_browser_modules(
+            """
+            import { readFileSync } from 'node:fs';
+            const module = (path) => import('data:text/javascript,' + encodeURIComponent(readFileSync(path, 'utf8')));
+            const { stringsFor } = await module('./pattern_translator/web/translations.js');
+            const languages = ['en', 'zh-Hant', 'zh-Hans', 'ja'];
+            console.log(JSON.stringify(languages.map((lang) => {
+              const text = stringsFor(lang);
+              return [text.downloadDiagnostic, text.diagnosticLoading, text.diagnosticError];
+            })));
+            """
+        )
+        self.assertEqual(
+            [
+                [
+                    "Download Diagnostic Report",
+                    "Preparing Diagnostic Report…",
+                    "The Diagnostic Report could not be generated. Your translation is still available.",
+                ],
+                [
+                    "下載診斷報告",
+                    "正在準備診斷報告……",
+                    "無法產生診斷報告。你的翻譯結果仍然可用。",
+                ],
+                [
+                    "下载诊断报告",
+                    "正在准备诊断报告……",
+                    "无法生成诊断报告。你的翻译结果仍然可用。",
+                ],
+                [
+                    "診断レポートをダウンロード",
+                    "診断レポートを準備しています……",
+                    "診断レポートを生成できませんでした。翻訳結果は引き続き利用できます。",
+                ],
+            ],
+            payload,
+        )
+
+    def test_diagnostic_request_runtime_is_repeatable_and_stale_safe(self):
+        payload = run_browser_modules(
+            """
+            import { readFileSync } from 'node:fs';
+            const module = (path) => import('data:text/javascript,' + encodeURIComponent(readFileSync(path, 'utf8')));
+            const { diagnosticFilename, isCurrentDiagnosticRequest, postDiagnosticReport } = await module('./pattern_translator/web/workflow_state.js');
+            const context = { schema_version: 1, result: { area_mode: 'Whole Pattern' } };
+            const state = { generation: 4, diagnosticContext: context };
+            const calls = [];
+            const fetchImpl = async (url, options) => {
+              calls.push({ url, method: options.method, headers: options.headers, body: JSON.parse(options.body), signal: Boolean(options.signal) });
+              return {
+                ok: true,
+                headers: { get: (name) => name === 'content-disposition' ? 'attachment; filename="safe-report.txt"' : '' },
+              };
+            };
+            const controller = new AbortController();
+            const first = await postDiagnosticReport(fetchImpl, context, 'ja', controller.signal);
+            await postDiagnosticReport(fetchImpl, context, 'ja', controller.signal);
+            const currentBefore = isCurrentDiagnosticRequest(state, 4, context);
+            state.generation += 1;
+            const currentAfterGeneration = isCurrentDiagnosticRequest(state, 4, context);
+            state.generation = 4;
+            state.diagnosticContext = { schema_version: 1 };
+            const currentAfterReplacement = isCurrentDiagnosticRequest(state, 4, context);
+            console.log(JSON.stringify({
+              calls,
+              filename: diagnosticFilename(first),
+              fallback: diagnosticFilename({ headers: { get: () => '' } }),
+              currentBefore,
+              currentAfterGeneration,
+              currentAfterReplacement,
+            }));
+            """
+        )
+        self.assertEqual(2, len(payload["calls"]))
+        for call in payload["calls"]:
+            self.assertEqual("/api/v1/diagnostic-report", call["url"])
+            self.assertEqual("POST", call["method"])
+            self.assertEqual("application/json", call["headers"]["Content-Type"])
+            self.assertEqual("ja", call["body"]["ui_lang"])
+            self.assertEqual(1, call["body"]["diagnostic_context"]["schema_version"])
+            self.assertTrue(call["signal"])
+        self.assertEqual("safe-report.txt", payload["filename"])
+        self.assertEqual("PatternOCR_DiagnosticReport.txt", payload["fallback"])
+        self.assertTrue(payload["currentBefore"])
+        self.assertFalse(payload["currentAfterGeneration"])
+        self.assertFalse(payload["currentAfterReplacement"])
+
+    def test_diagnostic_download_blob_handling_is_isolated(self):
+        app_source = (
+            REPO_ROOT / "pattern_translator" / "web" / "app.js"
+        ).read_text(encoding="utf-8")
+        html_source = (
+            REPO_ROOT / "pattern_translator" / "web" / "index.html"
+        ).read_text(encoding="utf-8")
+        start = app_source.index("async function downloadDiagnostic()")
+        end = app_source.index("\nfunction track(", start)
+        diagnostic_source = app_source[start:end]
+
+        self.assertIn('id="diagnostic-download"', html_source)
+        self.assertIn('id="diagnostic-status"', html_source)
+        self.assertIn("postDiagnosticReport(", diagnostic_source)
+        self.assertGreaterEqual(
+            diagnostic_source.count("isCurrentDiagnosticRequest(state, token, diagnosticContext)"),
+            4,
+        )
+        self.assertIn("new Blob([reportText]", diagnostic_source)
+        self.assertIn("anchor.click()", diagnostic_source)
+        self.assertIn("URL.revokeObjectURL(reportUrl)", diagnostic_source)
+        self.assertIn("setDiagnosticMessage(text.diagnosticError)", diagnostic_source)
+        self.assertNotIn('clearObjectUrl("pngUrl")', diagnostic_source)
+        self.assertNotIn('clearObjectUrl("txtUrl")', diagnostic_source)
+        self.assertNotIn('$("result-section").hidden = true', diagnostic_source)
+        self.assertNotIn("showResult(", diagnostic_source)
+
     def test_error_adapter_never_returns_browser_or_parser_exception_text(self):
         payload = run_browser_modules(
             """

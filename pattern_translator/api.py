@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import io
+import json
 import os
 import re
 import time
@@ -11,14 +12,17 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from PIL import Image
 
+from pattern_translator.engine import result_delivery as result_delivery_engine
 from pattern_translator.engine import translation_area_state as translation_area_state_engine
 from pattern_translator.engine import translation_language_state as translation_language_state_engine
 from pattern_translator.translation_service import (
+    CSV_TERM_CACHE_STATS,
+    NORMALIZED_LOOKUP_INDEX_STATS,
     TranslateImageRequest,
     load_database_dataframe,
     prepare_translation_dataframe,
@@ -43,6 +47,14 @@ _DEFAULT_INTERFACE_LANGUAGE = "English"
 _DEFAULT_DIAGNOSTIC_PLATFORM = "http-api"
 _DEFAULT_DIAGNOSTIC_SESSION_GENERATION = "http-api"
 _DEFAULT_QUALITY_LABEL = "Not assessed"
+_APP_VERSION = "Pattern OCR Translator (Beta RC26)"
+_MAX_DIAGNOSTIC_REQUEST_BYTES = 4 * 1024 * 1024
+_UI_LANGUAGE_LABELS = {
+    "en": "English",
+    "zh-Hant": "Traditional Chinese",
+    "zh-Hans": "Simplified Chinese",
+    "ja": "Japanese",
+}
 
 
 def _validate_language(value: str, field_name: str) -> str:
@@ -147,7 +159,7 @@ def _build_translate_request(
     action_started: float,
     ocr_execution_start: float,
 ) -> TranslateImageRequest:
-    width, height = image.size
+    width, height = working_image.size
     experimental_downscale, downscale_max_height_option = _downscale_settings(
         working_image,
         _DEFAULT_OCR_RESIZE_TEST,
@@ -198,10 +210,20 @@ def _serialize_success(
     area_mode: str,
     crop_box: Tuple[int, int, int, int],
     result,
+    terminology_dataframe,
 ) -> Dict[str, Any]:
     primary = result.primary_result
     analytics = result.analytics
     timings = primary.get("timings", {})
+    try:
+        diagnostic_context = result_delivery_engine.create_diagnostic_snapshot(
+            primary,
+            terminology_row_count=len(terminology_dataframe),
+            csv_term_cache_stats=dict(CSV_TERM_CACHE_STATS),
+            normalized_lookup_index_stats=dict(NORMALIZED_LOOKUP_INDEX_STATS),
+        )
+    except Exception:
+        diagnostic_context = None
     return {
         "request_id": request_id,
         "source_mode": source_mode,
@@ -212,6 +234,7 @@ def _serialize_success(
         "readable_translation": primary.get("readable_translation", ""),
         "translation_txt": primary.get("translation_txt", ""),
         "overlay_png": _overlay_png_payload(primary.get("overlay_png")),
+        "diagnostic_context": diagnostic_context,
         "ocr_finished_at": result.ocr_finished_at,
         "ocr_duration_seconds": result.ocr_duration_seconds,
         "ocr_time_sec": analytics.get("ocr_time_sec"),
@@ -226,6 +249,34 @@ def _serialize_success(
             "total_runtime": timings.get("Total runtime"),
         },
     }
+
+
+def _diagnostic_error(status_code: int, request_id: str) -> JSONResponse:
+    message = (
+        "Invalid diagnostic request"
+        if status_code == 400
+        else "Diagnostic report failed"
+    )
+    return JSONResponse(
+        status_code=status_code,
+        content={"error": message, "request_id": request_id},
+    )
+
+
+async def _read_bounded_body(request: Request) -> bytes:
+    content_length = request.headers.get("content-length")
+    if content_length:
+        try:
+            if int(content_length) > _MAX_DIAGNOSTIC_REQUEST_BYTES:
+                raise ValueError
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid diagnostic request")
+    body = bytearray()
+    async for chunk in request.stream():
+        body.extend(chunk)
+        if len(body) > _MAX_DIAGNOSTIC_REQUEST_BYTES:
+            raise HTTPException(status_code=400, detail="Invalid diagnostic request")
+    return bytes(body)
 
 
 @app.get("/", include_in_schema=False)
@@ -336,4 +387,47 @@ def translate_pattern(
         area_mode,
         crop_box,
         result,
+        df,
+    )
+
+
+@app.post("/api/v1/diagnostic-report")
+async def diagnostic_report(request: Request):
+    request_id = uuid.uuid4().hex
+    try:
+        raw_body = await _read_bounded_body(request)
+        payload = json.loads(raw_body)
+        if not isinstance(payload, dict):
+            raise ValueError
+        ui_lang = payload.get("ui_lang")
+        if ui_lang not in _UI_LANGUAGE_LABELS:
+            raise ValueError
+        user_agent = str(request.headers.get("user-agent", "") or "Not captured")
+        user_agent = user_agent.replace("\r", " ").replace("\n", " ")[:512]
+        restored = result_delivery_engine.restore_diagnostic_snapshot(
+            payload.get("diagnostic_context"),
+            interface_language=_UI_LANGUAGE_LABELS[ui_lang],
+            platform=user_agent,
+        )
+    except Exception:
+        return _diagnostic_error(400, request_id)
+
+    try:
+        report_text = result_delivery_engine.build_deferred_diagnostic_report(
+            restored.result,
+            terminology_row_count=restored.terminology_row_count,
+            csv_term_cache_stats=restored.csv_term_cache_stats,
+            normalized_lookup_index_stats=restored.normalized_lookup_index_stats,
+            app_version=_APP_VERSION,
+        )
+    except Exception:
+        return _diagnostic_error(500, request_id)
+
+    filename = result_delivery_engine.diagnostic_report_filename(_APP_VERSION)
+    return PlainTextResponse(
+        report_text,
+        media_type="text/plain",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+        },
     )

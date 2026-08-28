@@ -1,5 +1,7 @@
 import base64
+import copy
 import io
+import json
 import subprocess
 import sys
 import time
@@ -11,6 +13,7 @@ import pandas as pd
 from fastapi.testclient import TestClient
 from PIL import Image
 
+from pattern_translator import api as pattern_api
 from pattern_translator.api import app
 from pattern_translator.engine import translation_area_state as translation_area_state_engine
 from pattern_translator.translation_service import (
@@ -88,6 +91,33 @@ class PatternApiHttpTests(unittest.TestCase):
         data = dict(fields)
         return self.client.post("/api/v1/translate", data=data, files=files)
 
+    def _translated_payload(self, area_mode="Whole Pattern", crop_box=None):
+        fields = {
+            "files": {
+                "image": (
+                    "pattern.png",
+                    self._png_bytes(200, 160),
+                    "image/png",
+                )
+            },
+            "source_mode": self.source_mode,
+            "output_mode": self.output_mode,
+            "area_mode": area_mode,
+        }
+        if crop_box:
+            for name, value in zip(
+                ("crop_left", "crop_top", "crop_right", "crop_bottom"),
+                crop_box,
+            ):
+                fields[name] = str(value)
+        with mock.patch(
+            "pattern_translator.translation_service.run_primary_ocr",
+            return_value=self._mock_primary_ocr(),
+        ):
+            response = self._multipart(**fields)
+        self.assertEqual(200, response.status_code)
+        return response.json()
+
     def test_whole_pattern_valid_request_returns_200(self):
         with mock.patch(
             "pattern_translator.translation_service.run_primary_ocr",
@@ -131,6 +161,221 @@ class PatternApiHttpTests(unittest.TestCase):
         self.assertEqual(self.source_mode, request.source_mode)
         self.assertEqual(self.output_mode, request.output_mode)
         self.assertEqual("Whole Pattern", request.area_mode)
+
+    def test_translate_exposes_snapshot_without_building_report(self):
+        with mock.patch(
+            "pattern_translator.translation_service.run_primary_ocr",
+            return_value=self._mock_primary_ocr(),
+        ), mock.patch.object(
+            pattern_api.result_delivery_engine,
+            "build_deferred_diagnostic_report",
+        ) as report_builder:
+            response = self._multipart(
+                files={"image": ("pattern.png", self._png_bytes(), "image/png")},
+                source_mode=self.source_mode,
+                output_mode=self.output_mode,
+                area_mode="Whole Pattern",
+            )
+
+        self.assertEqual(200, response.status_code)
+        diagnostic_context = response.json()["diagnostic_context"]
+        self.assertEqual(1, diagnostic_context["schema_version"])
+        self.assertEqual(
+            "Whole Pattern",
+            diagnostic_context["result"]["area_mode"],
+        )
+        self.assertLessEqual(
+            len(json.dumps(diagnostic_context).encode("utf-8")),
+            pattern_api.result_delivery_engine.MAX_DIAGNOSTIC_SNAPSHOT_BYTES,
+        )
+        report_builder.assert_not_called()
+
+    def test_snapshot_failure_does_not_replace_successful_translation(self):
+        with mock.patch(
+            "pattern_translator.translation_service.run_primary_ocr",
+            return_value=self._mock_primary_ocr(),
+        ), mock.patch.object(
+            pattern_api.result_delivery_engine,
+            "create_diagnostic_snapshot",
+            side_effect=ValueError("snapshot failed"),
+        ):
+            response = self._multipart(
+                files={"image": ("pattern.png", self._png_bytes(), "image/png")},
+                source_mode=self.source_mode,
+                output_mode=self.output_mode,
+                area_mode="Whole Pattern",
+            )
+
+        self.assertEqual(200, response.status_code)
+        payload = response.json()
+        self.assertIsNone(payload["diagnostic_context"])
+        self.assertIn("R1: 6 sc", payload["readable_translation"])
+        self.assertTrue(payload["overlay_png"]["base64"])
+
+    def test_diagnostic_endpoint_restores_whole_and_selected_area_context(self):
+        cases = [
+            ("Whole Pattern", None, [0, 0, 200, 160], "200 x 160 px"),
+            ("Select Area", (40, 30, 140, 110), [40, 30, 140, 110], "100 x 80 px"),
+        ]
+        real_builder = (
+            pattern_api.result_delivery_engine.build_deferred_diagnostic_report
+        )
+        for area_mode, crop_box, expected_crop, expected_resolution in cases:
+            with self.subTest(area_mode=area_mode):
+                translated = self._translated_payload(area_mode, crop_box)
+                with mock.patch(
+                    "pattern_translator.api.translate_image"
+                ) as translate_spy, mock.patch(
+                    "pattern_translator.translation_service.run_primary_ocr"
+                ) as ocr_spy, mock.patch.object(
+                    pattern_api.result_delivery_engine,
+                    "build_deferred_diagnostic_report",
+                    wraps=real_builder,
+                ) as report_builder:
+                    response = self.client.post(
+                        "/api/v1/diagnostic-report",
+                        json={
+                            "diagnostic_context": translated[
+                                "diagnostic_context"
+                            ],
+                            "ui_lang": "ja",
+                        },
+                        headers={"user-agent": "Phase3B1-Test-Agent"},
+                    )
+
+                self.assertEqual(200, response.status_code)
+                self.assertTrue(
+                    response.headers["content-type"].startswith(
+                        "text/plain; charset=utf-8"
+                    )
+                )
+                self.assertRegex(
+                    response.headers["content-disposition"],
+                    r'attachment; filename="PatternOCR_DiagnosticReport_RC26_\d{8}_\d{6}\.txt"',
+                )
+                self.assertIn(f"Area selected: {area_mode}", response.text)
+                self.assertIn(f"Crop box: {tuple(expected_crop)}", response.text)
+                self.assertIn(f"Resolution: {expected_resolution}", response.text)
+                self.assertIn("R1: 6X", response.text)
+                self.assertIn("R1: 6 sc", response.text)
+                self.assertIn("Interface language: Japanese", response.text)
+                self.assertIn("Platform: Phase3B1-Test-Agent", response.text)
+                self.assertIn(
+                    "Image quality status: Not assessed",
+                    response.text,
+                )
+                restored_result = report_builder.call_args.args[0]
+                self.assertEqual(area_mode, restored_result["area_mode"])
+                self.assertEqual(tuple(expected_crop), restored_result["crop_box"])
+                self.assertEqual(
+                    "R1: 6X",
+                    restored_result["raw_ocr_text"],
+                )
+                self.assertIn(
+                    "R1: 6 sc",
+                    restored_result["readable_translation"],
+                )
+                translate_spy.assert_not_called()
+                ocr_spy.assert_not_called()
+
+    def test_diagnostic_endpoint_rejects_malformed_and_oversized_requests(self):
+        valid_snapshot = self._translated_payload()["diagnostic_context"]
+        invalid_result_type = copy.deepcopy(valid_snapshot)
+        invalid_result_type["result"]["quality_metrics"] = []
+        duplicate_frame_columns = copy.deepcopy(valid_snapshot)
+        duplicate_frame_columns["frames"]["line_df"]["columns"] = [
+            "Original",
+            "Original",
+        ]
+        cases = [
+            (
+                b"{",
+                {"content-type": "application/json"},
+            ),
+            (
+                json.dumps(
+                    {
+                        "diagnostic_context": {"schema_version": 1},
+                        "ui_lang": "en",
+                    }
+                ).encode("utf-8"),
+                {"content-type": "application/json"},
+            ),
+            (
+                json.dumps(
+                    {
+                        "diagnostic_context": {"schema_version": True},
+                        "ui_lang": "en",
+                    }
+                ).encode("utf-8"),
+                {"content-type": "application/json"},
+            ),
+            (
+                json.dumps(
+                    {
+                        "diagnostic_context": {},
+                        "ui_lang": "invalid",
+                    }
+                ).encode("utf-8"),
+                {"content-type": "application/json"},
+            ),
+            (
+                b"x" * (pattern_api._MAX_DIAGNOSTIC_REQUEST_BYTES + 1),
+                {"content-type": "application/json"},
+            ),
+            (
+                json.dumps(
+                    {
+                        "diagnostic_context": invalid_result_type,
+                        "ui_lang": "en",
+                    }
+                ).encode("utf-8"),
+                {"content-type": "application/json"},
+            ),
+            (
+                json.dumps(
+                    {
+                        "diagnostic_context": duplicate_frame_columns,
+                        "ui_lang": "en",
+                    }
+                ).encode("utf-8"),
+                {"content-type": "application/json"},
+            ),
+        ]
+        for content, headers in cases:
+            with self.subTest(size=len(content)):
+                response = self.client.post(
+                    "/api/v1/diagnostic-report",
+                    content=content,
+                    headers=headers,
+                )
+                self.assertEqual(400, response.status_code)
+                self.assertEqual(
+                    "Invalid diagnostic request",
+                    response.json()["error"],
+                )
+                self.assertTrue(response.json()["request_id"])
+
+    def test_diagnostic_builder_exception_is_generic_and_isolated(self):
+        translated = self._translated_payload()
+        snapshot = translated["diagnostic_context"]
+        before = json.dumps(snapshot, sort_keys=True)
+        with mock.patch.object(
+            pattern_api.result_delivery_engine,
+            "build_deferred_diagnostic_report",
+            side_effect=RuntimeError("secret diagnostic failure"),
+        ), mock.patch("pattern_translator.api.translate_image") as translate_spy:
+            response = self.client.post(
+                "/api/v1/diagnostic-report",
+                json={"diagnostic_context": snapshot, "ui_lang": "en"},
+            )
+
+        self.assertEqual(500, response.status_code)
+        self.assertEqual("Diagnostic report failed", response.json()["error"])
+        self.assertTrue(response.json()["request_id"])
+        self.assertNotIn("secret", response.text)
+        self.assertEqual(before, json.dumps(snapshot, sort_keys=True))
+        translate_spy.assert_not_called()
 
     def test_select_area_ocr_receives_cropped_dimensions(self):
         width, height = 200, 160

@@ -51,7 +51,6 @@ from pattern_translator.components.custom_upload import (
 from pattern_translator.components.custom_cropper import custom_select_area
 from pattern_translator.engine import terminology as terminology_engine
 from pattern_translator.engine import line_translation as line_translation_engine
-from pattern_translator.engine import diagnostic_report as diagnostic_report_engine
 from pattern_translator.engine import overlay as overlay_engine
 from pattern_translator.engine import pattern_document as pattern_document_engine
 from pattern_translator.engine import ocr_lines as ocr_lines_engine
@@ -514,209 +513,6 @@ def assess_image_quality(image: Image.Image) -> Tuple[List[str], List[str], Dict
         "contrast_score": round(contrast, 1),
     }
     return errors, warnings, metrics
-
-# -----------------------------
-# Diagnostic Report Engine wrappers. Streamlit context stays in app.py; pure
-# report construction lives in pattern_translator.engine.diagnostic_report.
-def build_rc11f_cache_diagnostics(
-    translation_profile: Optional[Dict[str, Dict[str, float]]],
-    timings: Optional[Dict[str, object]],
-    translation_output: str,
-) -> Dict[str, object]:
-    return diagnostic_report_engine.build_rc11f_cache_diagnostics(
-        translation_profile,
-        timings,
-        translation_output,
-        csv_term_cache_stats=CSV_TERM_CACHE_STATS,
-    )
-
-
-def build_rc11g_lookup_index_diagnostics(
-    translation_profile: Optional[Dict[str, Dict[str, float]]],
-    timings: Optional[Dict[str, object]],
-    translation_output: str,
-) -> Dict[str, object]:
-    return diagnostic_report_engine.build_rc11g_lookup_index_diagnostics(
-        translation_profile,
-        timings,
-        translation_output,
-        normalized_lookup_index_stats=NORMALIZED_LOOKUP_INDEX_STATS,
-    )
-
-
-def build_debug_report_text(
-    line_df: pd.DataFrame,
-    legend_text: str = "",
-    clean_text: str = "",
-    raw_text: str = "",
-    source_mode: str = "",
-    output_mode: str = "",
-    area_mode: str = "",
-    crop_box: Optional[Tuple[int, int, int, int]] = None,
-    matches_df: Optional[pd.DataFrame] = None,
-    unmatched: Optional[List[str]] = None,
-    ocr_engine: str = "",
-    image_quality_status: str = "",
-    quality_metrics: Optional[Dict[str, object]] = None,
-    session_diagnostics: Optional[Dict[str, object]] = None,
-    events: Optional[List[Dict[str, object]]] = None,
-    timings: Optional[Dict[str, object]] = None,
-    ocr_workload_diagnostics: Optional[Dict[str, object]] = None,
-    ocr_box_rows: Optional[pd.DataFrame] = None,
-    ocr_call_diagnostics: Optional[Dict[str, object]] = None,
-    ocr_call_trace: Optional[List[str]] = None,
-    downscale_diagnostics: Optional[Dict[str, object]] = None,
-    ocr_resize_test: str = "Auto",
-    interface_language: str = "",
-    platform: str = "",
-    rc11c_translation_diagnostics: Optional[Dict[str, object]] = None,
-    rc11d_validation_diagnostics: Optional[Dict[str, object]] = None,
-    rc11e_normalization_diagnostics: Optional[Dict[str, object]] = None,
-    rc11f_cache_diagnostics: Optional[Dict[str, object]] = None,
-    rc11g_lookup_index_diagnostics: Optional[Dict[str, object]] = None,
-) -> str:
-    if not platform:
-        try:
-            platform = str(get_request_headers().get("user-agent", "") or "Not captured")
-        except Exception:
-            platform = "Not captured"
-    return diagnostic_report_engine.build_debug_report_text(
-        line_df,
-        legend_text=legend_text,
-        clean_text=clean_text,
-        raw_text=raw_text,
-        source_mode=source_mode,
-        output_mode=output_mode,
-        area_mode=area_mode,
-        crop_box=crop_box,
-        matches_df=matches_df,
-        unmatched=unmatched,
-        ocr_engine=ocr_engine,
-        image_quality_status=image_quality_status,
-        quality_metrics=quality_metrics,
-        session_diagnostics=session_diagnostics,
-        events=events,
-        timings=timings,
-        ocr_workload_diagnostics=ocr_workload_diagnostics,
-        ocr_box_rows=ocr_box_rows,
-        ocr_call_diagnostics=ocr_call_diagnostics,
-        ocr_call_trace=ocr_call_trace,
-        downscale_diagnostics=downscale_diagnostics,
-        ocr_resize_test=ocr_resize_test,
-        interface_language=interface_language,
-        platform=platform,
-        app_version=APP_VERSION,
-        rc11c_translation_diagnostics=rc11c_translation_diagnostics,
-        rc11d_validation_diagnostics=rc11d_validation_diagnostics,
-        rc11e_normalization_diagnostics=rc11e_normalization_diagnostics,
-        rc11f_cache_diagnostics=rc11f_cache_diagnostics,
-        rc11g_lookup_index_diagnostics=rc11g_lookup_index_diagnostics,
-    )
-
-
-def build_deferred_diagnostic_report(result: Dict[str, object]) -> str:
-    """Build the optional report after the primary result is already stored."""
-    inputs = result.get("diagnostic_report_inputs", {})
-    if not isinstance(inputs, dict):
-        inputs = {}
-    timings = result.get("timings", {})
-    if not isinstance(timings, dict):
-        timings = {}
-    runtime_profile = result.get("runtime_profile", {})
-    if not isinstance(runtime_profile, dict):
-        runtime_profile = {}
-    translation_profile = result.get("translation_profile", {})
-    if not isinstance(translation_profile, dict):
-        translation_profile = {}
-
-    report_start = time.perf_counter()
-    line_df = result.get("line_df")
-    ocr_rows = result.get("ocr_rows")
-    overlay_legend_df = result.get("overlay_legend_df")
-    readable_translation = str(result.get("readable_translation", "") or "")
-    rc11c_translation_diagnostics = (
-        diagnostic_report_engine.build_rc11c_translation_diagnostics(
-            translation_profile,
-            timings,
-            ocr_rows,
-            line_df,
-            overlay_legend_df,
-        )
-    )
-    rc11d_validation_diagnostics = (
-        diagnostic_report_engine.build_rc11d_validation_diagnostics(
-            translation_profile,
-            rc11c_translation_diagnostics,
-        )
-    )
-    rc11e_normalization_diagnostics = (
-        diagnostic_report_engine.build_rc11e_normalization_diagnostics(
-            translation_profile,
-            df,
-        )
-    )
-    rc11f_cache_diagnostics = build_rc11f_cache_diagnostics(
-        translation_profile,
-        timings,
-        readable_translation,
-    )
-    rc11g_lookup_index_diagnostics = build_rc11g_lookup_index_diagnostics(
-        translation_profile,
-        timings,
-        readable_translation,
-    )
-    report_text = build_debug_report_text(
-        line_df,
-        str(result.get("overlay_legend", "") or ""),
-        clean_text=str(result.get("clean_text", "") or ""),
-        raw_text=str(result.get("raw_ocr_text", "") or ""),
-        source_mode=str(result.get("source_mode", "") or ""),
-        output_mode=str(result.get("output_mode", "") or ""),
-        area_mode=str(result.get("area_mode", "") or ""),
-        crop_box=result.get("crop_box"),
-        matches_df=result.get("matches_df"),
-        unmatched=result.get("unmatched"),
-        ocr_engine=str(inputs.get("ocr_engine", "") or ""),
-        image_quality_status=str(inputs.get("image_quality_status", "") or ""),
-        quality_metrics=result.get("quality_metrics"),
-        session_diagnostics=inputs.get("session_diagnostics"),
-        events=inputs.get("events"),
-        timings=timings,
-        ocr_workload_diagnostics=inputs.get("ocr_workload_diagnostics"),
-        ocr_box_rows=inputs.get("ocr_box_rows"),
-        ocr_call_diagnostics=inputs.get("ocr_call_diagnostics"),
-        ocr_call_trace=inputs.get("ocr_call_trace"),
-        downscale_diagnostics=inputs.get("downscale_diagnostics"),
-        ocr_resize_test=str(inputs.get("ocr_resize_test", "Auto") or "Auto"),
-        interface_language=str(inputs.get("interface_language", "") or ""),
-        platform=str(inputs.get("platform", "Not captured") or "Not captured"),
-        rc11c_translation_diagnostics=rc11c_translation_diagnostics,
-        rc11d_validation_diagnostics=rc11d_validation_diagnostics,
-        rc11e_normalization_diagnostics=rc11e_normalization_diagnostics,
-        rc11f_cache_diagnostics=rc11f_cache_diagnostics,
-        rc11g_lookup_index_diagnostics=rc11g_lookup_index_diagnostics,
-    )
-    report_seconds = time.perf_counter() - report_start
-    runtime_profile["diagnostic_report_generation"] = report_seconds
-    try:
-        runtime_profile["total"] = (
-            float(runtime_profile.get("total") or 0.0) + report_seconds
-        )
-    except Exception:
-        pass
-    timings["Diagnostic Report generation"] = report_seconds
-    if runtime_profile.get("total") is not None:
-        timings["Total runtime"] = runtime_profile["total"]
-    return "\n".join([
-        report_text.rstrip(),
-        "",
-        "=== Performance: Runtime Profile ===",
-        diagnostic_report_engine.format_runtime_profile(runtime_profile),
-        "",
-    ])
-
-
-
 
 # -----------------------------
 # Area selection helpers
@@ -1428,13 +1224,6 @@ def build_ocr_input_signature(
 ) -> Tuple[object, ...]:
     stable_crop_box = tuple(int(round(v)) for v in crop_box)
     return (image_signature, source_mode, output_mode, area_mode, stable_crop_box, extra_settings or ())
-
-
-def diagnostic_report_filename() -> str:
-    version = APP_VERSION.split("Beta ", 1)[-1].rstrip(")") if "Beta " in APP_VERSION else APP_VERSION
-    safe_version = re.sub(r"[^A-Za-z0-9]+", "", version) or "RC"
-    timestamp = time.strftime("%Y%m%d_%H%M%S")
-    return f"PatternOCR_DiagnosticReport_{safe_version}_{timestamp}.txt"
 
 
 def _result_request_id() -> str:
@@ -2978,7 +2767,13 @@ if image_file is not None:
             generated, report_outcome = (
                 result_delivery_engine.generate_optional_diagnostic_report(
                     result,
-                    lambda: build_deferred_diagnostic_report(result),
+                    lambda: result_delivery_engine.build_deferred_diagnostic_report(
+                        result,
+                        terminology_dataframe=df,
+                        csv_term_cache_stats=CSV_TERM_CACHE_STATS,
+                        normalized_lookup_index_stats=NORMALIZED_LOOKUP_INDEX_STATS,
+                        app_version=APP_VERSION,
+                    ),
                 )
             )
             report_seconds = time.perf_counter() - report_generation_start
@@ -3002,7 +2797,9 @@ if image_file is not None:
             diagnostic_download_slot.download_button(
                 t("download_debug_report"),
                 data=debug_report_txt,
-                file_name=diagnostic_report_filename(),
+                file_name=result_delivery_engine.diagnostic_report_filename(
+                    APP_VERSION
+                ),
                 mime="text/plain",
                 key="download_debug_report_txt",
                 on_click="ignore",

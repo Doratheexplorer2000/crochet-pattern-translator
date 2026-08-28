@@ -1,7 +1,10 @@
+import copy
+import json
 import threading
 import re
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import pandas as pd
 from streamlit.runtime.scriptrunner_utils.exceptions import RerunException
@@ -305,6 +308,220 @@ class ResultDeliveryTests(unittest.TestCase):
 
         self.assertIn("Diagnostic Report", report)
         self.assertIn("Translation Output", report)
+
+    def test_diagnostic_snapshot_round_trip_preserves_report_data(self):
+        line_df = pd.DataFrame(
+            [
+                {
+                    "Original": "R1: 6X",
+                    "Translation": "R1: 6 sc",
+                    "Confidence": 0.99,
+                    "Changed": "✓",
+                    "min_x": 1.0,
+                    "max_x": 20.0,
+                    "min_y": 2.0,
+                    "max_y": 22.0,
+                }
+            ]
+        )
+        ocr_boxes = pd.DataFrame(
+            [
+                {
+                    "text": "R1: 6X",
+                    "confidence": 0.99,
+                    "min_x": 1.0,
+                    "max_x": 20.0,
+                    "min_y": 2.0,
+                    "max_y": 22.0,
+                }
+            ]
+        )
+        result = {
+            "line_df": line_df,
+            "ocr_rows": ocr_boxes.copy(),
+            "overlay_legend": "[1] R1: 6 sc",
+            "overlay_legend_df": pd.DataFrame([{"label": "[1]"}]),
+            "raw_ocr_text": "R1: 6X",
+            "clean_text": "R1: 6X",
+            "matches_df": pd.DataFrame(
+                [
+                    {
+                        "Original detected": "X",
+                        "Category": "stitch",
+                        "US abb": "sc",
+                    }
+                ]
+            ),
+            "unmatched": ["R1"],
+            "readable_translation": "R1: 6X\n→ R1: 6 sc",
+            "quality_metrics": {"width_px": 120, "height_px": 80},
+            "timings": {"Translation processing": 0.2, "Total runtime": 1.0},
+            "runtime_profile": {
+                "translation": 0.2,
+                "diagnostic_report_generation": None,
+                "total": 1.0,
+            },
+            "translation_profile": {
+                "counts": {"lookup_term calls": 1},
+                "timings": {},
+            },
+            "source_mode": "Traditional Chinese",
+            "output_mode": "English — US",
+            "area_mode": "Whole Pattern",
+            "crop_box": (0, 0, 120, 80),
+            "diagnostic_report_inputs": {
+                "ocr_engine": "PaddleOCR",
+                "image_quality_status": "Not assessed",
+                "session_diagnostics": {"ocr_running": False},
+                "events": [{"event": "snapshot"}],
+                "ocr_workload_diagnostics": {"ocr_box_count": 1},
+                "ocr_box_rows": ocr_boxes,
+                "ocr_call_diagnostics": {
+                    "whole_pattern_sends_full_image": True
+                },
+                "ocr_call_trace": ["OCR results returned"],
+                "downscale_diagnostics": {"downscale_applied": "No"},
+                "ocr_resize_test": "1000 px",
+                "interface_language": "English",
+                "platform": "unit-test-agent",
+            },
+        }
+        cache_stats = {"hits": 2, "misses": 1}
+        lookup_stats = {"enabled": "Yes", "index_size": 3}
+        snapshot = result_delivery.create_diagnostic_snapshot(
+            result,
+            terminology_row_count=7,
+            csv_term_cache_stats=cache_stats,
+            normalized_lookup_index_stats=lookup_stats,
+        )
+        encoded = json.dumps(snapshot, allow_nan=False).encode("utf-8")
+        self.assertLessEqual(
+            len(encoded),
+            result_delivery.MAX_DIAGNOSTIC_SNAPSHOT_BYTES,
+        )
+        restored = result_delivery.restore_diagnostic_snapshot(
+            json.loads(encoded),
+            interface_language="English",
+            platform="unit-test-agent",
+        )
+
+        with mock.patch(
+            "pattern_translator.engine.result_delivery.time.perf_counter",
+            side_effect=[10.0, 10.25, 20.0, 20.25],
+        ), mock.patch(
+            "pattern_translator.engine.diagnostic_report.time.strftime",
+            return_value="2026-08-28 22:00:00",
+        ):
+            in_process = result_delivery.build_deferred_diagnostic_report(
+                copy.deepcopy(result),
+                terminology_dataframe=pd.DataFrame(index=range(7)),
+                csv_term_cache_stats=cache_stats,
+                normalized_lookup_index_stats=lookup_stats,
+                app_version="Pattern OCR Translator (Beta RC26)",
+            )
+            round_tripped = result_delivery.build_deferred_diagnostic_report(
+                restored.result,
+                terminology_row_count=restored.terminology_row_count,
+                csv_term_cache_stats=restored.csv_term_cache_stats,
+                normalized_lookup_index_stats=(
+                    restored.normalized_lookup_index_stats
+                ),
+                app_version="Pattern OCR Translator (Beta RC26)",
+            )
+
+        self.assertEqual(in_process, round_tripped)
+        self.assertIn("Area selected: Whole Pattern", round_tripped)
+        self.assertIn("R1: 6X", round_tripped)
+        self.assertIn("R1: 6 sc", round_tripped)
+        self.assertIn("CSV rows loaded: 7", round_tripped)
+
+    def test_large_diagnostic_snapshot_remains_bounded_and_restorable(self):
+        line_df = pd.DataFrame(
+            [
+                {
+                    "Original": f"R{index}: 6X",
+                    "Translation": f"Round {index}: 6 sc",
+                    "Confidence": 0.99,
+                    "min_x": 1.0,
+                    "max_x": 20.0,
+                    "min_y": float(index),
+                    "max_y": float(index + 10),
+                }
+                for index in range(500)
+            ]
+        )
+        ocr_boxes = pd.DataFrame(
+            [
+                {
+                    "text": f"R{index}: 6X",
+                    "confidence": 0.99,
+                    "min_x": 1.0,
+                    "max_x": 20.0,
+                    "min_y": float(index),
+                    "max_y": float(index + 10),
+                    "unused": "not needed by the report",
+                }
+                for index in range(500)
+            ]
+        )
+        result = {
+            "source_mode": "English — US",
+            "output_mode": "Japanese",
+            "area_mode": "Select Area",
+            "crop_box": (10, 20, 110, 120),
+            "quality_metrics": {"width_px": 200, "height_px": 160},
+            "timings": {},
+            "runtime_profile": {},
+            "translation_profile": {},
+            "readable_translation": "Round 1",
+            "overlay_legend": "x" * 300_000,
+            "raw_ocr_text": "y" * 300_000,
+            "clean_text": "z" * 300_000,
+            "unmatched": [],
+            "line_df": line_df,
+            "matches_df": pd.DataFrame(
+                [{"Original detected": "X", "Category": "stitch", "US abb": "sc"}]
+            ),
+            "ocr_rows": ocr_boxes.copy(),
+            "overlay_legend_df": pd.DataFrame(index=range(1)),
+            "diagnostic_report_inputs": {
+                "ocr_box_rows": ocr_boxes,
+                "session_diagnostics": {"note": "n" * 100_000},
+            },
+        }
+
+        snapshot = result_delivery.create_diagnostic_snapshot(
+            result,
+            terminology_row_count=12,
+            csv_term_cache_stats={"hits": 1},
+            normalized_lookup_index_stats={"enabled": "Yes"},
+        )
+        encoded = json.dumps(snapshot, ensure_ascii=False).encode("utf-8")
+        restored = result_delivery.restore_diagnostic_snapshot(
+            json.loads(encoded),
+            interface_language="Japanese",
+            platform="large-snapshot-test",
+        )
+
+        self.assertLessEqual(
+            len(encoded),
+            result_delivery.MAX_DIAGNOSTIC_SNAPSHOT_BYTES,
+        )
+        self.assertEqual("Select Area", restored.result["area_mode"])
+        self.assertEqual((10, 20, 110, 120), restored.result["crop_box"])
+        self.assertEqual(500, len(restored.result["line_df"]))
+        self.assertEqual(500, len(restored.result["diagnostic_report_inputs"]["ocr_box_rows"]))
+        self.assertEqual(1, len(restored.result["matches_df"]))
+        self.assertEqual("Round 0: 6 sc", restored.result["line_df"].iloc[0]["Translation"])
+        self.assertEqual(
+            ["Original", "Translation"],
+            list(restored.result["line_df"].columns),
+        )
+        self.assertNotIn(
+            "unused",
+            restored.result["diagnostic_report_inputs"]["ocr_box_rows"].columns,
+        )
+        self.assertEqual(12, restored.terminology_row_count)
 
     def test_app_stores_primary_result_before_optional_report_generation(self):
         app_source = (

@@ -29,6 +29,25 @@ export function isCurrentImage(state, token, file) {
   return state.generation === token && state.file === file;
 }
 
+export function isCurrentDiagnosticRequest(state, token, context) {
+  return state.generation === token && state.diagnosticContext === context;
+}
+
+export function diagnosticFilename(response) {
+  const disposition = response.headers.get("content-disposition") || "";
+  const match = disposition.match(/filename="?([^";]+)"?/i);
+  return match?.[1] || "PatternOCR_DiagnosticReport.txt";
+}
+
+export function postDiagnosticReport(fetchImpl, context, uiLang, signal) {
+  return fetchImpl("/api/v1/diagnostic-report", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ diagnostic_context: context, ui_lang: uiLang }),
+    signal,
+  });
+}
+
 export function adaptApiError(status, body, strings) {
   if (status === 400) {
     const detail = String(body?.detail || "");
