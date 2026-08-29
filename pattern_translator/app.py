@@ -26,7 +26,6 @@ from pathlib import Path
 from typing import Dict, List, Tuple, Optional
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-import numpy as np
 import pandas as pd
 import streamlit as st
 from PIL import Image
@@ -71,6 +70,8 @@ from pattern_translator.translation_service import (
     CSV_TERM_CACHE_STATS,
     NORMALIZED_LOOKUP_INDEX_STATS,
     TranslateImageRequest,
+    assess_image_quality,
+    get_quality_status,
     log_app_ocr_timing,
     prepare_translation_dataframe,
     translate_image,
@@ -447,72 +448,6 @@ def build_term_index(df: pd.DataFrame, source_mode: str) -> Dict[str, int]:
 def build_all_term_index(df: pd.DataFrame) -> Dict[str, int]:
     return terminology_engine.build_all_term_index(df)
 
-
-# -----------------------------
-# Image quality check
-# -----------------------------
-def assess_image_quality(image: Image.Image) -> Tuple[List[str], List[str], Dict[str, object]]:
-    """Return blocking errors, non-blocking warnings, and diagnostic metrics.
-
-    This is intentionally conservative. File size alone is not reliable: a large
-    decorative screenshot can still be unreadable, and a small crop can be sharp.
-    We mainly check pixel size, sharpness, contrast, and text-area adequacy.
-    """
-    img_rgb = image.convert("RGB")
-    w, h = img_rgb.size
-    arr = np.array(img_rgb)
-
-    try:
-        import cv2
-        gray = cv2.cvtColor(arr, cv2.COLOR_RGB2GRAY)
-        sharpness = float(cv2.Laplacian(gray, cv2.CV_64F).var())
-        contrast = float(gray.std())
-    except Exception:
-        # If OpenCV fails, do a simple NumPy fallback.
-        gray = np.dot(arr[..., :3], [0.299, 0.587, 0.114])
-        gy, gx = np.gradient(gray.astype(float))
-        sharpness = float((gx ** 2 + gy ** 2).mean())
-        contrast = float(gray.std())
-
-    shortest = min(w, h)
-    longest = max(w, h)
-    megapixels = round((w * h) / 1_000_000, 2)
-
-    errors: List[str] = []
-    warnings: List[str] = []
-
-    if longest < 1000 or shortest < 600:
-        errors.append(
-            "Image is probably too small for reliable OCR. Recommended: crop the pattern area and use an image at least 1000px wide, preferably 1500px+."
-        )
-    elif longest < 1500:
-        warnings.append(
-            "Image size is acceptable but not ideal. For small crochet text, 1500px+ on the longer side usually works better."
-        )
-
-    # Thresholds are deliberately broad because decorative backgrounds vary a lot.
-    if sharpness < 60:
-        errors.append(
-            "Image appears blurry. Retake the photo or upload a sharper screenshot before running OCR."
-        )
-    elif sharpness < 120:
-        warnings.append(
-            "Image is slightly soft. OCR may confuse punctuation such as X.V, commas, colons, or R10/R11."
-        )
-
-    if contrast < 28:
-        warnings.append(
-            "Text contrast seems low. Fancy backgrounds, watermarks, or pale text may reduce OCR accuracy. Try cropping closer to the text area."
-        )
-
-    metrics = {
-        "width_px": w,
-        "height_px": h,
-        "megapixels": megapixels,
-        "sharpness_score": round(sharpness, 1),
-        "contrast_score": round(contrast, 1),
-    }
-    return errors, warnings, metrics
 
 # -----------------------------
 # Area selection helpers
@@ -1186,14 +1121,6 @@ INTERFACE_LANGUAGES = {
         "language_japanese": "日本語",
     },
 }
-
-
-def get_quality_status(errors: List[str], warnings: List[str]) -> Tuple[str, str, str]:
-    if errors:
-        return "poor", "🔴 Poor", "Image quality may affect OCR accuracy."
-    if warnings:
-        return "fair", "🟡 Fair", "OCR may contain some errors."
-    return "good", "🟢 Good", "Image quality looks suitable for OCR."
 
 
 def build_quality_recommendation(errors: List[str], warnings: List[str]) -> str:

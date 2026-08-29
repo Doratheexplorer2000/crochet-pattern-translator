@@ -371,7 +371,7 @@ class ResultDeliveryTests(unittest.TestCase):
             "crop_box": (0, 0, 120, 80),
             "diagnostic_report_inputs": {
                 "ocr_engine": "PaddleOCR",
-                "image_quality_status": "Not assessed",
+                "image_quality_status": "Good",
                 "session_diagnostics": {"ocr_running": False},
                 "events": [{"event": "snapshot"}],
                 "ocr_workload_diagnostics": {"ocr_box_count": 1},
@@ -434,6 +434,16 @@ class ResultDeliveryTests(unittest.TestCase):
         self.assertIn("R1: 6X", round_tripped)
         self.assertIn("R1: 6 sc", round_tripped)
         self.assertIn("CSV rows loaded: 7", round_tripped)
+        self.assertIn("Image quality status: Good", round_tripped)
+        self.assertIn("Resolution: 120 x 80 px", round_tripped)
+        self.assertEqual(
+            "Good",
+            restored.result["diagnostic_report_inputs"]["image_quality_status"],
+        )
+        self.assertEqual(
+            {"width_px": 120, "height_px": 80},
+            restored.result["quality_metrics"],
+        )
 
     def test_large_diagnostic_snapshot_remains_bounded_and_restorable(self):
         line_df = pd.DataFrame(

@@ -45,6 +45,90 @@ _TRANSLATION_PROFILE: ContextVar[Optional[Dict[str, Dict[str, float]]]] = Contex
 _MIN_CONF_FOR_CLEAN_TEXT = 0.45
 
 
+def _classify_image_quality(
+    width: int,
+    height: int,
+    sharpness: float,
+    contrast: float,
+) -> Tuple[List[str], List[str]]:
+    errors: List[str] = []
+    warnings: List[str] = []
+    shortest = min(width, height)
+    longest = max(width, height)
+
+    if longest < 1000 or shortest < 600:
+        errors.append(
+            "Image is probably too small for reliable OCR. Recommended: crop the pattern area and use an image at least 1000px wide, preferably 1500px+."
+        )
+    elif longest < 1500:
+        warnings.append(
+            "Image size is acceptable but not ideal. For small crochet text, 1500px+ on the longer side usually works better."
+        )
+
+    if sharpness < 60:
+        errors.append(
+            "Image appears blurry. Retake the photo or upload a sharper screenshot before running OCR."
+        )
+    elif sharpness < 120:
+        warnings.append(
+            "Image is slightly soft. OCR may confuse punctuation such as X.V, commas, colons, or R10/R11."
+        )
+
+    if contrast < 28:
+        warnings.append(
+            "Text contrast seems low. Fancy backgrounds, watermarks, or pale text may reduce OCR accuracy. Try cropping closer to the text area."
+        )
+
+    return errors, warnings
+
+
+def assess_image_quality(
+    image: Image.Image,
+) -> Tuple[List[str], List[str], Dict[str, object]]:
+    """Return the existing blocking issues, warnings, and quality metrics."""
+    img_rgb = image.convert("RGB")
+    width, height = img_rgb.size
+    pixels = np.array(img_rgb)
+
+    try:
+        import cv2
+
+        gray = cv2.cvtColor(pixels, cv2.COLOR_RGB2GRAY)
+        sharpness = float(cv2.Laplacian(gray, cv2.CV_64F).var())
+        contrast = float(gray.std())
+    except Exception:
+        gray = np.dot(pixels[..., :3], [0.299, 0.587, 0.114])
+        gradient_y, gradient_x = np.gradient(gray.astype(float))
+        sharpness = float((gradient_x ** 2 + gradient_y ** 2).mean())
+        contrast = float(gray.std())
+
+    errors, warnings = _classify_image_quality(
+        width,
+        height,
+        sharpness,
+        contrast,
+    )
+    metrics = {
+        "width_px": width,
+        "height_px": height,
+        "megapixels": round((width * height) / 1_000_000, 2),
+        "sharpness_score": round(sharpness, 1),
+        "contrast_score": round(contrast, 1),
+    }
+    return errors, warnings, metrics
+
+
+def get_quality_status(
+    errors: List[str],
+    warnings: List[str],
+) -> Tuple[str, str, str]:
+    if errors:
+        return "poor", "🔴 Poor", "Image quality may affect OCR accuracy."
+    if warnings:
+        return "fair", "🟡 Fair", "OCR may contain some errors."
+    return "good", "🟢 Good", "Image quality looks suitable for OCR."
+
+
 def load_database_dataframe() -> pd.DataFrame:
     csv_path = SOURCE_CSV if SOURCE_CSV.exists() else FALLBACK_CSV
     if not csv_path.exists():
@@ -1201,7 +1285,10 @@ def translate_image(request: TranslateImageRequest) -> TranslateImageResult:
         overlay_start = time.perf_counter()
         log_downstream_timing("overlay_begin")
         overlay_image, overlay_legend, overlay_legend_df = overlay_engine.make_line_translation_overlay(
-            working_image, line_df, output_mode
+            working_image,
+            line_df,
+            output_mode,
+            scale_to_source_text=area_mode == "Select Area",
         )
         overlay_seconds = time.perf_counter() - overlay_start
         log_downstream_timing(

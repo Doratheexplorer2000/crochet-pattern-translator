@@ -434,6 +434,9 @@ def create_diagnostic_snapshot(
         "ocr_engine": inputs.get("ocr_engine")
         if isinstance(inputs.get("ocr_engine"), str)
         else "",
+        "image_quality_status": inputs.get("image_quality_status")
+        if isinstance(inputs.get("image_quality_status"), str)
+        else "",
         "session_diagnostics": inputs.get("session_diagnostics")
         if isinstance(inputs.get("session_diagnostics"), Mapping)
         else {},
@@ -688,7 +691,6 @@ def restore_diagnostic_snapshot(
 
     restored_inputs = dict(diagnostics)
     restored_inputs["ocr_box_rows"] = ocr_box_rows
-    restored_inputs["image_quality_status"] = "Not assessed"
     restored_inputs["interface_language"] = str(interface_language)[:128]
     restored_inputs["platform"] = str(platform or "Not captured")[:512]
     restored_result = dict(result_payload)

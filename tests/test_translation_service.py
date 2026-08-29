@@ -5,6 +5,7 @@ import subprocess
 import sys
 import threading
 import time
+import types
 import unittest
 from contextvars import ContextVar
 from pathlib import Path
@@ -14,10 +15,14 @@ import pandas as pd
 from PIL import Image
 
 from pattern_translator.engine import line_translation as line_translation_engine
+from pattern_translator.engine import overlay as overlay_engine
 from pattern_translator.engine import terminology as terminology_engine
 from pattern_translator.translation_service import (
     TranslateImageRequest,
     _TRANSLATION_PROFILE,
+    _classify_image_quality,
+    assess_image_quality,
+    get_quality_status,
     prepare_translation_dataframe,
     profile_count,
     translate_image,
@@ -50,6 +55,129 @@ class TranslationServiceImportTests(unittest.TestCase):
         from pattern_translator.translation_service import translate_image as imported
 
         self.assertTrue(callable(imported))
+
+    def test_streamlit_delegates_to_shared_quality_assessment(self):
+        app_source = (
+            Path(__file__).resolve().parents[1] / "pattern_translator" / "app.py"
+        ).read_text(encoding="utf-8")
+        self.assertNotIn("def assess_image_quality(", app_source)
+        self.assertNotIn("def get_quality_status(", app_source)
+        self.assertIn("    assess_image_quality,", app_source)
+        self.assertIn("    get_quality_status,", app_source)
+
+
+class ImageQualityAssessmentTests(unittest.TestCase):
+    def test_resolution_boundaries_are_preserved(self):
+        errors, warnings = _classify_image_quality(999, 600, 120, 28)
+        self.assertEqual(1, len(errors))
+        self.assertIn("too small", errors[0])
+        self.assertEqual([], warnings)
+
+        errors, warnings = _classify_image_quality(1000, 600, 120, 28)
+        self.assertEqual([], errors)
+        self.assertEqual(1, len(warnings))
+        self.assertIn("acceptable but not ideal", warnings[0])
+
+        errors, warnings = _classify_image_quality(1500, 600, 120, 28)
+        self.assertEqual([], errors)
+        self.assertEqual([], warnings)
+
+        errors, _warnings = _classify_image_quality(1500, 599, 120, 28)
+        self.assertEqual(1, len(errors))
+
+    def test_sharpness_and_contrast_boundaries_are_preserved(self):
+        errors, warnings = _classify_image_quality(1500, 600, 59.9, 28)
+        self.assertEqual(1, len(errors))
+        self.assertIn("blurry", errors[0])
+        self.assertEqual([], warnings)
+
+        errors, warnings = _classify_image_quality(1500, 600, 60, 28)
+        self.assertEqual([], errors)
+        self.assertEqual(1, len(warnings))
+        self.assertIn("slightly soft", warnings[0])
+
+        errors, warnings = _classify_image_quality(1500, 600, 119.9, 28)
+        self.assertEqual([], errors)
+        self.assertEqual(1, len(warnings))
+
+        errors, warnings = _classify_image_quality(1500, 600, 120, 27.9)
+        self.assertEqual([], errors)
+        self.assertEqual(1, len(warnings))
+        self.assertIn("contrast", warnings[0])
+
+        errors, warnings = _classify_image_quality(1500, 600, 120, 28)
+        self.assertEqual([], errors)
+        self.assertEqual([], warnings)
+
+    def test_status_precedence_is_error_then_warning_then_good(self):
+        self.assertEqual("poor", get_quality_status(["error"], ["warning"])[0])
+        self.assertEqual("fair", get_quality_status([], ["warning"])[0])
+        self.assertEqual("good", get_quality_status([], [])[0])
+
+    def test_numpy_fallback_is_used_when_opencv_assessment_fails(self):
+        image = Image.linear_gradient("L").resize((1500, 600)).convert("RGB")
+        failing_cv2 = types.SimpleNamespace(
+            COLOR_RGB2GRAY=1,
+            cvtColor=mock.Mock(side_effect=RuntimeError("opencv failed")),
+        )
+        with mock.patch.dict(sys.modules, {"cv2": failing_cv2}):
+            errors, warnings, metrics = assess_image_quality(image)
+
+        failing_cv2.cvtColor.assert_called_once()
+        self.assertEqual(1500, metrics["width_px"])
+        self.assertEqual(600, metrics["height_px"])
+        self.assertIsInstance(metrics["sharpness_score"], float)
+        self.assertIsInstance(metrics["contrast_score"], float)
+        self.assertEqual(
+            get_quality_status(errors, warnings)[0],
+            "poor" if errors else "fair" if warnings else "good",
+        )
+
+
+class OverlayScalingTests(unittest.TestCase):
+    @staticmethod
+    def _line_rows(height: float) -> pd.DataFrame:
+        return pd.DataFrame(
+            [
+                {
+                    "Original": f"R{index}: 6X",
+                    "Translation": f"R{index}: 6 sc",
+                    "min_x": 10.0,
+                    "max_x": 400.0,
+                    "min_y": float(index * 100),
+                    "max_y": float(index * 100) + height,
+                }
+                for index in range(1, 4)
+            ]
+        )
+
+    def test_line_overlay_font_uses_source_geometry_only_for_select_area(self):
+        normal_width = 1180
+        camera_width = 4084
+        camera_crop_width = 1038
+
+        normal_size = overlay_engine.line_overlay_font_size(normal_width)
+        camera_size = overlay_engine.line_overlay_font_size(camera_width)
+        camera_crop_size = overlay_engine.line_overlay_font_size(
+            camera_crop_width,
+            self._line_rows(90),
+            scale_to_source_text=True,
+        )
+        normal_photo_crop_size = overlay_engine.line_overlay_font_size(
+            normal_width,
+            self._line_rows(40),
+            scale_to_source_text=True,
+        )
+
+        self.assertEqual(31, normal_size)
+        self.assertEqual(107, camera_size)
+        self.assertEqual(54, camera_crop_size)
+        self.assertEqual(31, normal_photo_crop_size)
+        self.assertAlmostEqual(
+            normal_size / normal_width,
+            camera_size / camera_width,
+            delta=0.001,
+        )
 
 
 class TranslationProfileIsolationTests(unittest.TestCase):
@@ -466,6 +594,10 @@ class TranslationServiceOrchestrationTests(unittest.TestCase):
         self.assertIn("diagnostic_report_inputs", result.primary_result)
         self.assertEqual(result.analytics["area_mode"], "Whole Pattern")
         mock_run_primary_ocr.assert_called_once()
+        overlay_args, overlay_kwargs = mock_make_overlay.call_args
+        self.assertIs(line_df, overlay_args[1])
+        self.assertEqual(self.output_mode, overlay_args[2])
+        self.assertEqual({"scale_to_source_text": False}, overlay_kwargs)
 
     @mock.patch("pattern_translator.translation_service.overlay_engine.image_to_png_bytes")
     @mock.patch("pattern_translator.translation_service.overlay_engine.make_line_translation_overlay")
@@ -507,6 +639,11 @@ class TranslationServiceOrchestrationTests(unittest.TestCase):
         self.assertFalse(ocr_call_diagnostics["whole_pattern_sends_full_image"])
         self.assertTrue(ocr_call_diagnostics["select_area_sends_cropped_image"])
         self.assertEqual(result.analytics["area_mode"], "Select Area")
+        overlay_args, overlay_kwargs = mock_make_overlay.call_args
+        self.assertIs(cropped, overlay_args[0])
+        self.assertIs(line_df, overlay_args[1])
+        self.assertEqual(self.output_mode, overlay_args[2])
+        self.assertEqual({"scale_to_source_text": True}, overlay_kwargs)
         passed_image = mock_run_primary_ocr.call_args.args[0]
         self.assertEqual(passed_image.size, cropped.size)
 

@@ -2,6 +2,7 @@ import base64
 import copy
 import io
 import json
+import struct
 import subprocess
 import sys
 import time
@@ -11,7 +12,7 @@ from unittest import mock
 
 import pandas as pd
 from fastapi.testclient import TestClient
-from PIL import Image
+from PIL import Image, ImageOps
 
 from pattern_translator import api as pattern_api
 from pattern_translator.api import app
@@ -61,6 +62,52 @@ class PatternApiHttpTests(unittest.TestCase):
         Image.new("RGB", (width, height), colour).save(output, format="PNG")
         return output.getvalue()
 
+    @staticmethod
+    def _exif_oriented_jpeg_bytes(width: int = 160, height: int = 100) -> bytes:
+        image = Image.new("RGB", (width, height), "white")
+        image.paste((220, 30, 30), (0, 0, width // 2, height // 2))
+        image.paste((30, 80, 220), (width // 2, height // 2, width, height))
+        exif = Image.Exif()
+        exif[274] = 6
+        output = io.BytesIO()
+        image.save(output, format="JPEG", quality=95, exif=exif)
+        return output.getvalue()
+
+    @staticmethod
+    def _mpo_bytes(width: int = 200, height: int = 160) -> bytes:
+        def jpeg_bytes(colour: str) -> bytes:
+            output = io.BytesIO()
+            Image.new("RGB", (width, height), colour).save(output, format="JPEG")
+            return output.getvalue()
+
+        def mpf_segment(first_size: int, second_size: int, second_offset: int) -> bytes:
+            tiff_header = b"MM\x00*\x00\x00\x00\x08"
+            entries = [
+                struct.pack(">HHI4s", 0xB000, 7, 4, b"0100"),
+                struct.pack(">HHII", 0xB001, 4, 1, 2),
+                struct.pack(">HHII", 0xB002, 7, 32, 50),
+            ]
+            image_entries = (
+                struct.pack(">IIIHH", 0, first_size, 0, 0, 0)
+                + struct.pack(">IIIHH", 0, second_size, second_offset, 0, 0)
+            )
+            tiff = (
+                tiff_header
+                + struct.pack(">H", len(entries))
+                + b"".join(entries)
+                + struct.pack(">I", 0)
+                + image_entries
+            )
+            payload = b"MPF\x00" + tiff
+            return b"\xff\xe2" + struct.pack(">H", len(payload) + 2) + payload
+
+        first = jpeg_bytes("white")
+        second = jpeg_bytes("black")
+        segment = mpf_segment(0, len(second), 0)
+        primary = first[:2] + segment + first[2:]
+        segment = mpf_segment(len(primary), len(second), len(primary) - 10)
+        return first[:2] + segment + first[2:] + second
+
     def _ocr_rows(self):
         return pd.DataFrame(
             [
@@ -89,6 +136,7 @@ class PatternApiHttpTests(unittest.TestCase):
     def _multipart(self, **fields):
         files = fields.pop("files", None)
         data = dict(fields)
+        data.setdefault("force_run", "true")
         return self.client.post("/api/v1/translate", data=data, files=files)
 
     def _translated_payload(self, area_mode="Whole Pattern", crop_box=None):
@@ -139,6 +187,485 @@ class PatternApiHttpTests(unittest.TestCase):
         self.assertIsNotNone(payload["overlay_png"])
         self.assertEqual("image/png", payload["overlay_png"]["media_type"])
         self.assertTrue(payload["overlay_png"]["base64"])
+        self.assertEqual("poor", payload["quality"]["level"])
+        self.assertTrue(payload["quality"]["requires_confirmation"])
+
+    def test_quality_preflight_assesses_full_image_and_exact_crop_without_ocr(self):
+        observed_sizes = []
+
+        def capture_quality(image):
+            observed_sizes.append(image.size)
+            return [], [], {
+                "width_px": image.width,
+                "height_px": image.height,
+                "megapixels": round((image.width * image.height) / 1_000_000, 2),
+                "sharpness_score": 120.0,
+                "contrast_score": 28.0,
+            }
+
+        with mock.patch.object(
+            pattern_api,
+            "assess_image_quality",
+            side_effect=capture_quality,
+        ), mock.patch.object(
+            pattern_api,
+            "translate_image",
+        ) as translate_spy, mock.patch(
+            "pattern_translator.translation_service.run_primary_ocr",
+        ) as ocr_spy:
+            whole = self.client.post(
+                "/api/v1/image-quality",
+                data={"area_mode": "Whole Pattern"},
+                files={
+                    "image": (
+                        "pattern.png",
+                        self._png_bytes(200, 160),
+                        "image/png",
+                    )
+                },
+            )
+            selected = self.client.post(
+                "/api/v1/image-quality",
+                data={
+                    "area_mode": "Select Area",
+                    "crop_left": "40",
+                    "crop_top": "30",
+                    "crop_right": "140",
+                    "crop_bottom": "110",
+                },
+                files={
+                    "image": (
+                        "pattern.png",
+                        self._png_bytes(200, 160),
+                        "image/png",
+                    )
+                },
+            )
+
+        self.assertEqual(200, whole.status_code)
+        self.assertEqual(200, selected.status_code)
+        self.assertEqual([(200, 160), (100, 80)], observed_sizes)
+        self.assertEqual([0, 0, 200, 160], whole.json()["crop_box"])
+        self.assertEqual([40, 30, 140, 110], selected.json()["crop_box"])
+        self.assertEqual("good", whole.json()["quality"]["level"])
+        translate_spy.assert_not_called()
+        ocr_spy.assert_not_called()
+
+    def test_quality_preflight_accepts_browser_png_mime_variants(self):
+        for content_type in ("application/octet-stream", "image/x-png"):
+            with self.subTest(content_type=content_type):
+                response = self.client.post(
+                    "/api/v1/image-quality",
+                    data={"area_mode": "Whole Pattern"},
+                    files={
+                        "image": (
+                            "pattern.PNG",
+                            self._png_bytes(200, 160),
+                            content_type,
+                        )
+                    },
+                )
+                self.assertEqual(200, response.status_code, response.text)
+                self.assertEqual([0, 0, 200, 160], response.json()["crop_box"])
+
+    def test_iphone_camera_mpo_jpg_preflight_assesses_selected_crop_without_ocr(self):
+        mpo_bytes = self._mpo_bytes(200, 160)
+        with Image.open(io.BytesIO(mpo_bytes)) as opened:
+            self.assertEqual("MPO", opened.format)
+
+        observed_sizes = []
+
+        def capture_quality(image):
+            observed_sizes.append(image.size)
+            return [], [], {
+                "width_px": image.width,
+                "height_px": image.height,
+                "megapixels": round((image.width * image.height) / 1_000_000, 2),
+                "sharpness_score": 120.0,
+                "contrast_score": 28.0,
+            }
+
+        with mock.patch.object(
+            pattern_api,
+            "assess_image_quality",
+            side_effect=capture_quality,
+        ), mock.patch.object(
+            pattern_api,
+            "translate_image",
+        ) as translate_spy, mock.patch(
+            "pattern_translator.translation_service.run_primary_ocr",
+        ) as ocr_spy:
+            response = self.client.post(
+                "/api/v1/image-quality",
+                data={
+                    "area_mode": "Select Area",
+                    "crop_left": "40",
+                    "crop_top": "30",
+                    "crop_right": "140",
+                    "crop_bottom": "110",
+                },
+                files={"image": ("IMG_5302.JPG", mpo_bytes, "image/jpeg")},
+            )
+
+        self.assertEqual(200, response.status_code, response.text)
+        self.assertEqual([40, 30, 140, 110], response.json()["crop_box"])
+        self.assertEqual([(100, 80)], observed_sizes)
+        translate_spy.assert_not_called()
+        ocr_spy.assert_not_called()
+
+    def test_iphone_camera_exif_orientation_matches_preview_quality_crop_ocr_and_output(self):
+        image_bytes = self._exif_oriented_jpeg_bytes()
+        with Image.open(io.BytesIO(image_bytes)) as opened:
+            self.assertEqual((160, 100), opened.size)
+            self.assertEqual(6, opened.getexif().get(274))
+            expected_visual = ImageOps.exif_transpose(opened).convert("RGB")
+        self.assertEqual((100, 160), expected_visual.size)
+        crop_box = (10, 20, 70, 120)
+        expected_crop = expected_visual.crop(crop_box)
+        quality_images = []
+
+        def capture_quality(image):
+            quality_images.append(image.copy())
+            return [], [], {
+                "width_px": image.width,
+                "height_px": image.height,
+                "megapixels": round((image.width * image.height) / 1_000_000, 2),
+                "sharpness_score": 120.0,
+                "contrast_score": 28.0,
+            }
+
+        with mock.patch.object(
+            pattern_api,
+            "assess_image_quality",
+            side_effect=capture_quality,
+        ), mock.patch.object(
+            pattern_api,
+            "translate_image",
+        ) as translate_spy, mock.patch(
+            "pattern_translator.translation_service.run_primary_ocr",
+        ) as ocr_spy:
+            preflight = self.client.post(
+                "/api/v1/image-quality",
+                data={
+                    "area_mode": "Select Area",
+                    "crop_left": str(crop_box[0]),
+                    "crop_top": str(crop_box[1]),
+                    "crop_right": str(crop_box[2]),
+                    "crop_bottom": str(crop_box[3]),
+                },
+                files={"image": ("image.jpg", image_bytes, "image/jpeg")},
+            )
+
+        self.assertEqual(200, preflight.status_code, preflight.text)
+        self.assertEqual(list(crop_box), preflight.json()["crop_box"])
+        self.assertEqual((60, 100), quality_images[0].size)
+        self.assertEqual(expected_crop.tobytes(), quality_images[0].tobytes())
+        translate_spy.assert_not_called()
+        ocr_spy.assert_not_called()
+
+        ocr_sizes = []
+
+        def capture_ocr(image, *_args, **_kwargs):
+            ocr_sizes.append(image.size)
+            return self._mock_primary_ocr()
+
+        with mock.patch.object(
+            pattern_api,
+            "assess_image_quality",
+            side_effect=capture_quality,
+        ), mock.patch(
+            "pattern_translator.translation_service.run_primary_ocr",
+            side_effect=capture_ocr,
+        ):
+            whole = self._multipart(
+                files={"image": ("image.jpg", image_bytes, "image/jpeg")},
+                source_mode=self.source_mode,
+                output_mode=self.output_mode,
+                area_mode="Whole Pattern",
+            )
+            selected = self._multipart(
+                files={"image": ("image.jpg", image_bytes, "image/jpeg")},
+                source_mode=self.source_mode,
+                output_mode=self.output_mode,
+                area_mode="Select Area",
+                crop_left=str(crop_box[0]),
+                crop_top=str(crop_box[1]),
+                crop_right=str(crop_box[2]),
+                crop_bottom=str(crop_box[3]),
+            )
+
+        self.assertEqual(200, whole.status_code, whole.text)
+        self.assertEqual(200, selected.status_code, selected.text)
+        self.assertEqual([(100, 160), (60, 100)], ocr_sizes)
+        self.assertEqual([0, 0, 100, 160], whole.json()["crop_box"])
+        self.assertEqual(list(crop_box), selected.json()["crop_box"])
+        for response, expected_size in ((whole, (100, 160)), (selected, (60, 100))):
+            overlay_bytes = base64.b64decode(response.json()["overlay_png"]["base64"])
+            with Image.open(io.BytesIO(overlay_bytes)) as overlay:
+                self.assertEqual(expected_size, overlay.size)
+
+    def test_generic_mime_does_not_bypass_extension_or_image_decode_validation(self):
+        unsupported_extension = self.client.post(
+            "/api/v1/image-quality",
+            data={"area_mode": "Whole Pattern"},
+            files={"image": ("pattern.txt", self._png_bytes(), "application/octet-stream")},
+        )
+        invalid_image = self.client.post(
+            "/api/v1/image-quality",
+            data={"area_mode": "Whole Pattern"},
+            files={"image": ("pattern.png", b"not an image", "application/octet-stream")},
+        )
+
+        self.assertEqual(400, unsupported_extension.status_code)
+        self.assertEqual(400, invalid_image.status_code)
+
+    def test_poor_preflight_is_canonical_and_never_starts_ocr(self):
+        with mock.patch.object(
+            pattern_api,
+            "translate_image",
+        ) as translate_spy, mock.patch(
+            "pattern_translator.translation_service.run_primary_ocr",
+        ) as ocr_spy:
+            response = self.client.post(
+                "/api/v1/image-quality",
+                data={"area_mode": "Whole Pattern"},
+                files={
+                    "image": (
+                        "pattern.png",
+                        self._png_bytes(200, 160),
+                        "image/png",
+                    )
+                },
+            )
+
+        self.assertEqual(200, response.status_code)
+        payload = response.json()
+        self.assertTrue(payload["request_id"])
+        self.assertEqual("poor", payload["quality"]["level"])
+        self.assertEqual("Poor", payload["quality"]["label"])
+        self.assertTrue(payload["quality"]["requires_confirmation"])
+        self.assertEqual(200, payload["quality"]["metrics"]["width_px"])
+        translate_spy.assert_not_called()
+        ocr_spy.assert_not_called()
+
+    def test_poor_unconfirmed_translate_stops_before_database_and_ocr(self):
+        poor_quality = (
+            ["Image appears blurry."],
+            [],
+            {
+                "width_px": 1500,
+                "height_px": 600,
+                "megapixels": 0.9,
+                "sharpness_score": 59.9,
+                "contrast_score": 28.0,
+            },
+        )
+        with mock.patch.object(
+            pattern_api,
+            "assess_image_quality",
+            return_value=poor_quality,
+        ), mock.patch.object(
+            pattern_api,
+            "load_database_dataframe",
+        ) as load_spy, mock.patch.object(
+            pattern_api,
+            "translate_image",
+        ) as translate_spy, mock.patch(
+            "pattern_translator.translation_service.run_primary_ocr",
+        ) as ocr_spy:
+            response = self._multipart(
+                files={
+                    "image": (
+                        "pattern.png",
+                        self._png_bytes(200, 160),
+                        "image/png",
+                    )
+                },
+                source_mode=self.source_mode,
+                output_mode=self.output_mode,
+                area_mode="Whole Pattern",
+                force_run="false",
+            )
+
+        self.assertEqual(409, response.status_code)
+        self.assertEqual("poor", response.json()["quality"]["level"])
+        load_spy.assert_not_called()
+        translate_spy.assert_not_called()
+        ocr_spy.assert_not_called()
+
+    def test_fair_translate_proceeds_without_override_with_real_metadata(self):
+        fair_quality = (
+            [],
+            ["Image is slightly soft."],
+            {
+                "width_px": 1500,
+                "height_px": 600,
+                "megapixels": 0.9,
+                "sharpness_score": 60.0,
+                "contrast_score": 28.0,
+            },
+        )
+        with mock.patch.object(
+            pattern_api,
+            "assess_image_quality",
+            return_value=fair_quality,
+        ), mock.patch(
+            "pattern_translator.translation_service.run_primary_ocr",
+            return_value=self._mock_primary_ocr(),
+        ), mock.patch.object(
+            pattern_api,
+            "translate_image",
+            wraps=translate_image,
+        ) as translate_spy:
+            response = self._multipart(
+                files={
+                    "image": (
+                        "pattern.png",
+                        self._png_bytes(200, 160),
+                        "image/png",
+                    )
+                },
+                source_mode=self.source_mode,
+                output_mode=self.output_mode,
+                area_mode="Whole Pattern",
+                force_run="false",
+            )
+
+        self.assertEqual(200, response.status_code)
+        translate_spy.assert_called_once()
+        request = translate_spy.call_args.args[0]
+        self.assertEqual(fair_quality[1], request.quality_warnings)
+        self.assertEqual(fair_quality[2], request.quality_metrics)
+        self.assertEqual("Fair", request.quality_label)
+        self.assertEqual(response.json()["quality"]["metrics"], fair_quality[2])
+
+    def test_poor_explicit_override_proceeds_exactly_once(self):
+        poor_quality = (
+            ["Image appears blurry."],
+            [],
+            {
+                "width_px": 1500,
+                "height_px": 600,
+                "megapixels": 0.9,
+                "sharpness_score": 59.9,
+                "contrast_score": 28.0,
+            },
+        )
+        with mock.patch.object(
+            pattern_api,
+            "assess_image_quality",
+            return_value=poor_quality,
+        ), mock.patch(
+            "pattern_translator.translation_service.run_primary_ocr",
+            return_value=self._mock_primary_ocr(),
+        ) as ocr_spy, mock.patch.object(
+            pattern_api,
+            "translate_image",
+            wraps=translate_image,
+        ) as translate_spy:
+            response = self._multipart(
+                files={
+                    "image": (
+                        "pattern.png",
+                        self._png_bytes(200, 160),
+                        "image/png",
+                    )
+                },
+                source_mode=self.source_mode,
+                output_mode=self.output_mode,
+                area_mode="Whole Pattern",
+                force_run="true",
+            )
+
+        self.assertEqual(200, response.status_code)
+        translate_spy.assert_called_once()
+        ocr_spy.assert_called_once()
+        request = translate_spy.call_args.args[0]
+        self.assertEqual(poor_quality[0], request.quality_errors)
+        self.assertEqual("Poor", request.quality_label)
+        self.assertEqual("poor", response.json()["quality"]["level"])
+
+    def test_quality_assessment_failure_is_generic_and_never_starts_ocr(self):
+        with mock.patch.object(
+            pattern_api,
+            "assess_image_quality",
+            side_effect=RuntimeError("secret quality failure"),
+        ), mock.patch.object(
+            pattern_api,
+            "load_database_dataframe",
+        ) as load_spy, mock.patch.object(
+            pattern_api,
+            "translate_image",
+        ) as translate_spy, mock.patch(
+            "pattern_translator.translation_service.run_primary_ocr",
+        ) as ocr_spy:
+            response = self._multipart(
+                files={
+                    "image": (
+                        "pattern.png",
+                        self._png_bytes(200, 160),
+                        "image/png",
+                    )
+                },
+                source_mode=self.source_mode,
+                output_mode=self.output_mode,
+                area_mode="Whole Pattern",
+            )
+
+        self.assertEqual(500, response.status_code)
+        self.assertEqual(
+            "Image quality assessment failed",
+            response.json()["error"],
+        )
+        self.assertTrue(response.json()["request_id"])
+        self.assertNotIn("secret", response.text)
+        load_spy.assert_not_called()
+        translate_spy.assert_not_called()
+        ocr_spy.assert_not_called()
+
+    def test_quality_endpoint_validation_error_is_bounded_and_has_request_id(self):
+        cases = [
+            {
+                "data": {"area_mode": "Whole Pattern"},
+                "files": {
+                    "image": ("pattern.gif", b"not-an-image", "image/gif")
+                },
+            },
+            {"data": {"area_mode": "Whole Pattern"}, "files": None},
+            {
+                "data": {
+                    "area_mode": "Select Area",
+                    "crop_left": "not-a-number",
+                    "crop_top": "0",
+                    "crop_right": "100",
+                    "crop_bottom": "80",
+                },
+                "files": {
+                    "image": (
+                        "pattern.png",
+                        self._png_bytes(200, 160),
+                        "image/png",
+                    )
+                },
+            },
+        ]
+        for case in cases:
+            with self.subTest(case=case["data"]):
+                response = self.client.post(
+                    "/api/v1/image-quality",
+                    data=case["data"],
+                    files=case["files"],
+                )
+                self.assertEqual(400, response.status_code)
+                self.assertEqual(
+                    {"error", "request_id"},
+                    set(response.json()),
+                )
+                self.assertEqual(
+                    "Image quality assessment failed",
+                    response.json()["error"],
+                )
+                self.assertTrue(response.json()["request_id"])
 
     def test_translate_image_invoked_once_with_real_request(self):
         with mock.patch(
@@ -261,7 +788,7 @@ class PatternApiHttpTests(unittest.TestCase):
                 self.assertIn("Interface language: Japanese", response.text)
                 self.assertIn("Platform: Phase3B1-Test-Agent", response.text)
                 self.assertIn(
-                    "Image quality status: Not assessed",
+                    "Image quality status: Poor",
                     response.text,
                 )
                 restored_result = report_builder.call_args.args[0]

@@ -31,6 +31,14 @@ export function displayBoxToOriginal(box, orientation, rawWidth, rawHeight) {
   return [left, top, Math.max(left, right), Math.max(top, bottom)];
 }
 
+export function displayBoxToImage(box, width, height) {
+  const left = clamp(Math.floor(box.left), 0, width);
+  const top = clamp(Math.floor(box.top), 0, height);
+  const right = clamp(Math.ceil(box.right), 0, width);
+  const bottom = clamp(Math.ceil(box.bottom), 0, height);
+  return [left, top, Math.max(left, right), Math.max(top, bottom)];
+}
+
 export function normalizedCropBox(box, width, height, minSize = 50) {
   const minimum = Math.min(minSize, width, height);
   const cropWidth = clamp(Number(box.width) || minimum, minimum, width);

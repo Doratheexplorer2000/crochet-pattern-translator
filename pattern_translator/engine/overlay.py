@@ -90,6 +90,35 @@ def _load_overlay_font(size: int):
     return ImageFont.load_default()
 
 
+def line_overlay_font_size(
+    image_width: int,
+    line_df: Optional[pd.DataFrame] = None,
+    scale_to_source_text: bool = False,
+) -> int:
+    """Size labels from the canvas, plus source-row geometry for unscaled crops."""
+    canvas_size = max(18, int(image_width / 38))
+    if not scale_to_source_text or line_df is None or line_df.empty:
+        return canvas_size
+    row_heights = []
+    for _, row in line_df.iterrows():
+        try:
+            height = float(row.get("max_y", 0)) - float(row.get("min_y", 0))
+        except (TypeError, ValueError):
+            continue
+        if height > 0:
+            row_heights.append(height)
+    if not row_heights:
+        return canvas_size
+    row_heights.sort()
+    middle = len(row_heights) // 2
+    median_height = (
+        row_heights[middle]
+        if len(row_heights) % 2
+        else (row_heights[middle - 1] + row_heights[middle]) / 2
+    )
+    return max(canvas_size, int(median_height * 0.6))
+
+
 def _wrap_label(text: str, max_chars: int = 24) -> List[str]:
     text = str(text).strip()
     if len(text) <= max_chars:
@@ -389,6 +418,7 @@ def make_line_translation_overlay(
     output_mode: str,
     max_labels: int = 120,
     max_full_label_chars: int = 42,
+    scale_to_source_text: bool = False,
 ) -> Tuple[Optional[Image.Image], str, pd.DataFrame]:
     """Draw smart overlay labels for translated OCR visual lines.
 
@@ -403,7 +433,7 @@ def make_line_translation_overlay(
     w, h = img.size
     overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
-    font_size = max(18, min(34, int(w / 38)))
+    font_size = line_overlay_font_size(w, line_df, scale_to_source_text)
     font = _load_overlay_font(font_size)
     marker_font = _load_overlay_font(max(font_size, 20))
 

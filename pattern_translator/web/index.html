@@ -55,6 +55,15 @@
       <p class="preview-caption" data-i18n="cropPreviewCaption"></p>
       <button id="edit-area-button" class="secondary" type="button" data-i18n="editArea"></button>
     </section>
+    <section id="quality-section" class="quality-section" aria-live="polite" hidden>
+      <p id="quality-label" class="quality-label"></p>
+      <p id="quality-message" class="quality-message"></p>
+      <p id="quality-block-warning" class="quality-block-warning" data-i18n="qualityBlockWarning" hidden></p>
+      <label id="force-ocr-control" class="force-ocr-control" hidden>
+        <input id="force-ocr" type="checkbox">
+        <span data-i18n="forceOcr"></span>
+      </label>
+    </section>
     <section id="translation-action" class="translation-action" hidden>
       <p id="status" class="running-status" role="status" aria-live="polite"></p>
       <button id="translate-button" class="primary" type="button" data-i18n="translate"></button>

@@ -15,7 +15,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
-from PIL import Image
+from PIL import Image, ImageOps
 
 from pattern_translator.engine import result_delivery as result_delivery_engine
 from pattern_translator.engine import translation_area_state as translation_area_state_engine
@@ -24,6 +24,8 @@ from pattern_translator.translation_service import (
     CSV_TERM_CACHE_STATS,
     NORMALIZED_LOOKUP_INDEX_STATS,
     TranslateImageRequest,
+    assess_image_quality,
+    get_quality_status,
     load_database_dataframe,
     prepare_translation_dataframe,
     translate_image,
@@ -34,19 +36,20 @@ _WEB_DIRECTORY = Path(__file__).resolve().parent / "web"
 app.mount("/static", StaticFiles(directory=_WEB_DIRECTORY), name="static")
 
 _MAX_UPLOAD_BYTES = 25 * 1024 * 1024
-_SUPPORTED_PIL_FORMATS = {"JPEG", "PNG", "WEBP"}
+_SUPPORTED_PIL_FORMATS = {"JPEG", "MPO", "PNG", "WEBP"}
 _ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 _ALLOWED_CONTENT_TYPES = {
     "image/jpeg",
     "image/jpg",
     "image/png",
+    "image/x-png",
     "image/webp",
 }
+_GENERIC_CONTENT_TYPES = {"application/octet-stream"}
 _DEFAULT_OCR_RESIZE_TEST = "1000 px"
 _DEFAULT_INTERFACE_LANGUAGE = "English"
 _DEFAULT_DIAGNOSTIC_PLATFORM = "http-api"
 _DEFAULT_DIAGNOSTIC_SESSION_GENERATION = "http-api"
-_DEFAULT_QUALITY_LABEL = "Not assessed"
 _APP_VERSION = "Pattern OCR Translator (Beta RC26)"
 _MAX_DIAGNOSTIC_REQUEST_BYTES = 4 * 1024 * 1024
 _UI_LANGUAGE_LABELS = {
@@ -86,17 +89,43 @@ def _decode_uploaded_image(upload: UploadFile, raw_bytes: bytes) -> Image.Image:
     content_type = str(upload.content_type or "").strip().lower()
     if extension and extension not in _ALLOWED_EXTENSIONS:
         raise HTTPException(status_code=400, detail="Unsupported image format")
-    if content_type and content_type not in _ALLOWED_CONTENT_TYPES:
+    generic_type_with_supported_extension = (
+        content_type in _GENERIC_CONTENT_TYPES and extension in _ALLOWED_EXTENSIONS
+    )
+    if (
+        content_type
+        and content_type not in _ALLOWED_CONTENT_TYPES
+        and not generic_type_with_supported_extension
+    ):
         raise HTTPException(status_code=400, detail="Unsupported image format")
     try:
         with Image.open(io.BytesIO(raw_bytes)) as opened:
             if opened.format not in _SUPPORTED_PIL_FORMATS:
                 raise HTTPException(status_code=400, detail="Unsupported image format")
-            return opened.convert("RGB")
+            return ImageOps.exif_transpose(opened).convert("RGB")
     except HTTPException:
         raise
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid image")
+
+
+def _read_uploaded_bytes(upload: UploadFile) -> bytes:
+    try:
+        raw_bytes = upload.file.read()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid image")
+    if len(raw_bytes) > _MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=400, detail="Image too large")
+    return raw_bytes
+
+
+def _parse_optional_coordinate(value: Optional[str]) -> Optional[int]:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="Invalid crop coordinates")
 
 
 def _resolve_crop_box(
@@ -142,6 +171,44 @@ def _downscale_settings(working_image: Image.Image, ocr_resize_test: str) -> Tup
     return experimental_downscale, downscale_max_height_option
 
 
+def _quality_details(image: Image.Image) -> Dict[str, Any]:
+    errors, warnings, metrics = assess_image_quality(image)
+    level, _status_label, _message = get_quality_status(errors, warnings)
+    return {
+        "level": level,
+        "label": level.capitalize(),
+        "requires_confirmation": level == "poor",
+        "metrics": metrics,
+        "errors": errors,
+        "warnings": warnings,
+    }
+
+
+def _quality_response(
+    *,
+    request_id: str,
+    area_mode: str,
+    crop_box: Tuple[int, int, int, int],
+    quality: Dict[str, Any],
+) -> Dict[str, Any]:
+    return {
+        "request_id": request_id,
+        "area_mode": area_mode,
+        "crop_box": list(crop_box),
+        "quality": quality,
+    }
+
+
+def _image_quality_error(status_code: int, request_id: str) -> JSONResponse:
+    return JSONResponse(
+        status_code=status_code,
+        content={
+            "error": "Image quality assessment failed",
+            "request_id": request_id,
+        },
+    )
+
+
 def _build_translate_request(
     *,
     image: Image.Image,
@@ -158,8 +225,8 @@ def _build_translate_request(
     crop_extraction_seconds: float,
     action_started: float,
     ocr_execution_start: float,
+    quality: Dict[str, Any],
 ) -> TranslateImageRequest:
-    width, height = working_image.size
     experimental_downscale, downscale_max_height_option = _downscale_settings(
         working_image,
         _DEFAULT_OCR_RESIZE_TEST,
@@ -179,10 +246,10 @@ def _build_translate_request(
         action_started=action_started,
         image_load_seconds=image_load_seconds,
         crop_extraction_seconds=crop_extraction_seconds,
-        quality_metrics={"width_px": width, "height_px": height},
-        quality_errors=[],
-        quality_warnings=[],
-        quality_label=_DEFAULT_QUALITY_LABEL,
+        quality_metrics=dict(quality["metrics"]),
+        quality_errors=list(quality["errors"]),
+        quality_warnings=list(quality["warnings"]),
+        quality_label=str(quality["label"]),
         experimental_downscale=experimental_downscale,
         downscale_max_height_option=downscale_max_height_option,
         ocr_resize_test=_DEFAULT_OCR_RESIZE_TEST,
@@ -211,6 +278,7 @@ def _serialize_success(
     crop_box: Tuple[int, int, int, int],
     result,
     terminology_dataframe,
+    quality: Dict[str, Any],
 ) -> Dict[str, Any]:
     primary = result.primary_result
     analytics = result.analytics
@@ -230,6 +298,7 @@ def _serialize_success(
         "output_mode": output_mode,
         "area_mode": area_mode,
         "crop_box": list(crop_box),
+        "quality": quality,
         "raw_ocr_text": primary.get("raw_ocr_text", ""),
         "readable_translation": primary.get("readable_translation", ""),
         "translation_txt": primary.get("translation_txt", ""),
@@ -301,6 +370,49 @@ def browser_config() -> Dict[str, str]:
     }
 
 
+@app.post("/api/v1/image-quality")
+def image_quality(
+    image: Optional[UploadFile] = File(None),
+    area_mode: str = Form(translation_area_state_engine.WHOLE_PATTERN),
+    crop_left: Optional[str] = Form(None),
+    crop_top: Optional[str] = Form(None),
+    crop_right: Optional[str] = Form(None),
+    crop_bottom: Optional[str] = Form(None),
+) -> Dict[str, Any]:
+    request_id = uuid.uuid4().hex
+    try:
+        if image is None:
+            raise HTTPException(status_code=400, detail="Invalid image")
+        area_mode = _validate_area_mode(area_mode)
+        raw_bytes = _read_uploaded_bytes(image)
+        decoded_image = _decode_uploaded_image(image, raw_bytes)
+        crop_box = _resolve_crop_box(
+            area_mode,
+            decoded_image,
+            _parse_optional_coordinate(crop_left),
+            _parse_optional_coordinate(crop_top),
+            _parse_optional_coordinate(crop_right),
+            _parse_optional_coordinate(crop_bottom),
+        )
+        working_image = (
+            _crop_image(decoded_image, crop_box)
+            if area_mode == translation_area_state_engine.SELECT_AREA
+            else decoded_image
+        )
+        quality = _quality_details(working_image)
+    except HTTPException as error:
+        return _image_quality_error(error.status_code, request_id)
+    except Exception:
+        return _image_quality_error(500, request_id)
+
+    return _quality_response(
+        request_id=request_id,
+        area_mode=area_mode,
+        crop_box=crop_box,
+        quality=quality,
+    )
+
+
 @app.post("/api/v1/translate")
 def translate_pattern(
     image: UploadFile = File(...),
@@ -311,6 +423,7 @@ def translate_pattern(
     crop_top: Optional[int] = Form(None),
     crop_right: Optional[int] = Form(None),
     crop_bottom: Optional[int] = Form(None),
+    force_run: bool = Form(False),
 ) -> Dict[str, Any]:
     request_id = uuid.uuid4().hex
     source_mode = _validate_language(source_mode, "source_mode")
@@ -318,12 +431,7 @@ def translate_pattern(
     area_mode = _validate_area_mode(area_mode)
 
     image_load_start = time.perf_counter()
-    try:
-        raw_bytes = image.file.read()
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid image")
-    if len(raw_bytes) > _MAX_UPLOAD_BYTES:
-        raise HTTPException(status_code=400, detail="Image too large")
+    raw_bytes = _read_uploaded_bytes(image)
     decoded_image = _decode_uploaded_image(image, raw_bytes)
     image_load_seconds = time.perf_counter() - image_load_start
 
@@ -343,6 +451,20 @@ def translate_pattern(
         selected_image = decoded_image
     working_image = selected_image
     crop_extraction_seconds = time.perf_counter() - crop_extract_start
+
+    try:
+        quality = _quality_details(working_image)
+    except Exception:
+        return _image_quality_error(500, request_id)
+    if quality["requires_confirmation"] and not force_run:
+        content = _quality_response(
+            request_id=request_id,
+            area_mode=area_mode,
+            crop_box=crop_box,
+            quality=quality,
+        )
+        content["error"] = "Image quality confirmation required"
+        return JSONResponse(status_code=409, content=content)
 
     try:
         full_df = load_database_dataframe()
@@ -370,6 +492,7 @@ def translate_pattern(
         crop_extraction_seconds=crop_extraction_seconds,
         action_started=action_started,
         ocr_execution_start=ocr_execution_start,
+        quality=quality,
     )
 
     try:
@@ -388,6 +511,7 @@ def translate_pattern(
         crop_box,
         result,
         df,
+        quality,
     )
 
 

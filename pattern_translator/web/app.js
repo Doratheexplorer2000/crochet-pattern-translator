@@ -1,12 +1,15 @@
-import { displayBoxToOriginal, normalizedCropBox, readExifOrientation, resizeCropBox } from "/static/crop_coordinates.js";
+import { displayBoxToImage, normalizedCropBox, readExifOrientation, resizeCropBox } from "/static/crop_coordinates.js";
 import { modeLabelFor, resolveUiLang, stringsFor } from "/static/translations.js";
-import { MODE_VALUES, adaptApiError, canTranslate, diagnosticFilename, invalidateRequest, isCurrentDiagnosticRequest, isCurrentImage, isCurrentRequest, postDiagnosticReport, translationFormEntries } from "/static/workflow_state.js";
+import { MODE_VALUES, adaptApiError, applyQualityResponse, beginTranslation, canTranslate, confirmPoorQuality, diagnosticFilename, discardCompletedResult, forceRunForCurrentQuality, hasCurrentQuality, invalidateQuality, invalidateRequest, isCurrentDiagnosticRequest, isCurrentImage, isCurrentQualityRequest, isCurrentRequest, isValidQualityResponse, isValidTranslationResponse, postDiagnosticReport, qualityFormEntries, qualityIdentity, translationFormEntries, validateImageFile } from "/static/workflow_state.js";
 
 const MAX_BYTES = 25 * 1024 * 1024;
 const state = {
   file: null, source: "", target: "", area: "Whole Pattern", crop: null, imageState: "empty",
   generation: 0, loading: false, controller: null, imageUrl: null, pngUrl: null, txtUrl: null,
   diagnosticContext: null, diagnosticLoading: false, diagnosticController: null,
+  qualityAssessment: null, qualityFile: null, qualityArea: null, qualityCrop: null,
+  qualityConfirmed: false, qualityError: false, qualityGeneration: 0,
+  qualityLoading: false, qualityController: null,
   image: { orientation: 1, rawWidth: 0, rawHeight: 0, width: 1, height: 1 },
   selection: null, initialSelection: null, layout: null, controllerPosition: { left: 0, top: 0 },
   activeEdge: "right", pointer: null, repeatDelay: null, repeatTimer: null,
@@ -35,6 +38,39 @@ function updateTranslateAvailability() {
   translate.textContent = state.loading ? text.runningAction : text.translate;
 }
 
+function renderQuality() {
+  const section = $("quality-section");
+  const usable = state.file
+    && state.imageState === "ready"
+    && (state.area === "Whole Pattern" || state.crop);
+  section.hidden = !usable;
+  section.className = "quality-section";
+  $("quality-block-warning").hidden = true;
+  $("force-ocr-control").hidden = true;
+  $("force-ocr").checked = forceRunForCurrentQuality(state);
+  if (!usable) return;
+  if (state.qualityLoading) {
+    section.classList.add("quality-pending");
+    $("quality-label").textContent = text.qualityAssessing;
+    $("quality-message").textContent = "";
+    return;
+  }
+  if (state.qualityError || !hasCurrentQuality(state)) {
+    section.classList.add("quality-error");
+    $("quality-label").textContent = text.qualityAssessmentError;
+    $("quality-message").textContent = "";
+    return;
+  }
+  const level = state.qualityAssessment.level;
+  section.classList.add(`quality-${level}`);
+  $("quality-label").textContent = text[`quality${level[0].toUpperCase()}${level.slice(1)}`];
+  $("quality-message").textContent = text[`quality${level[0].toUpperCase()}${level.slice(1)}Message`];
+  if (level === "poor") {
+    $("quality-block-warning").hidden = false;
+    $("force-ocr-control").hidden = false;
+  }
+}
+
 function updateDiagnosticAvailability() {
   const button = $("diagnostic-download");
   button.hidden = !state.diagnosticContext;
@@ -42,21 +78,33 @@ function updateDiagnosticAvailability() {
   button.textContent = state.diagnosticLoading ? text.diagnosticLoading : text.downloadDiagnostic;
 }
 
-function invalidateResultAndRequest() {
+function invalidateTranslationRequest() {
   const controller = invalidateRequest(state);
   controller?.abort();
   state.controller = null;
   state.diagnosticController?.abort();
   state.diagnosticController = null;
   state.diagnosticLoading = false;
-  state.diagnosticContext = null;
-  clearObjectUrl("pngUrl");
-  clearObjectUrl("txtUrl");
-  $("result-section").hidden = true;
-  $("overlay-image").removeAttribute("src");
-  setDiagnosticMessage();
   setMessage();
+  setDiagnosticMessage();
   updateDiagnosticAvailability();
+  updateTranslateAvailability();
+}
+
+function clearCompletedResult() {
+  discardCompletedResult(state, (url) => URL.revokeObjectURL(url));
+  $("overlay-image").removeAttribute("src");
+  $("png-download").removeAttribute("href");
+  $("txt-download").removeAttribute("href");
+  $("translation-text").textContent = "";
+  $("result-section").hidden = true;
+  setDiagnosticMessage();
+  updateDiagnosticAvailability();
+}
+
+function invalidateQualityForInput() {
+  invalidateQuality(state)?.abort();
+  renderQuality();
   updateTranslateAvailability();
 }
 
@@ -82,6 +130,7 @@ function renderWorkflow() {
   $("preview-image").src = ready ? state.imageUrl : "";
   $("preview-image").alt = ready ? text.originalImage : "";
   renderHints();
+  renderQuality();
   updateTranslateAvailability();
 }
 
@@ -129,11 +178,12 @@ function populateModeSelects() {
 }
 
 function validateFile(file) {
-  if (!file || !file.size) return text.errorEmpty;
-  if (file.size > MAX_BYTES) return text.errorLarge;
-  const extension = (file.name.split(".").pop() || "").toLowerCase();
-  const allowedType = !file.type || ["image/jpeg", "image/png", "image/webp"].includes(file.type.toLowerCase());
-  return ["jpg", "jpeg", "png", "webp"].includes(extension) && allowedType ? "" : text.errorUnsupported;
+  const reason = validateImageFile(file, MAX_BYTES);
+  return {
+    empty: text.errorEmpty,
+    large: text.errorLarge,
+    unsupported: text.errorUnsupported,
+  }[reason] || "";
 }
 
 function acceptFile(file) {
@@ -142,7 +192,9 @@ function acceptFile(file) {
     setMessage("", error);
     return;
   }
-  invalidateResultAndRequest();
+  invalidateTranslationRequest();
+  invalidateQualityForInput();
+  clearCompletedResult();
   clearObjectUrl("imageUrl");
   state.file = file;
   state.imageState = "reading";
@@ -157,7 +209,9 @@ function acceptFile(file) {
 }
 
 function removeFile() {
-  invalidateResultAndRequest();
+  invalidateTranslationRequest();
+  invalidateQualityForInput();
+  clearCompletedResult();
   clearObjectUrl("imageUrl");
   state.file = null;
   state.imageState = "empty";
@@ -188,6 +242,7 @@ async function initializeImage() {
   const height = sourceImage.naturalHeight;
   if (!width || !height) {
     state.imageState = "empty";
+    invalidateQualityForInput();
     setMessage("", text.errorUnreadable);
     renderWorkflow();
     return;
@@ -209,6 +264,7 @@ async function initializeImage() {
   setMessage();
   if (state.area === "Select Area") openCropper();
   renderWorkflow();
+  if (state.area === "Whole Pattern") assessCurrentImageQuality();
 }
 
 function calculateLayout() {
@@ -404,9 +460,9 @@ function startArrowRepeat(event, button) {
 
 function currentCropBox() {
   const box = state.selection;
-  return displayBoxToOriginal({
+  return displayBoxToImage({
     left: box.left, top: box.top, right: box.left + box.width, bottom: box.top + box.height,
-  }, state.image.orientation, state.image.rawWidth, state.image.rawHeight);
+  }, state.image.width, state.image.height);
 }
 
 async function responseJson(response) {
@@ -417,13 +473,58 @@ async function responseJson(response) {
   }
 }
 
-async function translate() {
-  if (!canTranslate(state) || state.loading) return;
-  invalidateResultAndRequest();
-  state.loading = true;
-  const token = state.generation;
+async function assessCurrentImageQuality() {
+  if (
+    !state.file
+    || state.imageState !== "ready"
+    || (state.area === "Select Area" && !state.crop)
+  ) return;
+  invalidateQuality(state)?.abort();
+  const identity = qualityIdentity(state);
+  const token = state.qualityGeneration;
   const controller = new AbortController();
-  state.controller = controller;
+  state.qualityController = controller;
+  state.qualityLoading = true;
+  state.qualityError = false;
+  renderQuality();
+  updateTranslateAvailability();
+  const data = new FormData();
+  data.append("image", identity.file);
+  qualityFormEntries(state).forEach(([name, value]) => data.append(name, value));
+  try {
+    const response = await fetch("/api/v1/image-quality", {
+      method: "POST",
+      body: data,
+      signal: controller.signal,
+    });
+    const body = await responseJson(response);
+    if (!isCurrentQualityRequest(state, token, identity)) return;
+    if (!response.ok || !applyQualityResponse(state, body, identity)) {
+      state.qualityError = true;
+    }
+  } catch (error) {
+    if (
+      isCurrentQualityRequest(state, token, identity)
+      && error?.name !== "AbortError"
+    ) state.qualityError = true;
+  } finally {
+    if (
+      isCurrentQualityRequest(state, token, identity)
+      && state.qualityController === controller
+    ) {
+      state.qualityLoading = false;
+      state.qualityController = null;
+      renderQuality();
+      updateTranslateAvailability();
+    }
+  }
+}
+
+async function translate() {
+  const controller = new AbortController();
+  const token = beginTranslation(state, controller);
+  if (token === null) return;
+  const identity = qualityIdentity(state);
   setMessage(text.translating);
   updateTranslateAvailability();
   const data = new FormData();
@@ -434,14 +535,30 @@ async function translate() {
     const body = await responseJson(response);
     if (!isCurrentRequest(state, token)) return;
     if (!response.ok) {
-      setMessage("", adaptApiError(response.status, body, text));
+      const qualityConflict = (
+        response.status === 409
+        && isCurrentQualityRequest(state, state.qualityGeneration, identity)
+        && isValidQualityResponse(body, identity)
+      );
+      if (qualityConflict) {
+        applyQualityResponse(state, body, identity);
+        renderQuality();
+      }
+      setMessage("", qualityConflict ? "" : adaptApiError(response.status, body, text));
       return;
     }
-    if (!body || typeof body !== "object") {
+    if (!isValidTranslationResponse(body, state, identity)) {
       setMessage("", text.errorGeneric);
       return;
     }
-    showResult(body);
+    try {
+      showResult(body);
+    } catch (_) {
+      setMessage("", text.errorGeneric);
+      return;
+    }
+    applyQualityResponse(state, body, identity, true);
+    renderQuality();
     track("pattern_translation_completed");
     setMessage();
   } catch (error) {
@@ -461,8 +578,23 @@ function showResult(body) {
   if (!body.overlay_png?.base64) throw new Error("missing overlay");
   const binary = atob(body.overlay_png.base64);
   const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
-  state.pngUrl = URL.createObjectURL(new Blob([bytes], { type: "image/png" }));
-  state.txtUrl = URL.createObjectURL(new Blob([body.translation_txt || ""], { type: "text/plain;charset=utf-8" }));
+  let pngUrl;
+  let txtUrl;
+  try {
+    pngUrl = URL.createObjectURL(new Blob([bytes], { type: "image/png" }));
+    txtUrl = URL.createObjectURL(new Blob([body.translation_txt || ""], { type: "text/plain;charset=utf-8" }));
+  } catch (error) {
+    if (pngUrl) URL.revokeObjectURL(pngUrl);
+    if (txtUrl) URL.revokeObjectURL(txtUrl);
+    throw error;
+  }
+  const previousPngUrl = state.pngUrl;
+  const previousTxtUrl = state.txtUrl;
+  state.diagnosticController?.abort();
+  state.diagnosticController = null;
+  state.diagnosticLoading = false;
+  state.pngUrl = pngUrl;
+  state.txtUrl = txtUrl;
   $("overlay-image").src = state.pngUrl;
   $("png-download").href = state.pngUrl;
   $("png-download").download = "crochet_ocr_overlay_translation.png";
@@ -475,6 +607,8 @@ function showResult(body) {
   setDiagnosticMessage();
   updateDiagnosticAvailability();
   $("result-section").hidden = false;
+  if (previousPngUrl) URL.revokeObjectURL(previousPngUrl);
+  if (previousTxtUrl) URL.revokeObjectURL(previousTxtUrl);
 }
 
 async function downloadDiagnostic() {
@@ -555,13 +689,19 @@ $("remove-button").addEventListener("click", removeFile);
 ["dragenter", "dragover"].forEach((type) => zone.addEventListener(type, (event) => { event.preventDefault(); zone.classList.add("drag-over"); }));
 ["dragleave", "drop"].forEach((type) => zone.addEventListener(type, (event) => { event.preventDefault(); zone.classList.remove("drag-over"); }));
 zone.addEventListener("drop", (event) => acceptFile(event.dataTransfer?.files?.[0]));
-$("source-mode").addEventListener("change", (event) => { state.source = event.target.value; renderHints(); invalidateResultAndRequest(); });
-$("output-mode").addEventListener("change", (event) => { state.target = event.target.value; renderHints(); invalidateResultAndRequest(); });
+$("source-mode").addEventListener("change", (event) => { state.source = event.target.value; renderHints(); invalidateTranslationRequest(); });
+$("output-mode").addEventListener("change", (event) => { state.target = event.target.value; renderHints(); invalidateTranslationRequest(); });
 document.querySelectorAll("[name=area-mode]").forEach((radio) => radio.addEventListener("change", (event) => {
   state.area = event.target.value;
-  invalidateResultAndRequest();
+  invalidateTranslationRequest();
+  invalidateQualityForInput();
   if (state.area === "Select Area") openCropper();
-  else { state.crop = null; closeCropper(); renderWorkflow(); }
+  else {
+    state.crop = null;
+    closeCropper();
+    renderWorkflow();
+    assessCurrentImageQuality();
+  }
 }));
 sourceImage.addEventListener("load", initializeImage);
 selectionEl.addEventListener("pointerdown", (event) => { if (event.target === selectionEl) startPointer(event, "move-selection"); });
@@ -594,21 +734,32 @@ $("start-over-button").addEventListener("click", () => {
   $("settings input[value='Whole Pattern']").checked = true;
   state.area = "Whole Pattern";
   state.crop = null;
-  invalidateResultAndRequest();
+  invalidateTranslationRequest();
+  invalidateQualityForInput();
   closeCropper();
   renderWorkflow();
+  assessCurrentImageQuality();
 });
 $("use-area-button").addEventListener("click", () => {
   state.crop = currentCropBox();
   renderCropPreview();
-  invalidateResultAndRequest();
+  invalidateTranslationRequest();
+  invalidateQualityForInput();
   closeCropper();
   renderWorkflow();
+  assessCurrentImageQuality();
 });
 $("edit-area-button").addEventListener("click", () => {
   state.crop = null;
-  invalidateResultAndRequest();
+  invalidateTranslationRequest();
+  invalidateQualityForInput();
   openCropper();
+});
+$("force-ocr").addEventListener("change", (event) => {
+  if (event.target.checked) confirmPoorQuality(state);
+  else state.qualityConfirmed = false;
+  renderQuality();
+  updateTranslateAvailability();
 });
 $("translate-button").addEventListener("click", translate);
 $("diagnostic-download").addEventListener("click", downloadDiagnostic);
