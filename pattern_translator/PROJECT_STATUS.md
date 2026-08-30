@@ -4,13 +4,17 @@ Last updated: 2026-08-30
 
 ## Current Version
 
-Current production baseline: known-good pre-cache tree (`c49755b59686e58298febba445e5ae51a6cb6e05`)
-
-Validated equivalent tree: `8dccd17518344d7d2152dc49fc3e13c0e95e3fd0`
+Current FastAPI production application baseline: `778703b981fd2ef97c447eedca96021e553f3d3c` (`Fix FastAPI Plausible initialization`)
 
 Application version string: `Pattern OCR Translator (Beta RC26)`
 
-Entry point:
+Production entry point:
+
+```text
+pattern_translator.api:app
+```
+
+Preserved Streamlit rollback entry point:
 
 ```text
 pattern_translator/app.py
@@ -18,7 +22,17 @@ pattern_translator/app.py
 
 ## Current Production Status
 
-Crochet Pattern OCR Translator is the current OCR-based pattern translation app at `https://pattern.crochetintelligence.com`. Revert commit `c49755b59686e58298febba445e5ae51a6cb6e05` is deployed from GitHub `main`; its tree is byte-identical to the known-good pre-cache tree at `8dccd17518344d7d2152dc49fc3e13c0e95e3fd0`. It includes the production-validated Portal Centralization, Contextual LLM translation, completed Components V2 analytics, custom-domain, isolated OCR-worker, canonical translation-state, and rerun-safe result-delivery baselines.
+The FastAPI/browser Crochet Pattern Translator is live at `https://pattern.crochetintelligence.com` from GitHub `main`, using the existing Railway service and custom domain. The production application baseline is `778703b981fd2ef97c447eedca96021e553f3d3c`. Railway uses this validated Custom Start Command with one Uvicorn worker:
+
+```sh
+sh -c 'python -m uvicorn pattern_translator.api:app --host 0.0.0.0 --port "$PORT" --workers 1'
+```
+
+The `sh -c` wrapper is required so Railway's `PORT` variable is expanded. Passing `"${PORT}"` directly leaves a literal string and causes Uvicorn to reject the port as a non-integer. Railway's automatically generated networking/port configuration must not be changed.
+
+Production smoke UAT passed for the public browser UI, custom domain, upload, image-quality assessment, Whole Pattern and Select Area workflows, OCR, translation, overlay/result rendering, PNG/TXT downloads, Diagnostic Report, physical mobile workflow, and redeploy/startup behavior. Plausible production verification also passed: each approved event (`pattern_image_uploaded`, `pattern_translation_completed`, `pattern_png_downloaded`, `pattern_txt_downloaded`, and `pattern_feedback_clicked`) arrived exactly once in the intended shared `crochetintelligence.com` site, with no duplicate firing observed.
+
+Streamlit remains preserved as rollback-only and has not been removed. The Dockerfile default and `railway_start.sh` remain the rollback startup path. The cutover added no HEIC support and required no Redis, database session, queue, cache, persistent volume, or new Railway service. Streamlit retirement and other cleanup remain separate future work.
 
 RC42 completed the first Engine Extraction by moving the CSV terminology / lookup engine into `pattern_translator/engine/terminology.py`. RC43 extracted pure line-translation logic into `pattern_translator/engine/line_translation.py`. RC44 extracted Diagnostic Report construction and formatting into `pattern_translator/engine/diagnostic_report.py`. RC45 completed Boundary Cleanup. RC46 extracted overlay rendering into `pattern_translator/engine/overlay.py`. RC47 extracted Pattern Document responsibilities into `pattern_translator/engine/pattern_document.py`. RC48 extracted OCR line assembly into `pattern_translator/engine/ocr_lines.py`. RC49 extracted deterministic OCR cleanup into `pattern_translator/engine/ocr_cleanup.py`, completing Engine Migration and Domain Layer extraction. Regression and Human UAT passed with no user-visible behavior changes, and the completed engine layer is included in the current production release.
 
@@ -59,37 +73,37 @@ stitches_1_8e.csv
 
 ## Current Priorities
 
-Current Phase: Phase 3B2 image-quality assessment, gating, and force-run parity is complete and approved after automated validation and Human UAT. No later migration phase or production cutover is active.
+Current Phase: FastAPI production cutover and Production Human UAT are complete. FastAPI/browser is the production baseline; Streamlit is retained only as the rollback path pending separately approved retirement work.
 
 Purpose:
 
 - Preserve the approved RC51 Pattern Translator Home Screen and frozen RC52 custom-component baseline.
-- Preserve the production-validated RC54B Components V2 analytics transport baseline.
-- All five current Pattern Translator Plausible events use the shared Components V2 bridge; no V1 Plausible analytics dependency remains.
+- Preserve the production-validated RC54B Components V2 analytics transport as the Streamlit rollback baseline.
+- All five current FastAPI/browser Plausible events use the browser queue/init transport; the rollback-only Streamlit implementation retains its Components V2 bridge and no V1 Plausible analytics dependency.
 - Preserve the shared browser-side analytics implementation across the Portal and both translators while keeping analytics observational and non-blocking.
 - Keep Google Sheets Product Facts as separately approved future work; they are not implemented.
-- Replace the unreliable Streamlit browser/session delivery boundary in reversible stages while preserving the validated translation engines and product behavior.
+- Preserve the production-validated FastAPI browser/API boundary and the existing translation engines and product behavior.
 - Pause deterministic translation-performance work until the migration is stable.
 
-Phase 1 Translation Service Extraction is complete. Commit `8cd522c696b45ba2025e41588e13ea599232c602` added the framework-neutral `pattern_translator/translation_service.py` application-service boundary and `translate_image()`. Streamlit continues to own UI, session state, request lifecycle, result handoff, rendering, and downloads. OCR, deterministic translation, Luna fallback, overlay/output behavior, and engine algorithms were preserved.
+Phase 1 Translation Service Extraction is complete. Commit `8cd522c696b45ba2025e41588e13ea599232c602` added the framework-neutral `pattern_translator/translation_service.py` application-service boundary and `translate_image()`. At Phase 1 closeout, Streamlit continued to own UI, session state, request lifecycle, result handoff, rendering, and downloads. OCR, deterministic translation, Luna fallback, overlay/output behavior, and engine algorithms were preserved.
 
 Final validation passed: `210 / 210` automated tests, `220 / 220` deterministic corpus parity, and local iPhone Human UAT. Human UAT confirmed deterministic translation, Whole Pattern and Select Area workflows, result rendering, and PNG/TXT output delivery. Luna was not exercised locally because the server lacked the required fallback/API-key environment configuration; this was an environment/setup issue, not a Phase 1 regression. The visible stale `OCR Running` indicators after completed translation were confirmed as pre-existing same-run Streamlit rendering behavior, not fixed in Phase 1 and not a Phase 1 extraction regression. Phase 1 received final Codex approval for Human UAT before completion.
 
-Local `main` and `origin/main` were synchronized at the Phase 1 commit before this documentation update. Phase 1 Railway deployment is intentionally deferred; production remains on the pre-Phase-1 baseline. The existing Streamlit WebSocket/AppSession reliability issue remains unresolved and is a reason to continue the staged Streamlit removal.
+At Phase 1 closeout, local `main` and `origin/main` were synchronized at the Phase 1 commit, Railway deployment was deferred, and production remained on the pre-Phase-1 baseline. The Streamlit WebSocket/AppSession reliability issue drove the subsequent staged migration.
 
 Phase 2 is complete. The minimal FastAPI boundary invokes the existing framework-neutral `translate_image()` service through `POST /api/v1/translate`, with Whole Pattern and Select Area support, multipart image validation, crop validation, downscale parity, JSON translation output, and base64 PNG overlay output. Validation passed with 13 API tests, 30 translation/OCR regression tests, and 223 full-suite tests. Codex independent review returned **PASS WITH NON-BLOCKING NOTES**.
 
-Phase 3A delivered the same-origin FastAPI-served browser UI: Whole Pattern; Select Area cropper and Precision Pad; original-image preview; loading/error recovery; overlay and line-by-line results; PNG/TXT downloads; four-language browser localization; and approved visual/typography parity. Desktop Chrome, iPhone Safari, and Android Chrome Human UAT all passed. Final validation passed `229 / 229` tests. Streamlit production has not been replaced, and no Phase 3A push or deployment occurred.
+Phase 3A delivered the same-origin FastAPI-served browser UI: Whole Pattern; Select Area cropper and Precision Pad; original-image preview; loading/error recovery; overlay and line-by-line results; PNG/TXT downloads; four-language browser localization; and approved visual/typography parity. Desktop Chrome, iPhone Safari, and Android Chrome Human UAT all passed. Final validation passed `229 / 229` tests. At Phase 3A closeout, Streamlit production had not been replaced and no Phase 3A push or deployment had occurred.
 
 Deliberate Phase 3A deferrals were Diagnostic Report; image-quality assessment, gating, and force-run; and the download-completion destination popup. Diagnostic Report and image-quality parity were subsequently completed in Phase 3B1 and Phase 3B2. The popup absence remains accepted as non-blocking/deferred.
 
 Phase 3B1 restored on-demand Diagnostic Report parity in the FastAPI/browser UI for Whole Pattern and Select Area without rerunning OCR/translation or introducing server-side result/session persistence. Automated validation passed `239 / 239` tests. Human UAT passed on Desktop Chrome, physical iPhone Safari, and physical Android Chrome, including repeated report downloads, result and PNG/TXT preservation, crop/language preservation, and stale-request behavior.
 
-Phase 3B2 restored image-quality assessment, Good/Fair/Poor warning and gating behavior, and exact-source force-run parity in the FastAPI/browser UI. The stateless quality preflight runs before OCR, while `/api/v1/translate` independently reassesses quality and remains authoritative. Human UAT compatibility corrections included Apple MPO/JPEG acceptance, EXIF orientation normalization with a display-space Select Area crop contract, and responsive overlay sizing for high-resolution Whole Pattern and Select Area results. Final validation passed `264 / 264` automated tests, and Human UAT passed on Desktop Chrome, physical iPhone Safari, and physical Android Chrome. Production still runs the existing Streamlit Pattern Translator; no Railway deployment or FastAPI production cutover has occurred.
+Phase 3B2 restored image-quality assessment, Good/Fair/Poor warning and gating behavior, and exact-source force-run parity in the FastAPI/browser UI. The stateless quality preflight runs before OCR, while `/api/v1/translate` independently reassesses quality and remains authoritative. Human UAT compatibility corrections included Apple MPO/JPEG acceptance, EXIF orientation normalization with a display-space Select Area crop contract, and responsive overlay sizing for high-resolution Whole Pattern and Select Area results. Final validation passed `264 / 264` automated tests, and Human UAT passed on Desktop Chrome, physical iPhone Safari, and physical Android Chrome. At Phase 3B2 closeout, production still ran Streamlit; the subsequent FastAPI production cutover is now complete.
 
 Roadmap decisions:
 
-- Preserve `c49755b59686e58298febba445e5ae51a6cb6e05` / the byte-identical `8dccd17518344d7d2152dc49fc3e13c0e95e3fd0` tree as the current Railway rollback target.
+- Preserve the current Streamlit implementation and Dockerfile default / `railway_start.sh` startup path as the rollback option until retirement is separately approved.
 - Preserve the completed Engine Migration and Domain Layer extraction now included in the production release.
 - Preserve the completed RC54B analytics transport baseline.
 - Do not use the unreliable `app_open` event as the basis of platform visitor analytics.
@@ -113,10 +127,10 @@ The approved direction is staged removal of Streamlit from Pattern Translator on
 3. Migrate the browser UI, uploader, cropper, results, and downloads to the API. **Complete:** Phase 3A, approved local commit `6c8ab97b0731daa6cd61a4f919aa71cabc856d3b`.
 4. Restore Diagnostic Report parity. **Complete:** Phase 3B1.
 5. Restore image-quality assessment, gating, and force-run parity. **Complete:** Phase 3B2.
-6. Cut the existing Pattern Translator Railway service over to FastAPI/Uvicorn without adding another service. **Not started; requires explicit approval.**
-7. Complete Production Human UAT, then retire Streamlit lifecycle code only after parity is proven.
+6. Cut the existing Pattern Translator Railway service over to FastAPI/Uvicorn without adding another service. **Complete:** production baseline `778703b981fd2ef97c447eedca96021e553f3d3c`.
+7. Complete Production Human UAT. **Complete:** production smoke UAT and five-event Plausible verification passed. Streamlit retirement remains separate and has not started.
 
-Any later migration or production-cutover work remains separate and requires fresh scope and explicit approval.
+Any Streamlit retirement, dependency cleanup, or later migration work remains separate and requires fresh scope and explicit approval.
 
 Implementation workflow for this migration: the Product Owner and ChatGPT define scope and acceptance criteria; Cursor implements and validates the approved unit locally without pushing; Codex independently reviews the exact diff and evidence, runs release gates appropriate to risk, and owns commit/push/deployment only after approval.
 
@@ -135,13 +149,13 @@ The Portal Skeleton is functionally complete and frozen. It is an independent As
 - Pattern source/result language controls remain independent. Pattern's duplicate general Privacy UI was removed, while Stitch's tool-specific Google Forms feedback privacy note remains.
 - Both tools return to the Portal in the same tab with interface-language preservation. Pattern uses the Crochet Intelligence eyebrow and English title `Crochet Pattern Translator`; Stitch Tutorial Search preserves the submitted stitch term across interface languages.
 - All three services run in the Railway project `Crochet Intelligence`. Portal Centralization `5e975741a9a53c1835120f0cdb24a60f5af706b1` and custom-domain migration `22fded0fb39a389b87d767faa494d7ad48d3d799` passed production functional/navigation UAT and Plausible regression validation without analytics changes. RC54 Analytics remains closed with Site Domain `crochetintelligence.com`.
-- Portal visual refinement is complete. Pattern Translator's staged Streamlit removal is the highest-priority remaining launch work.
+- Portal visual refinement and the Pattern Translator FastAPI production cutover are complete. Streamlit retirement remains separate future cleanup.
 
 ## Known Issues
 
 ### Next Priority
 
-1. **No later migration phase is active.** Railway/FastAPI production cutover remains not started and requires fresh scope and explicit approval.
+1. **FastAPI production is the validated baseline.** No later migration phase is active. Streamlit retirement or rollback-path removal requires fresh scope and explicit approval.
 
 **Paused performance evidence:** the deterministic anomaly measured approximately `41.06s` total / `36.00s` translation with `0.89s` Paddle inference versus `6.79s` total / `5.70s` translation with `0.88s` Paddle inference after changing target. The controlled cache fix materially improved local deterministic timing and preserved output, but production interaction symptoms persisted after its revert. Resume the audit only after migration stability; dictionary size is not proven as the cause.
 
@@ -176,6 +190,14 @@ Other non-blocking polish already recorded:
 
 ## Current Release Notes
 
+### FastAPI production cutover (complete; Production Human UAT PASS)
+
+- FastAPI/browser is live on the existing Railway service at `https://pattern.crochetintelligence.com`; production application baseline `778703b981fd2ef97c447eedca96021e553f3d3c` includes the corrected Plausible initialization.
+- Validated Railway Custom Start Command: `sh -c 'python -m uvicorn pattern_translator.api:app --host 0.0.0.0 --port "$PORT" --workers 1'`. The shell wrapper is required for `PORT` expansion; direct `"${PORT}"` use failed because Uvicorn received the literal value. One worker is the validated initial production configuration.
+- Production smoke UAT passed across the browser, custom domain, image upload/quality, Whole Pattern, Select Area/crop, OCR/translation, results/overlay, PNG/TXT downloads, Diagnostic Report, physical mobile workflow, and redeploy/startup behavior.
+- Plausible production verification passed for all five approved events, each observed exactly once with no duplicates, in the intended shared `crochetintelligence.com` site.
+- Streamlit remains rollback-only. Its code, dependencies, Dockerfile default, and `railway_start.sh` have not been retired. No HEIC support, Redis, database session, queue, cache, persistent volume, or new service was added. Cleanup and retirement remain separately scoped future work.
+
 ### Phase 3B1 Diagnostic Report parity (complete; Human UAT PASS)
 
 - Restored on-demand Diagnostic Report download in the FastAPI/browser UI for Whole Pattern and Select Area without rerunning OCR/translation or adding server-side result/session persistence.
@@ -189,7 +211,7 @@ Other non-blocking polish already recorded:
 - `/api/v1/image-quality` is a stateless preflight; `/api/v1/translate` independently reassesses quality before OCR and blocks unconfirmed Poor requests.
 - Human UAT compatibility corrections covered Apple MPO/JPEG acceptance, EXIF orientation normalization and display-space crop coordinates, and responsive overlay sizing for high-resolution Whole Pattern and Select Area results.
 - Automated validation passed `264 / 264` tests. Human UAT passed on Desktop Chrome, physical iPhone Safari, and physical Android Chrome, including quality states and override, direct camera/gallery upload, Select Area and Precision Pad, result lifecycle, downloads, Diagnostic Report, and mobile UI behavior.
-- Production remains on the existing Streamlit Pattern Translator. No push, Railway deployment, or FastAPI production cutover occurred; later migration work remains separate.
+- At Phase 3B2 closeout, production remained on Streamlit and no cutover had occurred; the subsequent FastAPI production cutover is now complete.
 
 ### Phase 3A FastAPI browser UI migration (complete; approved)
 
@@ -197,7 +219,7 @@ Other non-blocking polish already recorded:
 - Delivered a same-origin FastAPI-served browser UI with Whole Pattern; Select Area cropper and Precision Pad; original-image preview; loading/error recovery; overlay and line-by-line results; PNG/TXT downloads; four-language browser localization; and approved visual/typography parity.
 - Human UAT passed on Desktop Chrome, iPhone Safari, and Android Chrome. Final automated validation passed `229 / 229` tests.
 - Diagnostic Report, image-quality assessment/gating/force-run, and the download-completion destination popup were deliberately deferred. The popup absence is accepted as non-blocking/deferred; image-quality work is separate Phase 3B2 scope, not Phase 3B1.
-- Release handling: committed locally only; no Phase 3A push or deployment occurred. Streamlit remains the production service, and Railway cutover to FastAPI/Uvicorn has not started and requires explicit approval.
+- Release handling at Phase 3A closeout: committed locally only; no Phase 3A push or deployment occurred. Streamlit still served production and Railway cutover to FastAPI/Uvicorn had not started.
 
 ### Phase 2 FastAPI HTTP boundary (complete; Human UAT PASS)
 
