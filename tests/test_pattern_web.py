@@ -1,6 +1,7 @@
 import base64
 import io
 import json
+import re
 import subprocess
 import unittest
 from pathlib import Path
@@ -49,6 +50,40 @@ class PatternBrowserUiTests(unittest.TestCase):
     def test_browser_config_contains_only_public_plausible_value(self):
         payload = self.client.get("/api/v1/browser-config").json()
         self.assertEqual({"plausible_script_url"}, set(payload))
+
+    def test_fastapi_plausible_initialization_and_event_contract(self):
+        app_source = (REPO_ROOT / "pattern_translator" / "web" / "app.js").read_text()
+        analytics_source = app_source[
+            app_source.index("async function initialiseAnalytics()"):
+            app_source.index('input.addEventListener("change"')
+        ]
+
+        expected_in_order = (
+            'fetch("/api/v1/browser-config")',
+            "config?.plausible_script_url",
+            "window.plausible = window.plausible ||",
+            "window.plausible.init = window.plausible.init ||",
+            "window.plausible.init();",
+            'document.createElement("script")',
+            "script.async = true",
+            "script.src = scriptUrl",
+            'script.id = "ci-plausible-script"',
+            "document.head.append(script)",
+        )
+        positions = [analytics_source.index(fragment) for fragment in expected_in_order]
+        self.assertEqual(sorted(positions), positions)
+        self.assertNotIn("data-domain", analytics_source)
+
+        self.assertEqual(
+            [
+                "pattern_image_uploaded",
+                "pattern_translation_completed",
+                "pattern_png_downloaded",
+                "pattern_txt_downloaded",
+                "pattern_feedback_clicked",
+            ],
+            re.findall(r'track\("([^"]+)"\)', app_source),
+        )
 
     def test_language_placeholders_labels_and_canonical_form_values(self):
         payload = run_browser_modules(

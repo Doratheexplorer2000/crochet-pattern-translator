@@ -674,7 +674,13 @@ async function initialiseAnalytics() {
     const config = await responseJson(response);
     const scriptUrl = String(config?.plausible_script_url || "").trim();
     if (!scriptUrl) return;
-    window.plausible = window.plausible || ((...args) => (window.plausible.q = window.plausible.q || []).push(args));
+    window.plausible = window.plausible || ((...args) => {
+      (window.plausible.q = window.plausible.q || []).push(args);
+    });
+    window.plausible.init = window.plausible.init || ((options) => {
+      window.plausible.o = options || {};
+    });
+    window.plausible.init();
     const script = document.createElement("script");
     script.async = true;
     script.src = scriptUrl;
