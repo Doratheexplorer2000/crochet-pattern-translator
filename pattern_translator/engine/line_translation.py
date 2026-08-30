@@ -937,10 +937,16 @@ def translate_ocr_line(original: str, index: Dict[str, int], df: pd.DataFrame, o
     if not s:
         return ""
 
-    # V24: avoid hard-coded full-sentence translations.
-    # First try CSV term replacement inside the whole line; this lets CSV terms
-    # such as turn / slst / magic ring / ch / sts translate wherever they appear.
-    csv_replaced = replace_csv_terms_in_line(s, index, df, output_mode)
+    csv_replaced_cache = None
+
+    def get_csv_replaced() -> str:
+        nonlocal csv_replaced_cache
+        if csv_replaced_cache is None:
+            # V24: avoid hard-coded full-sentence translations.
+            # Defer CSV replacement until prose/fallback paths need it so round
+            # and expression rows do not pay for a full protected-term scan twice.
+            csv_replaced_cache = replace_csv_terms_in_line(s, index, df, output_mode)
+        return csv_replaced_cache
 
     # Section headers / ordinary structural labels.
     translated_heading = section_headings.detect_section_header(s, output_mode)
@@ -999,6 +1005,7 @@ def translate_ocr_line(original: str, index: Dict[str, int], df: pd.DataFrame, o
     # This avoids partial expression-parser output such as leaving 8sc / Magic ring
     # untranslated in "Start with 8sc in a Magic ring, slst (8)".
     if _looks_like_prose_line(s):
+        csv_replaced = get_csv_replaced()
         if csv_replaced and (norm_text(csv_replaced) != norm_text(s) or (contains_chinese_stitch_count(s) and csv_replaced != s)):
             return csv_replaced
         return translated if translated else s
@@ -1008,6 +1015,7 @@ def translate_ocr_line(original: str, index: Dict[str, int], df: pd.DataFrame, o
         return translated
 
     # Otherwise return CSV term replacement. Unknown ordinary language remains as-is.
+    csv_replaced = get_csv_replaced()
     if csv_replaced and (norm_text(csv_replaced) != norm_text(s) or (contains_chinese_stitch_count(s) and csv_replaced != s)):
         return csv_replaced
 
