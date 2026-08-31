@@ -14,6 +14,7 @@ import pandas as pd
 from pattern_translator.engine import line_translation
 from pattern_translator.engine import llm_fallback
 from pattern_translator.engine import pattern_document
+from pattern_translator.engine import shadow_title_classifier
 from pattern_translator.engine import terminology
 
 
@@ -199,6 +200,10 @@ def build_ocr_line_translations(
             outcome="success",
         )
 
+    cleaned_lines = [cleaned for _row, cleaned, _translated in prepared]
+    shadow_title_classifier.record_shadow_comparison_if_enabled(
+        cleaned_lines=cleaned_lines,
+    )
     title_contexts = []
     for position, (_row, cleaned, _translated) in enumerate(prepared):
         nearby_lines = [
