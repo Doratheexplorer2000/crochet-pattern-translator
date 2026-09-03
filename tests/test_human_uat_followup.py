@@ -126,6 +126,7 @@ class HumanUatLlmDiagnosisTests(unittest.TestCase):
                     self.english_index,
                     self.df,
                     "Traditional Chinese",
+                    "English — US",
                     llm_provider=provider,
                 )
                 self.assertEqual(result.loc[0, "Translation"], expected)

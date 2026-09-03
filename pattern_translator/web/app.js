@@ -113,6 +113,11 @@ function setMessage(status = "", error = "") {
   $("error").textContent = error;
 }
 
+function surfaceTranslationError(error) {
+  setMessage("", error);
+  $("error").scrollIntoView({ block: "center" });
+}
+
 function setDiagnosticMessage(message = "") {
   $("diagnostic-status").textContent = message;
 }
@@ -543,18 +548,20 @@ async function translate() {
       if (qualityConflict) {
         applyQualityResponse(state, body, identity);
         renderQuality();
+        setMessage();
+      } else {
+        surfaceTranslationError(adaptApiError(response.status, body, text));
       }
-      setMessage("", qualityConflict ? "" : adaptApiError(response.status, body, text));
       return;
     }
     if (!isValidTranslationResponse(body, state, identity)) {
-      setMessage("", text.errorGeneric);
+      surfaceTranslationError(text.errorGeneric);
       return;
     }
     try {
       showResult(body);
     } catch (_) {
-      setMessage("", text.errorGeneric);
+      surfaceTranslationError(text.errorGeneric);
       return;
     }
     applyQualityResponse(state, body, identity, true);
@@ -563,7 +570,7 @@ async function translate() {
     setMessage();
   } catch (error) {
     if (isCurrentRequest(state, token) && error?.name !== "AbortError") {
-      setMessage("", text.errorNetwork);
+      surfaceTranslationError(text.errorNetwork);
     }
   } finally {
     if (isCurrentRequest(state, token) && state.controller === controller) {

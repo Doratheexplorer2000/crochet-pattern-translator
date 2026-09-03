@@ -177,6 +177,7 @@ def log_app_ocr_timing(
     call_ordinal: Optional[int] = None,
     model: str = "",
     route: str = "",
+    **diagnostic_fields: object,
 ) -> None:
     ocr_runtime_engine.log_ocr_timing(
         request_id,
@@ -192,6 +193,7 @@ def log_app_ocr_timing(
         call_ordinal=call_ordinal,
         model=model,
         route=route,
+        **diagnostic_fields,
     )
 
 
@@ -1277,6 +1279,7 @@ def translate_image(request: TranslateImageRequest) -> TranslateImageResult:
             index,
             df,
             output_mode,
+            source_mode,
             llm_provider=llm_fallback_engine.get_openai_provider_from_env(),
             diagnostic_logger=log_downstream_timing,
         )

@@ -94,6 +94,7 @@ class ShadowClassifierIntegrationTests(unittest.TestCase):
                 self.english_index,
                 self.df,
                 self.output_mode,
+                "English — US",
                 llm_provider=provider,
             )
 

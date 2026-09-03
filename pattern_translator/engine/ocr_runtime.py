@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import atexit
+import json
 import multiprocessing
 import os
 import sys
@@ -16,6 +17,52 @@ from pattern_translator.engine.ocr_worker import run_worker
 DEFAULT_OCR_TIMEOUT_SECONDS = 90.0
 DEFAULT_MAX_JOBS_PER_WORKER = 4
 _WORKER_STOP_GRACE_SECONDS = 3.0
+_BROAD_DIAGNOSTIC_FIELDS = frozenset(
+    {
+        "failed_rule",
+        "source_segment_ids",
+        "expected_source_segment_ids",
+        "returned_source_segment_ids",
+        "missing_source_segment_ids",
+        "duplicate_source_segment_ids",
+        "unknown_source_segment_ids",
+        "failed_source_excerpt",
+        "failed_translation_excerpt",
+        "failing_source_excerpt",
+        "failing_translation_excerpt",
+        "failed_source_excerpt_truncated",
+        "failed_translation_excerpt_truncated",
+        "source_digit_multiset",
+        "translation_digit_multiset",
+        "missing_digits",
+        "extra_digits",
+        "required_round_identities",
+        "present_round_identities",
+        "missing_round_identities",
+        "required_row_identities",
+        "present_row_identities",
+        "missing_row_identities",
+        "required_totals",
+        "missing_totals",
+        "required_repeat_multipliers",
+        "missing_repeat_multipliers",
+        "measurement_facts",
+        "failed_measurement_number",
+        "failed_measurement_unit",
+        "measurement_failure",
+        "semantic_unit_count",
+        "expected_segment_count",
+        "stage",
+        "exception_type",
+        "reason",
+        "expected_top_level_shape",
+        "actual_top_level_json_type",
+        "route_glossary_entry_count",
+        "scoped_glossary_entry_count",
+        "route_glossary_char_count",
+        "scoped_glossary_char_count",
+    }
+)
 
 
 def _safe_log_token(value: object) -> str:
@@ -51,6 +98,7 @@ def log_ocr_timing(
     call_ordinal: Optional[int] = None,
     model: str = "",
     route: str = "",
+    **diagnostic_fields: object,
 ) -> None:
     """Emit content-free OCR lifecycle timing for production diagnosis."""
     fields = [
@@ -88,6 +136,18 @@ def log_ocr_timing(
         fields.append(f"model={_safe_log_token(model)}")
     if route:
         fields.append(f"route={_safe_log_token(route)}")
+    for key in sorted(_BROAD_DIAGNOSTIC_FIELDS):
+        if key not in diagnostic_fields:
+            continue
+        try:
+            encoded = json.dumps(
+                diagnostic_fields[key],
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+        except (TypeError, ValueError):
+            continue
+        fields.append(f"{key}={encoded}")
     print("[pattern_ocr_timing] " + " ".join(fields), file=sys.stderr, flush=True)
 
 

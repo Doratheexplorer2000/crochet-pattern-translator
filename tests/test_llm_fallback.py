@@ -169,6 +169,7 @@ class LlmFallbackTests(unittest.TestCase):
             self.english_index,
             self.df,
             "Traditional Chinese",
+            "English — US",
             llm_provider=provider,
             diagnostic_logger=diagnostic_logger,
         )
@@ -566,6 +567,7 @@ class LlmFallbackTests(unittest.TestCase):
                 self.english_index,
                 self.df,
                 "Traditional Chinese",
+                "English — US",
                 llm_provider=provider,
             )
 
@@ -597,6 +599,7 @@ class LlmFallbackTests(unittest.TestCase):
             self.english_index,
             self.df,
             "Traditional Chinese",
+            "English — US",
             llm_provider=provider,
         )
         self.assertEqual(contexts, ["Body brown yarn"])
@@ -651,6 +654,7 @@ class LlmFallbackTests(unittest.TestCase):
             self.english_index,
             self.df,
             "Traditional Chinese",
+            "English — US",
             llm_provider=provider,
         )
         self.assertEqual(call_index, len(sources))
@@ -665,7 +669,7 @@ class LlmFallbackTests(unittest.TestCase):
             {"text": "Stuff firmly before closing the opening", "confidence": 0.99, "min_x": 0, "max_x": 300, "min_y": 0, "max_y": 20},
         ])
         result = ocr_lines.build_ocr_line_translations(
-            rows, self.english_index, self.df, "Traditional Chinese"
+            rows, self.english_index, self.df, "Traditional Chinese", "English — US"
         )
         self.assertEqual(
             result.loc[0, "Translation"], "塞滿棉花 before closing the opening"
@@ -683,6 +687,7 @@ class LlmFallbackTests(unittest.TestCase):
             self.english_index,
             self.df,
             "Traditional Chinese",
+            "English — US",
             llm_provider=provider,
         )
         provider.assert_not_called()
@@ -706,6 +711,7 @@ class LlmFallbackTests(unittest.TestCase):
             self.english_index,
             self.df,
             "Traditional Chinese",
+            "English — US",
             llm_provider=provider,
         )
         self.assertEqual(result["Original"].tolist(), ["Body (brown yarn)", "R3: 6 sc"])
@@ -734,6 +740,7 @@ class LlmFallbackTests(unittest.TestCase):
             terminology.build_term_index(self.df, "Traditional Chinese"),
             self.df,
             "English — US",
+            "Traditional Chinese",
             llm_provider=provider,
         )
         self.assertEqual(
@@ -788,6 +795,7 @@ class LlmFallbackTests(unittest.TestCase):
                     terminology.build_term_index(self.df, source_mode),
                     self.df,
                     output_mode,
+                    source_mode,
                     llm_provider=provider,
                 )
                 self.assertEqual(calls, [expected_input])
@@ -952,6 +960,7 @@ class LlmFallbackTests(unittest.TestCase):
             self.english_index,
             self.df,
             "Traditional Chinese",
+            "English — US",
             llm_provider=provider,
         )
         self.assertEqual(result.loc[0, "Translation"], "已翻譯標題 花樣")
@@ -1055,7 +1064,9 @@ class LlmFallbackTests(unittest.TestCase):
             {"text": "眼睛在11-12行之间", "confidence": 0.94, "min_x": 0, "max_x": 200, "min_y": 40, "max_y": 60},
         ])
         index = terminology.build_term_index(self.df, "Simplified Chinese")
-        result = ocr_lines.build_ocr_line_translations(rows, index, self.df, "English — US")
+        result = ocr_lines.build_ocr_line_translations(
+            rows, index, self.df, "English — US", "Simplified Chinese"
+        )
         self.assertEqual(
             result["Translation"].tolist(),
             [

@@ -11,6 +11,7 @@ from typing import Callable, Dict, Optional
 
 import pandas as pd
 
+from pattern_translator.engine import broad_translation
 from pattern_translator.engine import line_translation
 from pattern_translator.engine import llm_fallback
 from pattern_translator.engine import pattern_document
@@ -170,6 +171,7 @@ def build_ocr_line_translations(
     index: Dict[str, int],
     df: pd.DataFrame,
     output_mode: str,
+    source_mode: str,
     llm_provider: Optional[llm_fallback.Provider] = None,
     diagnostic_logger: Optional[llm_fallback.DiagnosticLogger] = None,
 ) -> pd.DataFrame:
@@ -180,6 +182,20 @@ def build_ocr_line_translations(
     rows["confidence"] = pd.to_numeric(rows.get("confidence", 0), errors="coerce").fillna(0)
     rows = rows.sort_values(["min_y", "min_x"]).reset_index(drop=True)
     _profile_count("merged OCR lines", len(rows))
+
+    if (
+        broad_translation.is_broad_translation_enabled()
+        and broad_translation.is_broad_translation_route(source_mode, output_mode)
+    ):
+        return broad_translation.translate_merged_ocr_lines_broad(
+            rows,
+            source_mode=source_mode,
+            output_mode=output_mode,
+            diagnostic_logger=diagnostic_logger,
+            profile_count=_profile_count,
+            profile_add_time=_profile_add_time,
+        )
+
     deterministic_start = time.perf_counter()
     if diagnostic_logger is not None:
         diagnostic_logger("deterministic_translation_begin")

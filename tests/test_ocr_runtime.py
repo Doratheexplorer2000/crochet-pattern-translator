@@ -14,6 +14,7 @@ import numpy as np
 from pattern_translator.engine import ocr_runtime
 from pattern_translator.engine import ocr_worker
 from pattern_translator.engine.ocr_worker import normalize_paddle_result
+from pattern_translator.translation_service import log_app_ocr_timing
 
 
 def _result_response(request, language):
@@ -189,6 +190,150 @@ class OCRRuntimeTests(unittest.TestCase):
         ):
             self.assertIn(expected, line)
         for forbidden in ("OCR source text", "translated text", "synthetic-test-key"):
+            self.assertNotIn(forbidden, line)
+
+    def test_broad_validation_diagnostics_survive_app_logging_boundary(self):
+        output = io.StringIO()
+        with redirect_stderr(output):
+            log_app_ocr_timing(
+                "broad-request",
+                "objective_validation_failed",
+                failed_rule="arabic_digit_multiset",
+                source_segment_ids=["segment-0003"],
+                expected_source_segment_ids=["segment-0001", "segment-0003"],
+                returned_source_segment_ids=["segment-0001", "segment-0003"],
+                missing_source_segment_ids=[],
+                duplicate_source_segment_ids=[],
+                unknown_source_segment_ids=[],
+                failed_source_excerpt="R1: 6X",
+                failed_translation_excerpt="R1: 7 sc",
+                source_digit_multiset={"1": 1, "6": 1},
+                translation_digit_multiset={"1": 1, "7": 1},
+                missing_digits=["6"],
+                extra_digits=["7"],
+                measurement_facts=[{"number": "6", "unit": "mm"}],
+                failed_measurement_number="6",
+                failed_measurement_unit="mm",
+                measurement_failure="unit_marker_missing",
+                semantic_unit_count=1,
+                expected_segment_count=2,
+                prompt="FULL_PROMPT_SECRET",
+                glossary="FULL_GLOSSARY_SECRET",
+                provider_response={"output": "FULL_PROVIDER_RESPONSE_SECRET"},
+                api_key="sk-secret-test-key",
+                authorization="Bearer secret",
+            )
+
+        line = output.getvalue()
+        for expected in (
+            "phase=objective_validation_failed",
+            'failed_rule="arabic_digit_multiset"',
+            'source_segment_ids=["segment-0003"]',
+            'expected_source_segment_ids=["segment-0001","segment-0003"]',
+            'returned_source_segment_ids=["segment-0001","segment-0003"]',
+            "missing_source_segment_ids=[]",
+            "duplicate_source_segment_ids=[]",
+            "unknown_source_segment_ids=[]",
+            'failed_source_excerpt="R1: 6X"',
+            'failed_translation_excerpt="R1: 7 sc"',
+            'source_digit_multiset={"1":1,"6":1}',
+            'translation_digit_multiset={"1":1,"7":1}',
+            'missing_digits=["6"]',
+            'extra_digits=["7"]',
+            'measurement_facts=[{"number":"6","unit":"mm"}]',
+            'failed_measurement_number="6"',
+            'failed_measurement_unit="mm"',
+            'measurement_failure="unit_marker_missing"',
+            "semantic_unit_count=1",
+            "expected_segment_count=2",
+        ):
+            self.assertIn(expected, line)
+        for forbidden in (
+            "FULL_PROMPT_SECRET",
+            "FULL_GLOSSARY_SECRET",
+            "FULL_PROVIDER_RESPONSE_SECRET",
+            "sk-secret-test-key",
+            "Bearer secret",
+        ):
+            self.assertNotIn(forbidden, line)
+
+    def test_broad_parse_stage_diagnostics_survive_app_logging_boundary(self):
+        output = io.StringIO()
+        with redirect_stderr(output):
+            log_app_ocr_timing(
+                "broad-parse-request",
+                "broad_response_parse_failed",
+                elapsed_seconds=1.25,
+                call_ordinal=1,
+                model="gpt-5.6-luna",
+                route="broad",
+                stage="semantic_unit_schema",
+                exception_type="_BroadResponseParsingError",
+                reason="semantic_unit_shape_invalid",
+                expected_top_level_shape=(
+                    "object_with_segment_assignments_and_semantic_units_objects"
+                ),
+                actual_top_level_json_type="object",
+                semantic_unit_count=18,
+                prompt="FULL_PROMPT_SECRET",
+                provider_response={"output": "FULL_PROVIDER_RESPONSE_SECRET"},
+                api_key="sk-secret-test-key",
+            )
+
+        line = output.getvalue()
+        for expected in (
+            "phase=broad_response_parse_failed",
+            'stage="semantic_unit_schema"',
+            'exception_type="_BroadResponseParsingError"',
+            'reason="semantic_unit_shape_invalid"',
+            (
+                'expected_top_level_shape='
+                '"object_with_segment_assignments_and_semantic_units_objects"'
+            ),
+            'actual_top_level_json_type="object"',
+            "semantic_unit_count=18",
+            "call_ordinal=1",
+            "model=gpt-5.6-luna",
+            "route=broad",
+            "elapsed_ms=1250.0",
+        ):
+            self.assertIn(expected, line)
+        for forbidden in (
+            "FULL_PROMPT_SECRET",
+            "FULL_PROVIDER_RESPONSE_SECRET",
+            "sk-secret-test-key",
+        ):
+            self.assertNotIn(forbidden, line)
+
+    def test_broad_glossary_scope_metrics_survive_app_logging_boundary(self):
+        output = io.StringIO()
+        with redirect_stderr(output):
+            log_app_ocr_timing(
+                "broad-scope-request",
+                "broad_glossary_scope",
+                route_glossary_entry_count=83,
+                scoped_glossary_entry_count=12,
+                route_glossary_char_count=21842,
+                scoped_glossary_char_count=3147,
+                glossary="FULL_GLOSSARY_SECRET",
+                source_text="FULL_OCR_SOURCE_SECRET",
+                api_key="sk-secret-test-key",
+            )
+
+        line = output.getvalue()
+        for expected in (
+            "phase=broad_glossary_scope",
+            "route_glossary_entry_count=83",
+            "scoped_glossary_entry_count=12",
+            "route_glossary_char_count=21842",
+            "scoped_glossary_char_count=3147",
+        ):
+            self.assertIn(expected, line)
+        for forbidden in (
+            "FULL_GLOSSARY_SECRET",
+            "FULL_OCR_SOURCE_SECRET",
+            "sk-secret-test-key",
+        ):
             self.assertNotIn(forbidden, line)
 
     def test_worker_starts_lazily_and_handles_sequential_requests(self):

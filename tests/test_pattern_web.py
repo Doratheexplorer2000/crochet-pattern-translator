@@ -526,6 +526,9 @@ class PatternBrowserUiTests(unittest.TestCase):
         translate_start = app_source.index("async function translate()")
         translate_end = app_source.index("\nfunction showResult(", translate_start)
         translate_source = app_source[translate_start:translate_end]
+        error_start = app_source.index("function surfaceTranslationError(")
+        error_end = app_source.index("\nfunction setDiagnosticMessage(", error_start)
+        error_source = app_source[error_start:error_end]
 
         self.assertNotIn('clearObjectUrl("pngUrl")', invalidation_source)
         self.assertNotIn('clearObjectUrl("txtUrl")', invalidation_source)
@@ -533,6 +536,9 @@ class PatternBrowserUiTests(unittest.TestCase):
         self.assertNotIn('"result-section").hidden = true', invalidation_source)
         self.assertNotIn("invalidateTranslationRequest()", translate_source)
         self.assertIn("showResult(body)", translate_source)
+        self.assertIn('setMessage("", error)', error_source)
+        self.assertIn('$("error").scrollIntoView({ block: "center" })', error_source)
+        self.assertEqual(4, translate_source.count("surfaceTranslationError("))
 
     def test_diagnostic_ui_strings_exist_in_all_four_languages(self):
         payload = run_browser_modules(
