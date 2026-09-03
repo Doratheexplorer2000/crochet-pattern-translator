@@ -36,6 +36,12 @@ export function discardCompletedResult(state, revokeObjectUrl = () => {}) {
   state.diagnosticContext = null;
 }
 
+export function restartCropWorkflow(state, wholePatternControl) {
+  wholePatternControl.checked = true;
+  state.area = "Whole Pattern";
+  state.crop = null;
+}
+
 function matchingCrop(first, second) {
   if (first === null || second === null) return first === second;
   return Array.isArray(first)

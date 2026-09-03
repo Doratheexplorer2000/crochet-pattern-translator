@@ -121,6 +121,66 @@ class PatternBrowserUiTests(unittest.TestCase):
             payload["form"],
         )
 
+    def test_select_area_start_over_resets_to_whole_pattern_without_affecting_other_paths(self):
+        payload = run_browser_modules(
+            """
+            import { readFileSync } from 'node:fs';
+            const module = (path) => import('data:text/javascript,' + encodeURIComponent(readFileSync(path, 'utf8')));
+            const { qualityFormEntries, restartCropWorkflow } = await module('./pattern_translator/web/workflow_state.js');
+
+            const selected = {
+              file: { name: 'pattern.png' }, source: 'English — US', target: 'Japanese',
+              area: 'Select Area', crop: [10, 20, 210, 220], selection: { left: 10 },
+            };
+            const wholePatternControl = { checked: false };
+            restartCropWorkflow(selected, wholePatternControl);
+
+            const useArea = { area: 'Select Area', crop: [30, 40, 130, 140] };
+            const wholePattern = { area: 'Whole Pattern', crop: null };
+            console.log(JSON.stringify({
+              restarted: {
+                checked: wholePatternControl.checked,
+                area: selected.area,
+                crop: selected.crop,
+                file: selected.file.name,
+                source: selected.source,
+                target: selected.target,
+                selection: selected.selection,
+              },
+              useAreaForm: qualityFormEntries(useArea),
+              wholePatternForm: qualityFormEntries(wholePattern),
+            }));
+            """
+        )
+        self.assertEqual(
+            {
+                "checked": True,
+                "area": "Whole Pattern",
+                "crop": None,
+                "file": "pattern.png",
+                "source": "English — US",
+                "target": "Japanese",
+                "selection": {"left": 10},
+            },
+            payload["restarted"],
+        )
+        self.assertEqual(
+            [["area_mode", "Select Area"], ["crop_left", "30"], ["crop_top", "40"],
+             ["crop_right", "130"], ["crop_bottom", "140"]],
+            payload["useAreaForm"],
+        )
+        self.assertEqual([["area_mode", "Whole Pattern"]], payload["wholePatternForm"])
+
+        app_source = (REPO_ROOT / "pattern_translator" / "web" / "app.js").read_text()
+        handler_start = app_source.index('$("start-over-button").addEventListener')
+        handler_end = app_source.index('$("use-area-button").addEventListener', handler_start)
+        handler_source = app_source[handler_start:handler_end]
+        self.assertIn(
+            'restartCropWorkflow(state, document.querySelector("#settings input[value=\'Whole Pattern\']"))',
+            handler_source,
+        )
+        self.assertNotIn('$("settings input', handler_source)
+
     def test_real_file_and_formdata_png_mime_variants_remain_compatible(self):
         payload = run_browser_modules(
             """
