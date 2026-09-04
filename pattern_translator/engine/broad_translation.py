@@ -39,6 +39,12 @@ SIMPLIFIED_CHINESE_SOURCE = "Simplified Chinese"
 EN_US_TARGET = "English — US"
 SIMPLIFIED_CHINESE_TARGET = SIMPLIFIED_CHINESE_SOURCE
 
+_UNRESOLVED_WARNING_PREFIX_BY_TARGET = {
+    TRADITIONAL_CHINESE_TARGET: "⚠ 未能可靠翻譯：",
+    SIMPLIFIED_CHINESE_TARGET: "⚠ 无法可靠翻译：",
+    EN_US_TARGET: "⚠ Could not translate reliably: ",
+}
+
 _TRUE_VALUES = {"1", "true", "yes", "on"}
 KEYED_RESPONSE_SHAPE = "object_with_segment_assignments_and_semantic_units_objects"
 SHARED_ARABIC_DIGIT_PROMPT_CONTRACT = (
@@ -208,6 +214,15 @@ MEASUREMENT_TARGET_ALIASES = {
 
 class BroadTranslationError(RuntimeError):
     """Controlled broad-translation failure without provider or OCR details."""
+
+
+class _ObjectiveValidationError(BroadTranslationError):
+    """One trusted semantic unit failed an objective translation rule."""
+
+    def __init__(self, failed_rule: str, diagnostic_fields: Mapping[str, object]) -> None:
+        super().__init__()
+        self.failed_rule = failed_rule
+        self.diagnostic_fields = dict(diagnostic_fields)
 
 
 class _BroadResponseParsingError(BroadTranslationError):
@@ -855,6 +870,7 @@ def _parse_semantic_units(
             unit_indexes[unit_id] = len(normalized)
             normalized.append(
                 {
+                    "semantic_unit_id": unit_id,
                     "source_segment_ids": [source_id],
                     "translation": translations_by_unit[unit_id],
                 }
@@ -1272,7 +1288,7 @@ def _validate_objective_facts(
         if source_segment_ids is not None:
             fields["source_segment_ids"] = list(source_segment_ids)
         _log(diagnostic_logger, "objective_validation_failed", **fields)
-        raise BroadTranslationError()
+        raise _ObjectiveValidationError(failed_rule, fields)
 
     if not translation.strip():
         fail("blank_translation")
@@ -1321,6 +1337,65 @@ def validate_semantic_units(
             diagnostic_logger=diagnostic_logger,
             source_segment_ids=unit["source_segment_ids"],
         )
+
+
+def _unresolved_translation(source: str, config: _RouteConfig) -> str:
+    prefix = _UNRESOLVED_WARNING_PREFIX_BY_TARGET.get(config.output_mode)
+    if prefix is None:
+        raise BroadTranslationError()
+    return prefix + source
+
+
+def _resolve_objective_validation_failures(
+    units: Sequence[dict[str, Any]],
+    segments: Sequence[Dict[str, str]],
+    config: _RouteConfig,
+    diagnostic_logger: Optional[DiagnosticLogger] = None,
+) -> Tuple[List[dict[str, Any]], int]:
+    """Fail closed per trusted unit while keeping structural failures request-fatal."""
+    expected_ids = [segment["source_segment_id"] for segment in segments]
+    _validate_id_coverage(units, expected_ids, diagnostic_logger=diagnostic_logger)
+    source_by_id = {
+        segment["source_segment_id"]: segment["text"] for segment in segments
+    }
+    resolved_units: List[dict[str, Any]] = []
+    failures: List[_ObjectiveValidationError] = []
+
+    for unit in units:
+        resolved = dict(unit)
+        source = "\n".join(
+            source_by_id[source_id] for source_id in unit["source_segment_ids"]
+        )
+        try:
+            _validate_objective_facts(
+                source,
+                unit["translation"],
+                config,
+                diagnostic_logger=diagnostic_logger,
+                source_segment_ids=unit["source_segment_ids"],
+            )
+        except _ObjectiveValidationError as error:
+            failures.append(error)
+            resolved["translation"] = _unresolved_translation(source, config)
+            resolved["validation_status"] = "unresolved"
+            resolved["validation_failure_reason"] = error.failed_rule
+        else:
+            resolved["validation_status"] = "validated"
+            resolved["validation_failure_reason"] = ""
+        resolved_units.append(resolved)
+
+    if failures and len(failures) == len(resolved_units):
+        raise BroadTranslationError()
+
+    for error in failures:
+        _log(
+            diagnostic_logger,
+            "partial_validation_failure",
+            partial_validation_failure=True,
+            **error.diagnostic_fields,
+        )
+
+    return resolved_units, len(failures)
 
 
 def call_luna_once(prompt: str, api_key: str) -> Tuple[dict[str, Any], float]:
@@ -1388,6 +1463,12 @@ def adapt_semantic_units_to_line_df(
                 "Translation": translation,
                 "Confidence": round(min(confidences), 3) if confidences else 0.0,
                 "Changed": "✓" if changed else "",
+                "Semantic Unit ID": str(unit.get("semantic_unit_id", "")),
+                "Source Segment IDs": tuple(ids),
+                "Validation Status": str(unit.get("validation_status", "validated")),
+                "Validation Failure Reason": str(
+                    unit.get("validation_failure_reason", "")
+                ),
                 "min_x": min_x,
                 "max_x": max_x,
                 "min_y": min_y,
@@ -1541,7 +1622,7 @@ def translate_merged_ocr_lines_broad(
             [segment["source_segment_id"] for segment in segments],
             diagnostic_logger=diagnostic_logger,
         )
-        validate_semantic_units(
+        units, partial_failure_count = _resolve_objective_validation_failures(
             units,
             segments,
             config,
@@ -1559,14 +1640,16 @@ def translate_merged_ocr_lines_broad(
             call_ordinal=1,
             model=BROAD_MODEL,
             route="broad",
-            outcome="success",
+            outcome="partial_success" if partial_failure_count else "success",
+            partial_validation_failure_count=partial_failure_count,
         )
         _log(
             diagnostic_logger,
             "line_reconstruction_end",
             elapsed_seconds=time.perf_counter() - broad_start,
             visual_line_count=len(result),
-            outcome="success",
+            outcome="partial_success" if partial_failure_count else "success",
+            partial_validation_failure_count=partial_failure_count,
         )
         return result
     except _BroadResponseParsingError as error:

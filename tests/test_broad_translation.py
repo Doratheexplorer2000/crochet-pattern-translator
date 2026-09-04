@@ -8,8 +8,10 @@ from unittest import mock
 import pandas as pd
 
 from pattern_translator.engine import broad_translation
+from pattern_translator.engine import diagnostic_report
 from pattern_translator.engine import line_translation
 from pattern_translator.engine import ocr_lines
+from pattern_translator.engine import overlay
 from pattern_translator.engine import terminology
 from pattern_translator.translation_service import (
     TranslateImageRequest,
@@ -1290,6 +1292,283 @@ class BroadAdapterTests(unittest.TestCase):
         self.assertTrue(required.issubset(set(line_df.columns)))
 
 
+class BroadPartialFailClosedTests(unittest.TestCase):
+    def setUp(self):
+        self.rows = pd.DataFrame(
+            [
+                _ocr_row(
+                    "R1: 6X",
+                    min_x=10,
+                    max_x=70,
+                    min_y=10,
+                    max_y=30,
+                    confidence=0.99,
+                ),
+                _ocr_row(
+                    "R616X",
+                    min_x=20,
+                    max_x=80,
+                    min_y=50,
+                    max_y=70,
+                    confidence=0.81,
+                ),
+                _ocr_row(
+                    "R7: 16X",
+                    min_x=30,
+                    max_x=100,
+                    min_y=90,
+                    max_y=115,
+                    confidence=0.97,
+                ),
+            ]
+        )
+        self.segments, _ = broad_translation.build_source_segments(self.rows)
+
+    @staticmethod
+    def _provider_payload(response: dict) -> dict:
+        return {
+            "output": [
+                {
+                    "content": [
+                        {"type": "output_text", "text": json.dumps(response)}
+                    ]
+                }
+            ]
+        }
+
+    def _translate(self, response: dict):
+        events: list[dict] = []
+        caller = mock.Mock(return_value=(self._provider_payload(response), 0.01))
+        result = broad_translation.translate_merged_ocr_lines_broad(
+            self.rows,
+            source_mode="Simplified Chinese",
+            output_mode="English — US",
+            diagnostic_logger=lambda phase, **fields: events.append(
+                {"phase": phase, **fields}
+            ),
+            environ={"OPENAI_API_KEY": "test-key"},
+            luna_caller=caller,
+        )
+        return result, events, caller
+
+    def _three_unit_response(self) -> dict:
+        return _keyed_response_from_units(
+            _valid_units(
+                self.segments,
+                ["R1: 6 sc", "R6: 16 sc", "R7: 16 sc"],
+            )
+        )
+
+    def test_one_invalid_unit_fails_closed_while_valid_units_are_delivered(self):
+        result, events, caller = self._translate(self._three_unit_response())
+
+        self.assertEqual(
+            [
+                "R1: 6 sc",
+                "⚠ Could not translate reliably: R616X",
+                "R7: 16 sc",
+            ],
+            result["Translation"].tolist(),
+        )
+        self.assertEqual(
+            ["validated", "unresolved", "validated"],
+            result["Validation Status"].tolist(),
+        )
+        self.assertEqual(
+            "arabic_digit_multiset",
+            result.loc[1, "Validation Failure Reason"],
+        )
+        self.assertEqual(
+            (self.segments[1]["source_segment_id"],),
+            result.loc[1, "Source Segment IDs"],
+        )
+        self.assertNotIn("R6: 16 sc", result.loc[1, "Translation"])
+        caller.assert_called_once()
+        partial = [
+            event for event in events if event["phase"] == "partial_validation_failure"
+        ]
+        self.assertEqual(1, len(partial))
+        self.assertEqual("arabic_digit_multiset", partial[0]["failed_rule"])
+        self.assertEqual(
+            [self.segments[1]["source_segment_id"]],
+            partial[0]["source_segment_ids"],
+        )
+        self.assertEqual("R616X", partial[0]["failed_source_excerpt"])
+        self.assertEqual("R6: 16 sc", partial[0]["failed_translation_excerpt"])
+        end = next(event for event in events if event["phase"] == "ai_request_end")
+        self.assertEqual("partial_success", end["outcome"])
+        self.assertEqual(1, end["partial_validation_failure_count"])
+
+    def test_production_digit_conflict_remains_strict_before_partial_fallback(self):
+        segment = [{"source_segment_id": "segment-0000", "text": "R616X"}]
+        units = _valid_units(segment, ["R6: 16 sc"])
+        with self.assertRaises(broad_translation.BroadTranslationError):
+            broad_translation.validate_semantic_units(
+                units,
+                segment,
+                _route_config("Simplified Chinese", "English — US"),
+            )
+
+        result, _events, _caller = self._translate(self._three_unit_response())
+        self.assertEqual("R616X", result.loc[1, "Original"])
+        self.assertEqual(
+            "⚠ Could not translate reliably: R616X",
+            result.loc[1, "Translation"],
+        )
+
+    def test_all_objective_failures_remain_request_fatal(self):
+        response = _keyed_response_from_units(
+            _valid_units(
+                self.segments,
+                ["R1: 5 sc", "R6: 16 sc", "R7: 15 sc"],
+            )
+        )
+        events: list[dict] = []
+        caller = mock.Mock(return_value=(self._provider_payload(response), 0.01))
+        with self.assertRaises(broad_translation.BroadTranslationError):
+            broad_translation.translate_merged_ocr_lines_broad(
+                self.rows,
+                source_mode="Simplified Chinese",
+                output_mode="English — US",
+                diagnostic_logger=lambda phase, **fields: events.append(
+                    {"phase": phase, **fields}
+                ),
+                environ={"OPENAI_API_KEY": "test-key"},
+                luna_caller=caller,
+            )
+        caller.assert_called_once()
+        self.assertEqual(
+            3,
+            len(
+                [
+                    event
+                    for event in events
+                    if event["phase"] == "objective_validation_failed"
+                ]
+            ),
+        )
+        self.assertFalse(
+            any(event["phase"] == "partial_validation_failure" for event in events)
+        )
+        end = next(event for event in events if event["phase"] == "ai_request_end")
+        self.assertEqual("validation_rejected", end["outcome"])
+
+    def test_structural_and_ownership_failures_remain_request_fatal(self):
+        cases = []
+        malformed = self._three_unit_response()
+        malformed["unexpected"] = {}
+        cases.append(malformed)
+        missing_assignment = self._three_unit_response()
+        del missing_assignment["segment_assignments"][
+            self.segments[1]["source_segment_id"]
+        ]
+        cases.append(missing_assignment)
+
+        for response in cases:
+            with self.subTest(response_keys=tuple(response)):
+                caller = mock.Mock(
+                    return_value=(self._provider_payload(response), 0.01)
+                )
+                with self.assertRaises(broad_translation.BroadTranslationError):
+                    broad_translation.translate_merged_ocr_lines_broad(
+                        self.rows,
+                        source_mode="Simplified Chinese",
+                        output_mode="English — US",
+                        environ={"OPENAI_API_KEY": "test-key"},
+                        luna_caller=caller,
+                    )
+                caller.assert_called_once()
+
+    def test_invalid_multi_segment_unit_falls_back_together_with_geometry(self):
+        response = {
+            "segment_assignments": {
+                self.segments[0]["source_segment_id"]: "unit-0000",
+                self.segments[1]["source_segment_id"]: "unit-0000",
+                self.segments[2]["source_segment_id"]: "unit-0001",
+            },
+            "semantic_units": {
+                "unit-0000": {"translated_text": "R1: 6 sc; R6: 16 sc"},
+                "unit-0001": {"translated_text": "R7: 16 sc"},
+            },
+        }
+        result, _events, _caller = self._translate(response)
+
+        exact_source = "R1: 6X\nR616X"
+        self.assertEqual(2, len(result))
+        self.assertEqual(exact_source, result.loc[0, "Original"])
+        self.assertEqual(
+            "⚠ Could not translate reliably: " + exact_source,
+            result.loc[0, "Translation"],
+        )
+        self.assertEqual("unresolved", result.loc[0, "Validation Status"])
+        self.assertEqual(
+            tuple(segment["source_segment_id"] for segment in self.segments[:2]),
+            result.loc[0, "Source Segment IDs"],
+        )
+        self.assertEqual("unit-0000", result.loc[0, "Semantic Unit ID"])
+        self.assertEqual(0.81, result.loc[0, "Confidence"])
+        self.assertEqual(10.0, result.loc[0, "min_x"])
+        self.assertEqual(80.0, result.loc[0, "max_x"])
+        self.assertEqual(10.0, result.loc[0, "min_y"])
+        self.assertEqual(70.0, result.loc[0, "max_y"])
+        self.assertEqual("R7: 16 sc", result.loc[1, "Translation"])
+
+    def test_unresolved_warning_is_visible_in_readable_txt_and_overlay(self):
+        from PIL import Image
+
+        result, _events, _caller = self._translate(self._three_unit_response())
+        warning = "⚠ Could not translate reliably: R616X"
+        readable = line_translation.build_readable_line_translation(result)
+        translation_txt = line_translation.build_overlay_export_text(result)
+        report = diagnostic_report.build_debug_report_text(
+            result,
+            output_mode="English — US",
+        )
+        overlay_image, legend, legend_df = overlay.make_line_translation_overlay(
+            Image.new("RGB", (300, 150), color="white"),
+            result,
+            "English — US",
+        )
+
+        self.assertIn(warning, readable)
+        self.assertIn(warning, translation_txt)
+        self.assertIn(warning, report)
+        self.assertIsNotNone(overlay_image)
+        self.assertIn(warning, legend)
+        self.assertIn(warning, legend_df["Translation"].tolist())
+        self.assertNotIn("UNRESOLVED OCR", readable)
+        self.assertNotIn("validation_failed", readable)
+        self.assertNotIn("arabic_digit_multiset", readable)
+
+    def test_unresolved_warning_is_localized_by_broad_target(self):
+        cases = (
+            (
+                "English — US",
+                "Traditional Chinese",
+                "⚠ 未能可靠翻譯：source",
+            ),
+            (
+                "English — US",
+                "Simplified Chinese",
+                "⚠ 无法可靠翻译：source",
+            ),
+            (
+                "Simplified Chinese",
+                "English — US",
+                "⚠ Could not translate reliably: source",
+            ),
+        )
+        for source_mode, output_mode, expected in cases:
+            with self.subTest(output_mode=output_mode):
+                self.assertEqual(
+                    expected,
+                    broad_translation._unresolved_translation(
+                        "source",
+                        _route_config(source_mode, output_mode),
+                    ),
+                )
+
+
 class BroadRoutingTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -1523,21 +1802,26 @@ class BroadRoutingTests(unittest.TestCase):
 
                 response["semantic_units"]["unit-0000"]["translated_text"] = invalid_translation
                 events = []
-                with self.assertRaises(broad_translation.BroadTranslationError):
-                    broad_translation.translate_merged_ocr_lines_broad(
-                        rows,
-                        source_mode,
-                        output_mode,
-                        diagnostic_logger=lambda phase, **fields: events.append(
-                            {"phase": phase, **fields}
-                        ),
-                        environ={"OPENAI_API_KEY": "test-key"},
-                        luna_caller=caller,
-                    )
+                partial_result = broad_translation.translate_merged_ocr_lines_broad(
+                    rows,
+                    source_mode,
+                    output_mode,
+                    diagnostic_logger=lambda phase, **fields: events.append(
+                        {"phase": phase, **fields}
+                    ),
+                    environ={"OPENAI_API_KEY": "test-key"},
+                    luna_caller=caller,
+                )
                 failure = next(
                     event for event in events if event["phase"] == "objective_validation_failed"
                 )
                 self.assertEqual("arabic_digit_multiset", failure["failed_rule"])
+                self.assertEqual("unresolved", partial_result.loc[0, "Validation Status"])
+                self.assertEqual("validated", partial_result.loc[1, "Validation Status"])
+                self.assertEqual(
+                    "⚠ 无法可靠翻译：" + expected_original,
+                    partial_result.loc[0, "Translation"],
+                )
                 self.assertEqual(2, calls)
 
     @mock.patch.dict(
@@ -1865,20 +2149,25 @@ class BroadKeyedOwnershipTests(unittest.TestCase):
             calls += 1
             return self._provider_payload(response), 0.01
 
-        with self.assertRaises(broad_translation.BroadTranslationError):
-            broad_translation.translate_merged_ocr_lines_broad(
-                self.rows,
-                source_mode="English — US",
-                output_mode="Traditional Chinese",
-                diagnostic_logger=lambda phase, **fields: events.append(
-                    {"phase": phase, **fields}
-                ),
-                environ={"OPENAI_API_KEY": "test-key"},
-                luna_caller=caller,
-            )
+        result = broad_translation.translate_merged_ocr_lines_broad(
+            self.rows,
+            source_mode="English — US",
+            output_mode="Traditional Chinese",
+            diagnostic_logger=lambda phase, **fields: events.append(
+                {"phase": phase, **fields}
+            ),
+            environ={"OPENAI_API_KEY": "test-key"},
+            luna_caller=caller,
+        )
         self.assertEqual(1, calls)
         failure = next(event for event in events if event["phase"] == "objective_validation_failed")
         self.assertEqual("arabic_digit_multiset", failure["failed_rule"])
+        self.assertEqual("unresolved", result.loc[0, "Validation Status"])
+        self.assertEqual("validated", result.loc[1, "Validation Status"])
+        self.assertEqual(
+            "⚠ 未能可靠翻譯：Rnd 1:\n6 sc",
+            result.loc[0, "Translation"],
+        )
 
     def test_normal_broad_path_uses_one_call_and_no_retry_events(self):
         calls = 0
@@ -2293,6 +2582,66 @@ class BroadServiceIntegrationTests(unittest.TestCase):
         primary = result.primary_result
         self.assertEqual(primary["line_df"].loc[0, "Translation"], "第 1 圈：6 短針")
         self.assertIn("overlay_png", primary)
+
+    @mock.patch("pattern_translator.translation_service.run_primary_ocr")
+    @mock.patch.dict(
+        os.environ,
+        {"PATTERN_BROAD_TRANSLATION_ENABLED": "1", "OPENAI_API_KEY": "test-key"},
+        clear=False,
+    )
+    def test_partial_validation_failure_delivers_service_outputs(
+        self, mock_run_primary_ocr
+    ):
+        ocr_rows = pd.DataFrame(
+            [
+                _ocr_row("R1: 6X", min_y=0, max_y=20),
+                _ocr_row("R616X", min_y=30, max_y=50),
+                _ocr_row("R7: 16X", min_y=60, max_y=80),
+            ]
+        )
+        mock_run_primary_ocr.return_value = {
+            "selected_name": "PaddleOCR",
+            "selected_text": "R1: 6X\nR616X\nR7: 16X",
+            "selected_rows": ocr_rows,
+            "paddle_inference_seconds": 0.1,
+        }
+        segments, _ = broad_translation.build_source_segments(ocr_rows)
+        response = _keyed_response_from_units(
+            _valid_units(segments, ["R1: 6 sc", "R6: 16 sc", "R7: 16 sc"])
+        )
+
+        def fake_luna(prompt, api_key):
+            del prompt, api_key
+            return {
+                "output": [
+                    {
+                        "content": [
+                            {"type": "output_text", "text": json.dumps(response)}
+                        ]
+                    }
+                ]
+            }, 0.01
+
+        with mock.patch.object(broad_translation, "call_luna_once", side_effect=fake_luna):
+            result = translate_image(
+                self._request(
+                    "Simplified Chinese",
+                    "English — US",
+                    self.index_sc,
+                    self.df_sc,
+                )
+            )
+
+        primary = result.primary_result
+        warning = "⚠ Could not translate reliably: R616X"
+        self.assertEqual(
+            ["validated", "unresolved", "validated"],
+            primary["line_df"]["Validation Status"].tolist(),
+        )
+        self.assertIn(warning, primary["readable_translation"])
+        self.assertIn(warning, primary["translation_txt"])
+        self.assertIn(warning, primary["overlay_legend"])
+        self.assertIsNotNone(primary["overlay_png"])
 
 
 if __name__ == "__main__":
