@@ -37,9 +37,19 @@ EN_US_SOURCE = "English — US"
 TRADITIONAL_CHINESE_TARGET = "Traditional Chinese"
 SIMPLIFIED_CHINESE_SOURCE = "Simplified Chinese"
 EN_US_TARGET = "English — US"
+SIMPLIFIED_CHINESE_TARGET = SIMPLIFIED_CHINESE_SOURCE
 
 _TRUE_VALUES = {"1", "true", "yes", "on"}
 KEYED_RESPONSE_SHAPE = "object_with_segment_assignments_and_semantic_units_objects"
+SHARED_ARABIC_DIGIT_PROMPT_CONTRACT = (
+    "Preserve every explicit Arabic digit from the assigned source segments as the "
+    "same Arabic digit in the translation. Do not spell it out as a number word, "
+    "ordinal word, or frequency word, and do not replace it with language-specific "
+    "numeric characters or words. For example, source 1 must remain 1, not one, once, "
+    "first, 一, or 第一; source 2 must remain 2, not two, twice, second, 二, or 兩. Do "
+    "not infer or invent Arabic digits absent from the assigned source segments. Natural "
+    "fluency must never override explicit Arabic-digit preservation.\n"
+)
 
 DOMAIN_CRITICAL_PATTERN_INSTRUCTION_IDS = frozenset(
     {
@@ -77,10 +87,10 @@ DOMAIN_CRITICAL_PATTERN_INSTRUCTION_IDS = frozenset(
         "st_108_close_opening",
     }
 )
-
 ARABIC_TOKEN_RE = re.compile(r"(?<!\d)\d+(?:\.\d+)?(?!\d)")
 TRIO_EN_RE = re.compile(r"\btrio\b", re.IGNORECASE)
 TRIO_TRADITIONAL_DIGIT_RE = re.compile(r"(?<!\d)3(?!\d)\s*顆")
+TRIO_SIMPLIFIED_DIGIT_RE = re.compile(r"(?<!\d)3(?!\d)\s*颗")
 ROUND_EN_RE = re.compile(
     r"\b(?:rnd|round|r)\s*(\d+)(?:\s*[-–—]\s*(?:r\s*)?(\d+))?",
     re.IGNORECASE,
@@ -90,6 +100,7 @@ ROW_EN_RE = re.compile(
     re.IGNORECASE,
 )
 ROUND_CN_RE = re.compile(r"第\s*(\d+)\s*[圈輪]")
+ROUND_SIMPLIFIED_CN_RE = re.compile(r"第\s*(\d+)\s*[圈轮]")
 ROW_CN_RE = re.compile(r"第\s*(\d+)\s*行")
 ROUND_SC_RE = re.compile(
     r"\bR(?:ND)?\s*(\d+)(?:\s*[-–—]\s*R?\s*(\d+))?",
@@ -107,6 +118,7 @@ MEASURE_RE = re.compile(
 ROUND_ID_EN_RE = re.compile(r"\b(?:rnd|round)\s*(\d+)", re.IGNORECASE)
 ROUND_ID_R_RE = re.compile(r"\bR(\d+)", re.IGNORECASE)
 ROUND_ID_CN_RE = re.compile(r"第\s*(\d+)\s*[圈輪]")
+ROUND_ID_SIMPLIFIED_CN_RE = re.compile(r"第\s*(\d+)\s*[圈轮]")
 ROW_ID_EN_RE = re.compile(r"\brow\s*(\d+)", re.IGNORECASE)
 ROW_ID_CN_RE = re.compile(r"第\s*(\d+)\s*行")
 
@@ -123,6 +135,11 @@ MEASUREMENT_UNIT_CANONICAL = {
 MEASUREMENT_TARGET_ALIASES = {
     TRADITIONAL_CHINESE_TARGET: {
         "mm": ("mm", "毫米", "公釐"),
+        "cm": ("cm", "厘米"),
+        "inch": ("inch", "inches", "英寸"),
+    },
+    SIMPLIFIED_CHINESE_TARGET: {
+        "mm": ("mm", "毫米"),
         "cm": ("cm", "厘米"),
         "inch": ("inch", "inches", "英寸"),
     },
@@ -187,6 +204,13 @@ _ROUTE_CONFIGS: Dict[Tuple[str, str], _RouteConfig] = {
         "Simplified Chinese",
         "English US",
         False,
+    ),
+    (EN_US_SOURCE, SIMPLIFIED_CHINESE_TARGET): _RouteConfig(
+        EN_US_SOURCE,
+        SIMPLIFIED_CHINESE_TARGET,
+        "English US",
+        "Simplified Chinese",
+        True,
     ),
 }
 
@@ -305,7 +329,8 @@ def build_glossary(source_mode: str, output_mode: str) -> List[Dict[str, Any]]:
             "english_us_aliases": english_aliases[1:],
             "english_us_abbreviations": english_abbreviations,
         }
-        if config.en_us_source:
+        chinese_mode = config.output_mode if config.en_us_source else config.source_mode
+        if chinese_mode == TRADITIONAL_CHINESE_TARGET:
             entry["traditional_chinese"] = traditional_terms[0]
             entry["traditional_chinese_aliases"] = traditional_terms[1:]
             if traditional_abbreviations:
@@ -520,26 +545,41 @@ def build_prompt(
         "source_segments": list(segments),
         "authoritative_crochet_glossary": list(terms),
     }
-    if config.en_us_source:
+    if (
+        config.source_mode == EN_US_SOURCE
+        and config.output_mode == TRADITIONAL_CHINESE_TARGET
+    ):
         task = (
             "TASK: Translate this stored OCR text from an English-US crochet pattern "
             "into natural Traditional Chinese.\n"
             "Preserve crochet meaning, quantities, measurements, explicit round/row facts, "
-            "repeat facts, and abbreviations/terminology. Keep Arabic numerals as Arabic "
-            "digits in the translation. Use the authoritative glossary as terminology "
-            "guidance, not as a phrase-replacement table. Do not repair or silently resolve "
-            "ambiguous OCR.\n"
+            "repeat facts, and abbreviations/terminology. Use the authoritative glossary as "
+            "terminology guidance, not as a phrase-replacement table. Do not repair or "
+            "silently resolve ambiguous OCR.\n"
         )
-    else:
+    elif (
+        config.source_mode == SIMPLIFIED_CHINESE_SOURCE
+        and config.output_mode == EN_US_TARGET
+    ):
         task = (
             "TASK: Translate this stored OCR text from a Simplified Chinese crochet pattern "
             "into natural US-English crochet instructions.\n"
             "Preserve crochet meaning, quantities, round/row facts, repeat facts, and stitch "
-            "totals. Keep Arabic numerals as Arabic digits. Use the authoritative glossary as "
-            "terminology guidance. Do not repair or silently resolve ambiguous OCR.\n"
+            "totals. Use the authoritative glossary as terminology guidance. Do not repair "
+            "or silently resolve ambiguous OCR.\n"
+        )
+    else:
+        task = (
+            "TASK: Translate this stored OCR text from an English-US crochet pattern "
+            "into natural Simplified Chinese.\n"
+            "Preserve crochet meaning, quantities, measurements, explicit round/row facts, "
+            "repeat facts, and abbreviations/terminology. Use the authoritative glossary as "
+            "terminology guidance, not as a phrase-replacement table. Do not repair or "
+            "silently resolve ambiguous OCR.\n"
         )
     return (
         task
+        + SHARED_ARABIC_DIGIT_PROMPT_CONTRACT
         + "Segments are visual OCR fragments. Combine adjacent segments when they form one "
         "instruction. Return JSON only with exactly two object keys: segment_assignments and "
         "semantic_units. Every input source_segment_id must appear exactly once as a key in "
@@ -829,14 +869,15 @@ def _validate_arabic_digit_multiset(
         return False
 
     extras = translation_counts - source_counts
-    if (
-        config.source_mode == EN_US_SOURCE
-        and config.output_mode == TRADITIONAL_CHINESE_TARGET
-        and extras["3"]
-    ):
+    if config.source_mode == EN_US_SOURCE and extras["3"]:
+        trio_target_pattern = (
+            TRIO_SIMPLIFIED_DIGIT_RE
+            if config.output_mode == SIMPLIFIED_CHINESE_TARGET
+            else TRIO_TRADITIONAL_DIGIT_RE
+        )
         trio_allowance = min(
             len(TRIO_EN_RE.findall(source)),
-            len(TRIO_TRADITIONAL_DIGIT_RE.findall(translation)),
+            len(trio_target_pattern.findall(translation)),
         )
         extras["3"] -= min(extras["3"], trio_allowance)
         if extras["3"] == 0:
@@ -863,11 +904,29 @@ def _identity_numbers(text: str, patterns: Sequence[re.Pattern[str]]) -> List[st
     return numbers
 
 
-def _validate_round_numbers(source: str, translation: str, patterns: Sequence[re.Pattern[str]]) -> bool:
-    required = _identity_numbers(source, patterns)
+def _source_round_patterns(config: _RouteConfig) -> Tuple[re.Pattern[str], ...]:
+    if config.en_us_source:
+        return (ROUND_EN_RE,)
+    return (ROUND_SC_RE, ROUND_CN_RE, ROUND_SIMPLIFIED_CN_RE)
+
+
+def _target_round_patterns(config: _RouteConfig) -> Tuple[re.Pattern[str], ...]:
+    patterns = (ROUND_ID_EN_RE, ROUND_ID_R_RE, ROUND_ID_CN_RE)
+    if config.output_mode == SIMPLIFIED_CHINESE_TARGET:
+        return (*patterns, ROUND_ID_SIMPLIFIED_CN_RE)
+    return patterns
+
+
+def _validate_round_numbers(
+    source: str,
+    translation: str,
+    source_patterns: Sequence[re.Pattern[str]],
+    config: _RouteConfig,
+) -> bool:
+    required = _identity_numbers(source, source_patterns)
     if not required:
         return True
-    present = set(_identity_numbers(translation, (ROUND_ID_EN_RE, ROUND_ID_R_RE, ROUND_ID_CN_RE)))
+    present = set(_identity_numbers(translation, _target_round_patterns(config)))
     return all(number in present for number in required)
 
 
@@ -942,11 +1001,10 @@ def _round_identity_fields(
     source: str,
     translation: str,
     source_patterns: Sequence[re.Pattern[str]],
+    target_patterns: Sequence[re.Pattern[str]],
 ) -> Dict[str, object]:
     required = _identity_numbers(source, source_patterns)
-    present = sorted(
-        set(_identity_numbers(translation, (ROUND_ID_EN_RE, ROUND_ID_R_RE, ROUND_ID_CN_RE)))
-    )
+    present = sorted(set(_identity_numbers(translation, target_patterns)))
     return {
         "required_round_identities": required,
         "present_round_identities": present,
@@ -1050,8 +1108,15 @@ def _objective_validation_failure_fields(
     if failed_rule == "arabic_digit_multiset":
         fields.update(_digit_multiset_fields(source, translation))
     elif failed_rule == "round_identity":
-        source_patterns = (ROUND_EN_RE,) if config.en_us_source else (ROUND_SC_RE, ROUND_CN_RE)
-        fields.update(_round_identity_fields(source, translation, source_patterns))
+        source_patterns = _source_round_patterns(config)
+        fields.update(
+            _round_identity_fields(
+                source,
+                translation,
+                source_patterns,
+                _target_round_patterns(config),
+            )
+        )
     elif failed_rule == "row_identity":
         source_patterns = (ROW_EN_RE,) if config.en_us_source else (ROW_CN_RE,)
         fields.update(_row_identity_fields(source, translation, source_patterns))
@@ -1103,12 +1168,17 @@ def _validate_objective_facts(
         fail("arabic_digit_multiset")
 
     if config.en_us_source:
-        if not _validate_round_numbers(source, translation, (ROUND_EN_RE,)):
+        if not _validate_round_numbers(source, translation, (ROUND_EN_RE,), config):
             fail("round_identity")
         if not _validate_row_numbers(source, translation, (ROW_EN_RE,)):
             fail("row_identity")
     else:
-        if not _validate_round_numbers(source, translation, (ROUND_SC_RE, ROUND_CN_RE)):
+        if not _validate_round_numbers(
+            source,
+            translation,
+            _source_round_patterns(config),
+            config,
+        ):
             fail("round_identity")
         if not _validate_row_numbers(source, translation, (ROW_CN_RE,)):
             fail("row_identity")

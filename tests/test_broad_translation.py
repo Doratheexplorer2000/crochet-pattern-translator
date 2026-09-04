@@ -115,6 +115,15 @@ class BroadValidationRegressionTests(unittest.TestCase):
     def test_simplified_chinese_mm_to_english_cm_rejected(self):
         self._assert_rejects("使用6毫米钩针", "Use a 6 cm hook", en_us_source=False)
 
+    def test_english_measurement_to_simplified_chinese_preserves_unit(self):
+        segments = self._segments("Use a 2 mm hook")
+        units = _valid_units(segments, ["使用 2 毫米钩针"])
+        broad_translation.validate_semantic_units(
+            units,
+            segments,
+            _route_config("English — US", "Simplified Chinese"),
+        )
+
     def test_mm_to_cm_rejected(self):
         self._assert_rejects("Use a 2 mm hook", "使用 2 cm 鉤針", en_us_source=True)
 
@@ -146,6 +155,18 @@ class BroadValidationRegressionTests(unittest.TestCase):
 
     def test_trio_may_translate_to_one_arabic_three(self):
         self._assert_accepts("Add a trio of peas", "放入 3 顆豌豆", en_us_source=True)
+
+    def test_trio_may_translate_to_simplified_chinese_three(self):
+        segments = self._segments("Add a trio of peas")
+        units = _valid_units(segments, ["放入 3 颗豌豆"])
+        broad_translation.validate_semantic_units(
+            units,
+            segments,
+            _route_config("English — US", "Simplified Chinese"),
+        )
+
+    def test_simplified_trio_counter_remains_invalid_for_traditional_target(self):
+        self._assert_rejects("Add a trio of peas", "放入 3 颗豌豆", en_us_source=True)
 
     def test_peas_mixed_unit_accepts_trio_as_arabic_three(self):
         self._assert_accepts(
@@ -196,6 +217,188 @@ class BroadValidationRegressionTests(unittest.TestCase):
 
     def test_range_numbers_preserved(self):
         self._assert_rejects("Rnd 2-4: sc around", "第2圈：短針", en_us_source=True)
+
+
+class BroadArabicDigitPromptContractTests(unittest.TestCase):
+    ROUTES = (
+        ("English — US", "Traditional Chinese"),
+        ("English — US", "Simplified Chinese"),
+        ("Simplified Chinese", "English — US"),
+    )
+
+    def _mocked_translation(
+        self,
+        source_mode: str,
+        output_mode: str,
+        source: str,
+        translation: str,
+    ) -> tuple[object, str, list[dict]]:
+        rows = pd.DataFrame([_ocr_row(source)])
+        segments, _ = broad_translation.build_source_segments(rows)
+        response = _keyed_response_from_units(_valid_units(segments, [translation]))
+        prompts: list[str] = []
+        events: list[dict] = []
+
+        def caller(prompt: str, api_key: str):
+            self.assertEqual("test-key", api_key)
+            prompts.append(prompt)
+            return {
+                "output": [
+                    {
+                        "content": [
+                            {"type": "output_text", "text": json.dumps(response)}
+                        ]
+                    }
+                ]
+            }, 0.01
+
+        try:
+            result = broad_translation.translate_merged_ocr_lines_broad(
+                rows,
+                source_mode,
+                output_mode,
+                diagnostic_logger=lambda phase, **fields: events.append(
+                    {"phase": phase, **fields}
+                ),
+                environ={"OPENAI_API_KEY": "test-key"},
+                luna_caller=caller,
+            )
+        except broad_translation.BroadTranslationError:
+            self.assertEqual(1, len(prompts))
+            return None, prompts[0], events
+        self.assertEqual(1, len(prompts))
+        return result, prompts[0], events
+
+    def _assert_mocked_passes(
+        self,
+        source_mode: str,
+        output_mode: str,
+        source: str,
+        translation: str,
+    ) -> str:
+        result, prompt, _events = self._mocked_translation(
+            source_mode,
+            output_mode,
+            source,
+            translation,
+        )
+        self.assertIsNotNone(result)
+        self.assertEqual(translation, result.loc[0, "Translation"])
+        return prompt
+
+    def _assert_mocked_rejects(
+        self,
+        source_mode: str,
+        output_mode: str,
+        source: str,
+        translation: str,
+    ) -> None:
+        result, _prompt, events = self._mocked_translation(
+            source_mode,
+            output_mode,
+            source,
+            translation,
+        )
+        self.assertIsNone(result)
+        failure = next(
+            event for event in events if event["phase"] == "objective_validation_failed"
+        )
+        self.assertEqual("arabic_digit_multiset", failure["failed_rule"])
+
+    def test_one_explicit_digit_contract_is_shared_by_all_three_routes(self):
+        required_clauses = (
+            "Preserve every explicit Arabic digit from the assigned source segments as "
+            "the same Arabic digit in the translation.",
+            "Do not spell it out as a number word, ordinal word, or frequency word",
+            "do not replace it with language-specific numeric characters or words",
+            "source 1 must remain 1, not one, once, first, 一, or 第一",
+            "source 2 must remain 2, not two, twice, second, 二, or 兩",
+            "Do not infer or invent Arabic digits absent from the assigned source segments.",
+            "Natural fluency must never override explicit Arabic-digit preservation.",
+        )
+        for source_mode, output_mode in self.ROUTES:
+            with self.subTest(source_mode=source_mode, output_mode=output_mode):
+                prompt = broad_translation.build_prompt(
+                    [],
+                    [],
+                    _route_config(source_mode, output_mode),
+                )
+                for clause in required_clauses:
+                    self.assertIn(clause, prompt)
+                self.assertEqual(
+                    1,
+                    prompt.count(
+                        "Preserve every explicit Arabic digit from the assigned source "
+                        "segments"
+                    ),
+                )
+                self.assertNotIn("Keep Arabic numerals as Arabic digits", prompt)
+
+    def test_simplified_chinese_to_english_keeps_explicit_arabic_digits(self):
+        self._assert_mocked_passes(
+            "Simplified Chinese",
+            "English — US",
+            "第2圈：缠绕1圈，钩14长针",
+            "Round 2: wrap the yarn 1 time and work 14 double crochet stitches.",
+        )
+        rejected = (
+            ("缠绕1圈", "Wrap the yarn once."),
+            ("重复2次", "Repeat twice."),
+            ("钩14长针", "Work double crochet stitches."),
+            ("收紧", "Tighten and add 1 marker."),
+        )
+        for source, translation in rejected:
+            with self.subTest(translation=translation):
+                self._assert_mocked_rejects(
+                    "Simplified Chinese",
+                    "English — US",
+                    source,
+                    translation,
+                )
+
+    def test_english_to_traditional_chinese_keeps_explicit_arabic_digits(self):
+        self._assert_mocked_passes(
+            "English — US",
+            "Traditional Chinese",
+            "Round 1: work 2 sc and repeat 3 times.",
+            "第 1 圈：鉤 2 短針並重複 3 次。",
+        )
+        rejected = (
+            ("Round 1: work sc.", "第一圈：鉤短針。"),
+            ("Repeat 2 times.", "重複兩次。"),
+            ("Work 14 sc.", "鉤短針。"),
+            ("Work sc.", "鉤短針並加 1 個記號。"),
+        )
+        for source, translation in rejected:
+            with self.subTest(translation=translation):
+                self._assert_mocked_rejects(
+                    "English — US",
+                    "Traditional Chinese",
+                    source,
+                    translation,
+                )
+
+    def test_english_to_simplified_chinese_keeps_explicit_arabic_digits(self):
+        self._assert_mocked_passes(
+            "English — US",
+            "Simplified Chinese",
+            "Round 1: work 2 sc and repeat 3 times.",
+            "第 1 轮：钩 2 短针并重复 3 次。",
+        )
+        rejected = (
+            ("Round 1: work sc.", "第一轮：钩短针。"),
+            ("Repeat 2 times.", "重复两次。"),
+            ("Work 14 sc.", "钩短针。"),
+            ("Work sc.", "钩短针并加 1 个记号。"),
+        )
+        for source, translation in rejected:
+            with self.subTest(translation=translation):
+                self._assert_mocked_rejects(
+                    "English — US",
+                    "Simplified Chinese",
+                    source,
+                    translation,
+                )
 
 
 class BroadIdCoverageDiagnosticsTests(unittest.TestCase):
@@ -485,6 +688,13 @@ class BroadGlossaryTests(unittest.TestCase):
         self.assertEqual(back_loop["simplified_chinese_authoritative_term"], "后半针")
         self.assertIn("内半针", back_loop.get("simplified_chinese_aliases", []))
 
+    def test_simplified_chinese_target_uses_existing_conversion(self):
+        terms = broad_translation.build_glossary("English — US", "Simplified Chinese")
+        chain = next(term for term in terms if term["english_us"].lower() == "chain")
+        self.assertEqual(chain["simplified_chinese_authoritative_term"], "锁针")
+        self.assertIn("辫子针", chain.get("simplified_chinese_aliases", []))
+        self.assertNotIn("traditional_chinese", chain)
+
 
 class BroadRequestScopedGlossaryTests(unittest.TestCase):
     def setUp(self):
@@ -549,11 +759,11 @@ class BroadRequestScopedGlossaryTests(unittest.TestCase):
             for index, text in enumerate(texts)
         ]
         self.assertEqual(
-            24737,
+            25217,
             len(broad_translation.build_prompt(segments, self.route_terms, self.config)),
         )
         self.assertEqual(
-            6042,
+            6522,
             len(broad_translation.build_prompt(segments, selected, self.config)),
         )
 
@@ -622,6 +832,25 @@ class BroadRequestScopedGlossaryTests(unittest.TestCase):
             config,
         )
         self.assertIn("st_001_chain", {entry["concept_id"] for entry in selected})
+
+    def test_english_to_simplified_selects_glossary_from_english_source(self):
+        config = _route_config("English — US", "Simplified Chinese")
+        route_terms = broad_translation.build_glossary(
+            config.source_mode,
+            config.output_mode,
+        )
+        selected = broad_translation.select_request_glossary(
+            route_terms,
+            [{"source_segment_id": "segment-0000", "text": "ch 6, then sc"}],
+            config,
+        )
+        selected_ids = {entry["concept_id"] for entry in selected}
+        self.assertIn("st_001_chain", selected_ids)
+        chain = next(
+            entry for entry in selected if entry["concept_id"] == "st_001_chain"
+        )
+        self.assertIn("english_us", chain)
+        self.assertLess(len(selected), len(route_terms))
 
     def test_scope_metrics_are_logged_without_glossary_or_source_content(self):
         rows = pd.DataFrame([_ocr_row("Rnd 1: 6 sc")])
@@ -724,6 +953,7 @@ class BroadRoutingTests(unittest.TestCase):
         cls.df = pd.read_csv("knowledge_base/data/master_stitches.csv")
         cls.english_index = terminology.build_term_index(cls.df, "English — US")
         cls.simplified_index = terminology.build_term_index(cls.df, "Simplified Chinese")
+        cls.traditional_index = terminology.build_term_index(cls.df, "Traditional Chinese")
 
     def _fake_luna(self, segments, translations):
         def caller(prompt, api_key):
@@ -750,19 +980,229 @@ class BroadRoutingTests(unittest.TestCase):
 
     @mock.patch.dict(os.environ, {"PATTERN_BROAD_TRANSLATION_ENABLED": "0"}, clear=False)
     def test_broad_flag_off_uses_legacy_path(self):
-        rows = pd.DataFrame([_ocr_row("Rnd 1: 6 sc")])
-        with mock.patch.object(
-            line_translation, "translate_ocr_line", return_value="legacy"
-        ) as legacy_mock:
-            result = ocr_lines.build_ocr_line_translations(
-                rows,
-                self.english_index,
-                self.df,
-                "Traditional Chinese",
+        routes = (
+            ("English — US", "Traditional Chinese", self.english_index),
+            ("Traditional Chinese", "English — US", self.traditional_index),
+            ("English — US", "Simplified Chinese", self.english_index),
+            ("Simplified Chinese", "English — US", self.simplified_index),
+        )
+        for source_mode, output_mode, index in routes:
+            with self.subTest(source_mode=source_mode, output_mode=output_mode):
+                rows = pd.DataFrame([_ocr_row("Materials")])
+                with mock.patch.object(
+                    broad_translation,
+                    "translate_merged_ocr_lines_broad",
+                    side_effect=AssertionError("broad path executed"),
+                ) as broad_mock, mock.patch.object(
+                    line_translation, "translate_ocr_line", return_value="legacy"
+                ) as legacy_mock:
+                    result = ocr_lines.build_ocr_line_translations(
+                        rows,
+                        index,
+                        self.df,
+                        output_mode,
+                        source_mode,
+                    )
+                broad_mock.assert_not_called()
+                legacy_mock.assert_called()
+                self.assertEqual(result.loc[0, "Translation"], "legacy")
+
+    def test_supported_core_route_matrix_is_exact(self):
+        expected = {
+            ("English — US", "Traditional Chinese"),
+            ("English — US", "Simplified Chinese"),
+            ("Simplified Chinese", "English — US"),
+        }
+        self.assertEqual(expected, set(broad_translation._ROUTE_CONFIGS))
+
+    @mock.patch.dict(
+        os.environ,
+        {
+            "PATTERN_BROAD_TRANSLATION_ENABLED": "1",
+            "OPENAI_API_KEY": "test-key",
+        },
+        clear=False,
+    )
+    def test_supported_routes_use_exactly_one_broad_call(self):
+        cases = (
+            (
                 "English — US",
-            )
-        legacy_mock.assert_called()
-        self.assertEqual(result.loc[0, "Translation"], "legacy")
+                "Traditional Chinese",
+                self.english_index,
+                "Rnd 1: (6 sc, 1 inc) x2 =14.",
+                "第 1 圈：(6 短針，1 加針)×2，共 14 針。",
+                "into natural Traditional Chinese",
+                '"traditional_chinese":"短針"',
+            ),
+            (
+                "Simplified Chinese",
+                "English — US",
+                self.simplified_index,
+                "第1圈：(6短针，1加针)×2，共14针。",
+                "Rnd 1: (6 sc, 1 inc) x2, 14 stitches total.",
+                "from a Simplified Chinese crochet pattern",
+                '"simplified_chinese_authoritative_term":"短针"',
+            ),
+            (
+                "English — US",
+                "Simplified Chinese",
+                self.english_index,
+                "Rnd 1: (6 sc, 1 inc) x2 =14. Sew the two pieces together.",
+                "第 1 轮：(6 短针，1 加针)×2，共 14 针。将两片缝合在一起。",
+                "into natural Simplified Chinese",
+                '"simplified_chinese_authoritative_term":"短针"',
+            ),
+        )
+        for (
+            source_mode,
+            output_mode,
+            index,
+            source_text,
+            translated_text,
+            prompt_route,
+            prompt_glossary,
+        ) in cases:
+            with self.subTest(source_mode=source_mode, output_mode=output_mode):
+                rows = pd.DataFrame([_ocr_row(source_text)])
+                segments, _ = broad_translation.build_source_segments(rows)
+                prompts = []
+
+                def caller(prompt, api_key):
+                    self.assertEqual("test-key", api_key)
+                    prompts.append(prompt)
+                    return self._fake_luna(segments, [translated_text])(prompt, api_key)
+
+                with mock.patch.object(
+                    broad_translation, "call_luna_once", side_effect=caller
+                ) as luna_mock, mock.patch.object(
+                    line_translation,
+                    "translate_ocr_line",
+                    side_effect=AssertionError("legacy fallback executed"),
+                ) as legacy_mock:
+                    result = ocr_lines.build_ocr_line_translations(
+                        rows,
+                        index,
+                        self.df,
+                        output_mode,
+                        source_mode,
+                    )
+                self.assertEqual(1, luna_mock.call_count)
+                legacy_mock.assert_not_called()
+                self.assertEqual(translated_text, result.loc[0, "Translation"])
+                self.assertIn(prompt_route, prompts[0])
+                self.assertIn(prompt_glossary, prompts[0])
+                self.assertIn("segment_assignments", prompts[0])
+
+    def test_new_routes_keep_keyed_ownership_and_objective_validation(self):
+        cases = (
+            (
+                "English — US",
+                "Simplified Chinese",
+                ["Rnd 1:", "6 sc", "Sew the two pieces."],
+                ["第 1 轮：6 短针", "将两片缝合。"],
+                "Rnd 1:\n6 sc",
+                "第 1 轮：5 短针",
+            ),
+        )
+        for (
+            source_mode,
+            output_mode,
+            source_lines,
+            translations,
+            expected_original,
+            invalid_translation,
+        ) in cases:
+            with self.subTest(source_mode=source_mode, output_mode=output_mode):
+                rows = pd.DataFrame([_ocr_row(text) for text in source_lines])
+                segments, _ = broad_translation.build_source_segments(rows)
+                units = [
+                    {
+                        "source_segment_ids": [
+                            segments[0]["source_segment_id"],
+                            segments[1]["source_segment_id"],
+                        ],
+                        "translation": translations[0],
+                    },
+                    {
+                        "source_segment_ids": [segments[2]["source_segment_id"]],
+                        "translation": translations[1],
+                    },
+                ]
+                response = _keyed_response_from_units(units)
+                calls = 0
+
+                def caller(_prompt, _api_key):
+                    nonlocal calls
+                    calls += 1
+                    return {
+                        "output": [{"content": [{"type": "output_text", "text": json.dumps(response)}]}]
+                    }, 0.01
+
+                result = broad_translation.translate_merged_ocr_lines_broad(
+                    rows,
+                    source_mode,
+                    output_mode,
+                    environ={"OPENAI_API_KEY": "test-key"},
+                    luna_caller=caller,
+                )
+                self.assertEqual(1, calls)
+                self.assertEqual(2, len(result))
+                self.assertEqual(expected_original, result.loc[0, "Original"])
+
+                response["semantic_units"]["unit-0000"]["translated_text"] = invalid_translation
+                events = []
+                with self.assertRaises(broad_translation.BroadTranslationError):
+                    broad_translation.translate_merged_ocr_lines_broad(
+                        rows,
+                        source_mode,
+                        output_mode,
+                        diagnostic_logger=lambda phase, **fields: events.append(
+                            {"phase": phase, **fields}
+                        ),
+                        environ={"OPENAI_API_KEY": "test-key"},
+                        luna_caller=caller,
+                    )
+                failure = next(
+                    event for event in events if event["phase"] == "objective_validation_failed"
+                )
+                self.assertEqual("arabic_digit_multiset", failure["failed_rule"])
+                self.assertEqual(2, calls)
+
+    @mock.patch.dict(
+        os.environ,
+        {
+            "PATTERN_BROAD_TRANSLATION_ENABLED": "1",
+            "OPENAI_API_KEY": "test-key",
+        },
+        clear=False,
+    )
+    def test_new_route_malformed_responses_fail_closed_without_legacy(self):
+        cases = (
+            ("English — US", "Simplified Chinese", self.english_index, "Rnd 1: 6 sc"),
+        )
+        malformed = {
+            "output": [{"content": [{"type": "output_text", "text": "{not-json"}]}]
+        }
+        for source_mode, output_mode, index, source_text in cases:
+            with self.subTest(source_mode=source_mode, output_mode=output_mode):
+                rows = pd.DataFrame([_ocr_row(source_text)])
+                with mock.patch.object(
+                    broad_translation, "call_luna_once", return_value=(malformed, 0.01)
+                ) as luna_mock, mock.patch.object(
+                    line_translation,
+                    "translate_ocr_line",
+                    side_effect=AssertionError("legacy fallback executed"),
+                ) as legacy_mock:
+                    with self.assertRaises(broad_translation.BroadTranslationError):
+                        ocr_lines.build_ocr_line_translations(
+                            rows,
+                            index,
+                            self.df,
+                            output_mode,
+                            source_mode,
+                        )
+                self.assertEqual(1, luna_mock.call_count)
+                legacy_mock.assert_not_called()
 
     @mock.patch.dict(
         os.environ,
@@ -825,24 +1265,79 @@ class BroadRoutingTests(unittest.TestCase):
         },
         clear=False,
     )
-    def test_broad_failure_skips_legacy_fallback(self):
-        rows = pd.DataFrame([_ocr_row("Rnd 1: 6 sc")])
+    def test_supported_route_broad_failures_skip_legacy_fallback(self):
+        cases = (
+            (
+                "English — US",
+                "Traditional Chinese",
+                self.english_index,
+                "Rnd 1: 6 sc",
+            ),
+            (
+                "Simplified Chinese",
+                "English — US",
+                self.simplified_index,
+                "第1圈：6短针",
+            ),
+            (
+                "English — US",
+                "Simplified Chinese",
+                self.english_index,
+                "Rnd 1: 6 sc",
+            ),
+        )
+        for source_mode, output_mode, index, source_text in cases:
+            with self.subTest(source_mode=source_mode, output_mode=output_mode):
+                rows = pd.DataFrame([_ocr_row(source_text)])
+                with mock.patch.object(
+                    broad_translation,
+                    "call_luna_once",
+                    side_effect=TimeoutError("timeout"),
+                ) as luna_mock, mock.patch.object(
+                    line_translation,
+                    "translate_ocr_line",
+                    side_effect=AssertionError("legacy"),
+                ) as legacy_mock:
+                    with self.assertRaises(broad_translation.BroadTranslationError):
+                        ocr_lines.build_ocr_line_translations(
+                            rows,
+                            index,
+                            self.df,
+                            output_mode,
+                            source_mode,
+                        )
+                self.assertEqual(1, luna_mock.call_count)
+                legacy_mock.assert_not_called()
+
+    @mock.patch.dict(
+        os.environ,
+        {
+            "PATTERN_BROAD_TRANSLATION_ENABLED": "1",
+            "OPENAI_API_KEY": "test-key",
+        },
+        clear=False,
+    )
+    def test_traditional_chinese_to_english_uses_legacy(self):
+        rows = pd.DataFrame([_ocr_row("第1圈：6短針")])
         with mock.patch.object(
             broad_translation,
-            "call_luna_once",
-            side_effect=TimeoutError("timeout"),
-        ):
-            with mock.patch.object(
-                line_translation, "translate_ocr_line", side_effect=AssertionError("legacy")
-            ):
-                with self.assertRaises(broad_translation.BroadTranslationError):
-                    ocr_lines.build_ocr_line_translations(
-                        rows,
-                        self.english_index,
-                        self.df,
-                        "Traditional Chinese",
-                        "English — US",
-                    )
+            "translate_merged_ocr_lines_broad",
+            side_effect=AssertionError("broad path executed"),
+        ) as broad_mock, mock.patch.object(
+            line_translation,
+            "translate_ocr_line",
+            return_value="legacy",
+        ) as legacy_mock:
+            result = ocr_lines.build_ocr_line_translations(
+                rows,
+                self.traditional_index,
+                self.df,
+                "English — US",
+                "Traditional Chinese",
+            )
+        broad_mock.assert_not_called()
+        legacy_mock.assert_called()
+        self.assertEqual("legacy", result.loc[0, "Translation"])
 
     def test_unsupported_pair_uses_legacy(self):
         rows = pd.DataFrame([_ocr_row("R1: 6X")])
@@ -851,9 +1346,9 @@ class BroadRoutingTests(unittest.TestCase):
         ) as legacy_mock:
             result = ocr_lines.build_ocr_line_translations(
                 rows,
-                self.simplified_index,
+                self.traditional_index,
                 self.df,
-                "English — US",
+                "Simplified Chinese",
                 "Traditional Chinese",
             )
         legacy_mock.assert_called()
