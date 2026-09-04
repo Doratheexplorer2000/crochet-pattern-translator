@@ -867,6 +867,40 @@ def _format_event_log(events: Optional[List[Dict[str, object]]]) -> str:
     return "\n".join(lines)
 
 
+def _format_ai_fallback_diagnostics(
+    diagnostics: Optional[List[Dict[str, object]]],
+) -> str:
+    if not diagnostics:
+        return "No Legacy AI fallback attempts captured."
+    lines = []
+    for record in sorted(
+        diagnostics,
+        key=lambda item: (
+            item.get("call_ordinal", 0)
+            if isinstance(item.get("call_ordinal"), int)
+            and not isinstance(item.get("call_ordinal"), bool)
+            else 0
+        ),
+    ):
+        fallback_returned = (
+            "yes" if record.get("deterministic_fallback_returned") else "no"
+        )
+        lines.append(
+            "Call {call} | outcome={outcome} | reason={reason} | "
+            "route={source}->{target} | fallback_returned={fallback} | "
+            "elapsed_seconds={elapsed}".format(
+                call=_debug_cell(record.get("call_ordinal", "")),
+                outcome=_debug_cell(record.get("outcome", "")),
+                reason=_debug_cell(record.get("reason", "")),
+                source=_debug_cell(record.get("source_mode", "")),
+                target=_debug_cell(record.get("target_mode", "")),
+                fallback=fallback_returned,
+                elapsed=_debug_cell(record.get("elapsed_seconds", "")),
+            )
+        )
+    return "\n".join(lines)
+
+
 def _format_session_diagnostics(diagnostics: Optional[Dict[str, object]]) -> str:
     diagnostics = diagnostics or {}
     lines = [
@@ -917,6 +951,7 @@ def build_debug_report_text(
     quality_metrics: Optional[Dict[str, object]] = None,
     session_diagnostics: Optional[Dict[str, object]] = None,
     events: Optional[List[Dict[str, object]]] = None,
+    ai_fallback_diagnostics: Optional[List[Dict[str, object]]] = None,
     timings: Optional[Dict[str, object]] = None,
     ocr_workload_diagnostics: Optional[Dict[str, object]] = None,
     ocr_box_rows: Optional[pd.DataFrame] = None,
@@ -1038,6 +1073,9 @@ def build_debug_report_text(
         "",
         "=== DEBUG TIMINGS ===",
         _format_debug_timings(timings),
+        "",
+        "=== AI Fallback Diagnostics ===",
+        _format_ai_fallback_diagnostics(ai_fallback_diagnostics),
         "",
         "=== Developer Information ===",
         "",

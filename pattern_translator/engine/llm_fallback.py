@@ -70,6 +70,7 @@ def _emit_timing(phase: str, **fields: object) -> None:
 _TRUE_VALUES = {"1", "true", "yes", "on"}
 _ENGLISH_OUTPUTS = {"English — US", "English — UK", "English US terms", "English UK terms"}
 _CHINESE_OUTPUTS = {"Traditional Chinese", "Simplified Chinese"}
+_CHINESE_SOURCE_MODES = {"Traditional Chinese", "Simplified Chinese"}
 _DESIGNER_SHORTHAND_MARKERS = ("not yet confirmed", "交叉x", "交叉×")
 _KNOWN_ABBREVIATIONS = {
     "sc", "dc", "hdc", "tr", "inc", "dec", "mr", "blo", "flo", "ch", "st", "sts", "fo", "slst", "sl st",
@@ -88,6 +89,14 @@ _PLACEHOLDER_RE = re.compile(r"__ciq[a-z]+__")
 _LATIN_TOKEN_RE = re.compile(
     r"(?<![A-Za-z0-9])([A-Za-z][A-Za-z0-9]*(?:[-'’][A-Za-z0-9]+)*)(?![A-Za-z0-9])"
 )
+_URL_OR_DOMAIN_RE = re.compile(
+    r"(?:https?://|www\.|(?<![A-Za-z0-9])(?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,24}\b)",
+    re.IGNORECASE,
+)
+_PAGE_LABEL_RE = re.compile(
+    r"(?:[-–—]?\s*\d+\s*[-–—]?|(?:第\s*)?\d+\s*[頁页]|[頁页]\s*\d+)",
+    re.IGNORECASE,
+)
 _DEBUG_OUTCOMES = {
     "not_eligible",
     "no_api_key",
@@ -100,6 +109,18 @@ _DEBUG_OUTCOMES = {
     "skipped_designer_shorthand",
     "skipped_resolved",
 }
+AI_TERMINAL_REASON_CODES = frozenset({
+    "success",
+    "no_improvement",
+    "validation_rejected_residual_cjk",
+    "validation_rejected_placeholder_contract",
+    "validation_rejected_other",
+    "timeout",
+    "network_error",
+    "malformed_response",
+    "empty_response",
+    "provider_error",
+})
 
 
 def is_fallback_enabled(environ: Optional[Mapping[str, str]] = None) -> bool:
@@ -140,7 +161,12 @@ def _has_context_backed_single_unresolved_word(source: str, deterministic: str) 
     )
 
 
-def should_use_llm(source: str, deterministic: str, output_mode: str) -> bool:
+def should_use_llm(
+    source: str,
+    deterministic: str,
+    output_mode: str,
+    source_mode: Optional[str] = None,
+) -> bool:
     """Return true only for clear unresolved or mixed ordinary-language content."""
     source = str(source or "").strip()
     deterministic = str(deterministic or "").strip()
@@ -152,7 +178,15 @@ def should_use_llm(source: str, deterministic: str, output_mode: str) -> bool:
 
     if output_mode in _ENGLISH_OUTPUTS:
         unresolved = len(_CJK_RE.findall(deterministic))
-        return unresolved >= 2 and len(source) >= 4
+        if _PAGE_LABEL_RE.fullmatch(source) or _PAGE_LABEL_RE.fullmatch(deterministic):
+            return False
+        if unresolved >= 2:
+            return len(source) >= 4
+        if unresolved != 1 or source_mode not in _CHINESE_SOURCE_MODES:
+            return False
+        if _URL_OR_DOMAIN_RE.search(source) or _URL_OR_DOMAIN_RE.search(deterministic):
+            return False
+        return True
     if output_mode in _CHINESE_OUTPUTS:
         unresolved = _meaningful_english_words(deterministic)
         return len(unresolved) >= 2 or _has_context_backed_single_unresolved_word(
@@ -437,26 +471,41 @@ def get_openai_provider_from_env(environ: Optional[Mapping[str, str]] = None) ->
     return create_openai_provider(api_key) if api_key else None
 
 
-def _restore_if_valid(raw: str, protected: str, deterministic: str, replacements: Dict[str, str]) -> Optional[str]:
+def _restore_with_reason(
+    raw: str,
+    protected: str,
+    deterministic: str,
+    replacements: Dict[str, str],
+) -> Tuple[Optional[str], str]:
     if not raw or not raw.strip():
-        return None
+        return None, "empty_response"
     placeholders = _PLACEHOLDER_RE.findall(raw)
     expected = _PLACEHOLDER_RE.findall(protected)
     if placeholders != expected:
-        return None
+        return None, "validation_rejected_placeholder_contract"
     if re.search(r"\d|[()（）\[\]{}]", _PLACEHOLDER_RE.sub("", raw)):
-        return None
+        return None, "validation_rejected_placeholder_contract"
 
     restored = raw.strip()
     for key, value in replacements.items():
         restored = restored.replace(key, value)
     if not restored:
-        return None
+        return None, "validation_rejected_other"
 
     baseline_abbreviations = {value.lower().replace(" ", "") for value in _ABBREVIATION_RE.findall(deterministic)}
     result_abbreviations = {value.lower().replace(" ", "") for value in _ABBREVIATION_RE.findall(restored)}
     if result_abbreviations - baseline_abbreviations:
-        return None
+        return None, "validation_rejected_other"
+    return restored, "success"
+
+
+def _restore_if_valid(raw: str, protected: str, deterministic: str, replacements: Dict[str, str]) -> Optional[str]:
+    restored, _reason = _restore_with_reason(
+        raw,
+        protected,
+        deterministic,
+        replacements,
+    )
     return restored
 
 
@@ -485,7 +534,9 @@ def _extract_title_subject(protected: str) -> Optional[str]:
 
 
 def _single_embedded_prose_span(
-    protected: str, output_mode: str
+    protected: str,
+    output_mode: str,
+    source_mode: Optional[str] = None,
 ) -> Optional[Tuple[int, int, str]]:
     """Return one unresolved prose span surrounded by protected structure."""
     placeholder_matches = list(_PLACEHOLDER_RE.finditer(protected))
@@ -533,7 +584,16 @@ def _single_embedded_prose_span(
         if unresolved:
             spans.append((prose_start, prose_end, prose))
 
-    return spans[0] if len(spans) == 1 else None
+    if len(spans) != 1:
+        return None
+    selected = spans[0]
+    if output_mode in _ENGLISH_OUTPUTS and source_mode in _CHINESE_SOURCE_MODES:
+        if any(
+            match.start() < selected[0] or match.end() > selected[1]
+            for match in _CJK_RE.finditer(protected)
+        ):
+            return None
+    return selected
 
 
 def _parse_title_result(raw: str, subject: str) -> Optional[str]:
@@ -597,10 +657,11 @@ def apply_llm_fallback(
     llm_df: Optional[pd.DataFrame] = None,
     diagnostic_logger: Optional[DiagnosticLogger] = None,
     call_ordinal: Optional[int] = None,
+    source_mode: Optional[str] = None,
 ) -> str:
     """Return a validated improvement or the unchanged deterministic result."""
     candidate_input = deterministic if llm_input_text is None else llm_input_text
-    if not should_use_llm(source, candidate_input, output_mode):
+    if not should_use_llm(source, candidate_input, output_mode, source_mode):
         _debug_outcome(_skip_outcome(source, candidate_input, output_mode))
         return deterministic
     if provider is None:
@@ -612,7 +673,9 @@ def apply_llm_fallback(
     protected, replacements = protect_authoritative_content(llm_input, protection_df, output_mode)
     title_subject = _extract_title_subject(protected) if title_context else None
     embedded_prose = (
-        None if title_subject else _single_embedded_prose_span(protected, output_mode)
+        None
+        if title_subject
+        else _single_embedded_prose_span(protected, output_mode, source_mode)
     )
     route = "title" if title_subject else "general"
     model = TITLE_MODEL if title_subject else GENERAL_MODEL
@@ -620,7 +683,11 @@ def apply_llm_fallback(
     ai_request_started = time.perf_counter()
     ai_request_finished = False
 
-    def finish_ai_request(outcome: str) -> None:
+    def finish_ai_request(
+        outcome: str,
+        reason: str,
+        deterministic_fallback_returned: bool,
+    ) -> None:
         nonlocal ai_request_finished
         if ai_request_finished or diagnostic_logger is None or call_ordinal is None:
             return
@@ -633,6 +700,10 @@ def apply_llm_fallback(
                 model=model,
                 route=route,
                 outcome=outcome,
+                reason=reason,
+                deterministic_fallback_returned=deterministic_fallback_returned,
+                source_mode=source_mode or "unknown",
+                target_mode=output_mode,
             )
         except Exception:
             pass
@@ -672,7 +743,7 @@ def apply_llm_fallback(
                 failure_stage="provider_empty_result",
             )
             _debug_outcome("malformed_response")
-            finish_ai_request("parse_error")
+            finish_ai_request("parse_error", "empty_response", True)
             return deterministic
         failure_stage = "validation"
         candidate = raw
@@ -680,7 +751,11 @@ def apply_llm_fallback(
             translated_subject = _parse_title_result(raw, title_subject)
             if translated_subject is None:
                 _debug_outcome("validation_rejected")
-                finish_ai_request("validation_rejected")
+                finish_ai_request(
+                    "validation_rejected",
+                    "validation_rejected_other",
+                    True,
+                )
                 return deterministic
             candidate = protected.replace(title_subject, translated_subject, 1)
         elif embedded_prose:
@@ -689,34 +764,59 @@ def apply_llm_fallback(
                 + raw.strip()
                 + protected[embedded_prose[1]:]
             )
-        restored = _restore_if_valid(candidate, protected, llm_input, replacements)
+        restored, restore_reason = _restore_with_reason(
+            candidate,
+            protected,
+            llm_input,
+            replacements,
+        )
         if restored is None:
             _debug_outcome("validation_rejected")
-            finish_ai_request("validation_rejected")
+            finish_ai_request("validation_rejected", restore_reason, True)
             return deterministic
         if _has_unsupported_latin_output(
             restored, source, deterministic, output_mode
         ):
             _debug_outcome("validation_rejected")
-            finish_ai_request("validation_rejected")
+            finish_ai_request(
+                "validation_rejected",
+                "validation_rejected_other",
+                True,
+            )
+            return deterministic
+        if (
+            source_mode in _CHINESE_SOURCE_MODES
+            and output_mode in _ENGLISH_OUTPUTS
+            and _CJK_RE.search(restored)
+        ):
+            _debug_outcome("validation_rejected")
+            finish_ai_request(
+                "validation_rejected",
+                "validation_rejected_residual_cjk",
+                True,
+            )
             return deterministic
         if outer_parentheses is not None:
             restored = f"{outer_parentheses[0]}{restored}{outer_parentheses[1]}"
         outcome = "called_no_improvement" if restored.strip() == deterministic.strip() else "called_accepted"
         _debug_outcome(outcome)
-        finish_ai_request("fallback_used" if outcome == "called_no_improvement" else "success")
+        finish_ai_request(
+            "fallback_used" if outcome == "called_no_improvement" else "success",
+            "no_improvement" if outcome == "called_no_improvement" else "success",
+            False,
+        )
         return restored
     except TimeoutError:
         _debug_outcome("timeout")
-        finish_ai_request("timeout")
+        finish_ai_request("timeout", "timeout", True)
         return deterministic
     except urllib.error.URLError:
         _debug_outcome("api_error")
-        finish_ai_request("network_error")
+        finish_ai_request("network_error", "network_error", True)
         return deterministic
     except _DiagnosedMalformedResponse:
         _debug_outcome("malformed_response")
-        finish_ai_request("parse_error")
+        finish_ai_request("parse_error", "malformed_response", True)
         return deterministic
     except ValueError:
         _debug_response_structure(
@@ -725,15 +825,15 @@ def apply_llm_fallback(
             failure_stage=f"{failure_stage}_value_error",
         )
         _debug_outcome("malformed_response")
-        finish_ai_request("parse_error")
+        finish_ai_request("parse_error", "malformed_response", True)
         return deterministic
     except OSError:
         _debug_outcome("api_error")
-        finish_ai_request("network_error")
+        finish_ai_request("network_error", "network_error", True)
         return deterministic
     except Exception:
         _debug_outcome("api_error")
-        finish_ai_request("provider_error")
+        finish_ai_request("provider_error", "provider_error", True)
         return deterministic
     finally:
         if provider_context_token is not None:

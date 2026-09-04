@@ -443,6 +443,9 @@ def create_diagnostic_snapshot(
         "events": inputs.get("events")
         if isinstance(inputs.get("events"), (list, tuple))
         else [],
+        "ai_fallback_diagnostics": inputs.get("ai_fallback_diagnostics")
+        if isinstance(inputs.get("ai_fallback_diagnostics"), (list, tuple))
+        else [],
         "ocr_workload_diagnostics": inputs.get("ocr_workload_diagnostics")
         if isinstance(inputs.get("ocr_workload_diagnostics"), Mapping)
         else {},
@@ -667,6 +670,11 @@ def restore_diagnostic_snapshot(
         not isinstance(event, dict) for event in events
     ):
         raise ValueError("diagnostic events are invalid")
+    ai_fallback_diagnostics = diagnostics.get("ai_fallback_diagnostics", [])
+    if not isinstance(ai_fallback_diagnostics, list) or any(
+        not isinstance(record, dict) for record in ai_fallback_diagnostics
+    ):
+        raise ValueError("AI fallback diagnostics are invalid")
     trace = diagnostics.get("ocr_call_trace")
     if not isinstance(trace, list) or any(
         not isinstance(item, str) for item in trace
@@ -817,6 +825,7 @@ def build_deferred_diagnostic_report(
         quality_metrics=result.get("quality_metrics"),
         session_diagnostics=inputs.get("session_diagnostics"),
         events=inputs.get("events"),
+        ai_fallback_diagnostics=inputs.get("ai_fallback_diagnostics"),
         timings=timings,
         ocr_workload_diagnostics=inputs.get("ocr_workload_diagnostics"),
         ocr_box_rows=inputs.get("ocr_box_rows"),

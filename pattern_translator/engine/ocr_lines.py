@@ -7,6 +7,9 @@ Streamlit state, render overlays, or perform downloads.
 
 import re
 import time
+from concurrent.futures import ThreadPoolExecutor
+from contextvars import copy_context
+from threading import BoundedSemaphore
 from typing import Callable, Dict, Optional
 
 import pandas as pd
@@ -22,6 +25,30 @@ from pattern_translator.engine import terminology
 ProfileGetter = Callable[[], object]
 ProfileCount = Callable[[str, float], None]
 ProfileAddTime = Callable[[str, float], None]
+
+LEGACY_LLM_MAX_CONCURRENCY = 4
+_LEGACY_LLM_CALL_SLOTS = BoundedSemaphore(LEGACY_LLM_MAX_CONCURRENCY)
+_ENGLISH_OUTPUT_MODES = {
+    "English — US",
+    "English — UK",
+    "English US terms",
+    "English UK terms",
+}
+_CHINESE_SOURCE_MODES = {"Traditional Chinese", "Simplified Chinese"}
+_RIGHT_SIDE_STITCH_TOTAL_RE = re.compile(r"^共\s*\d+\s*[針针]\s*$")
+_CJK_CHARACTER_RE = re.compile(r"[\u3400-\u9fff]")
+_URL_OR_DOMAIN_RE = re.compile(
+    r"(?:https?://|www\.|(?<![A-Za-z0-9])(?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,24}\b)",
+    re.IGNORECASE,
+)
+_PAGE_LABEL_RE = re.compile(
+    r"(?:[-–—]?\s*\d+\s*[-–—]?|(?:第\s*)?\d+\s*[頁页]|[頁页]\s*\d+)",
+    re.IGNORECASE,
+)
+_FOOTNOTE_OR_CAPTION_RE = re.compile(
+    r"(?:\[\s*\d+\s*\]|[＊*†‡]|(?:圖|图|表|Figure|Fig\.?)\s*\d+\b)",
+    re.IGNORECASE,
+)
 
 _profile_getter: ProfileGetter = lambda: None
 _profile_count_func: ProfileCount = lambda name, amount=1.0: None
@@ -75,7 +102,11 @@ def profile_function(time_name: str, count_name: str):
     return decorator
 
 
-def merge_ocr_boxes_into_visual_lines(ocr_rows: pd.DataFrame) -> pd.DataFrame:
+def merge_ocr_boxes_into_visual_lines(
+    ocr_rows: pd.DataFrame,
+    *,
+    correct_chinese_legacy_layout: bool = False,
+) -> pd.DataFrame:
     """Merge PaddleOCR text boxes that sit on the same visual line.
 
     PaddleOCR often returns English pattern rows as separate boxes:
@@ -122,6 +153,11 @@ def merge_ocr_boxes_into_visual_lines(ocr_rows: pd.DataFrame) -> pd.DataFrame:
 
     for group in line_groups:
         line = rows.loc[group].copy().sort_values("min_x")
+        line_rows = [row for _, row in line.iterrows()]
+        if correct_chinese_legacy_layout and _reassociate_right_side_stitch_total(
+            line_rows, merged_records, canvas_width=canvas_width, y_threshold=y_threshold
+        ):
+            continue
         cluster = []
         last_max_x = None
         for _, row in line.iterrows():
@@ -134,6 +170,11 @@ def merge_ocr_boxes_into_visual_lines(ocr_rows: pd.DataFrame) -> pd.DataFrame:
         if cluster:
             merged_records.append(_merge_ocr_cluster(cluster))
 
+    if correct_chinese_legacy_layout:
+        merged_records = _merge_parenthetical_continuation_records(
+            merged_records,
+            y_threshold=y_threshold,
+        )
     out = pd.DataFrame(merged_records)
     if out.empty:
         return rows.drop(columns=[c for c in ["_cy", "_h"] if c in rows.columns], errors="ignore")
@@ -165,6 +206,144 @@ def _merge_ocr_cluster(cluster: list) -> Dict[str, object]:
     }
 
 
+def _parenthesis_balance(text: str) -> int:
+    value = str(text or "")
+    return value.count("(") + value.count("（") - value.count(")") - value.count("）")
+
+
+def _horizontal_overlap_ratio(first: object, second: object) -> float:
+    first_min = float(first.get("min_x", 0) or 0)
+    first_max = float(first.get("max_x", first_min) or first_min)
+    second_min = float(second.get("min_x", 0) or 0)
+    second_max = float(second.get("max_x", second_min) or second_min)
+    overlap = max(0.0, min(first_max, second_max) - max(first_min, second_min))
+    narrower_width = min(first_max - first_min, second_max - second_min)
+    return overlap / narrower_width if narrower_width > 0 else 0.0
+
+
+def _reassociate_right_side_stitch_total(
+    line_rows: list,
+    merged_records: list,
+    *,
+    canvas_width: float,
+    y_threshold: float,
+) -> bool:
+    """Keep a right-column stitch total out of a vertically aligned open note."""
+    if len(line_rows) < 2 or not merged_records:
+        return False
+
+    total = line_rows[-1]
+    total_text = str(total.get("text", "")).strip()
+    if not _RIGHT_SIDE_STITCH_TOTAL_RE.fullmatch(total_text):
+        return False
+    total_min_x = float(total.get("min_x", 0) or 0)
+    if total_min_x < canvas_width * 0.80:
+        return False
+
+    competing = _merge_ocr_cluster(line_rows[:-1])
+    competing_text = str(competing.get("text", "")).strip()
+    if competing_text[:1] not in "(（" or _parenthesis_balance(competing_text) <= 0:
+        return False
+
+    previous = merged_records[-1]
+    previous_text = str(previous.get("text", "")).strip()
+    if (
+        not previous_text
+        or _RIGHT_SIDE_STITCH_TOTAL_RE.fullmatch(previous_text)
+        or _parenthesis_balance(previous_text) != 0
+        or _horizontal_overlap_ratio(previous, competing) < 0.70
+    ):
+        return False
+
+    vertical_edge_gap = float(total.get("min_y", 0) or 0) - float(
+        previous.get("max_y", 0) or 0
+    )
+    if vertical_edge_gap < 0 or vertical_edge_gap > y_threshold:
+        return False
+
+    merged_records[-1] = _merge_ocr_cluster([previous, total])
+    merged_records.append(competing)
+    return True
+
+
+def _merge_parenthetical_continuation_records(
+    records: list,
+    *,
+    y_threshold: float,
+) -> list:
+    """Join one tightly aligned wrapped parenthetical note into one logical row."""
+    ordered = sorted(
+        records,
+        key=lambda record: (
+            float(record.get("min_y", 0) or 0),
+            float(record.get("min_x", 0) or 0),
+        ),
+    )
+    merged = []
+    position = 0
+    while position < len(ordered):
+        current = ordered[position]
+        if position + 1 >= len(ordered):
+            merged.append(current)
+            break
+
+        following = ordered[position + 1]
+        current_text = str(current.get("text", "")).strip()
+        following_text = str(following.get("text", "")).strip()
+        vertical_edge_gap = float(following.get("min_y", 0) or 0) - float(
+            current.get("max_y", 0) or 0
+        )
+        left_edge_delta = abs(
+            float(current.get("min_x", 0) or 0)
+            - float(following.get("min_x", 0) or 0)
+        )
+        current_center_x = (
+            float(current.get("min_x", 0) or 0)
+            + float(current.get("max_x", 0) or 0)
+        ) / 2
+        following_center_x = (
+            float(following.get("min_x", 0) or 0)
+            + float(following.get("max_x", 0) or 0)
+        ) / 2
+        closes_parenthetical = (
+            _parenthesis_balance(current_text) > 0
+            and _parenthesis_balance(current_text + following_text) == 0
+            and any(character in following_text for character in ")）")
+        )
+        following_without_parentheses = following_text.strip("()（） ")
+        excluded_following = (
+            _URL_OR_DOMAIN_RE.search(following_text) is not None
+            or _PAGE_LABEL_RE.fullmatch(following_without_parentheses) is not None
+            or _FOOTNOTE_OR_CAPTION_RE.match(following_without_parentheses) is not None
+            or _RIGHT_SIDE_STITCH_TOTAL_RE.fullmatch(following_text) is not None
+        )
+        if (
+            closes_parenthetical
+            and not excluded_following
+            and 0 <= vertical_edge_gap <= y_threshold
+            and left_edge_delta <= y_threshold
+            and abs(current_center_x - following_center_x) <= y_threshold
+            and _horizontal_overlap_ratio(current, following) >= 0.70
+        ):
+            combined = _merge_ocr_cluster([current, following])
+            separator = " "
+            if (
+                current_text
+                and following_text
+                and _CJK_CHARACTER_RE.search(current_text[-1])
+                and _CJK_CHARACTER_RE.search(following_text[0])
+            ):
+                separator = ""
+            combined["text"] = current_text + separator + following_text
+            merged.append(combined)
+            position += 2
+            continue
+
+        merged.append(current)
+        position += 1
+    return merged
+
+
 @profile_function("line-by-line translation: build_ocr_line_translations", "build_ocr_line_translations calls")
 def build_ocr_line_translations(
     ocr_rows: pd.DataFrame,
@@ -178,15 +357,24 @@ def build_ocr_line_translations(
     if ocr_rows is None or ocr_rows.empty:
         return pd.DataFrame()
 
-    rows = merge_ocr_boxes_into_visual_lines(ocr_rows)
+    broad_route = (
+        broad_translation.is_broad_translation_enabled()
+        and broad_translation.is_broad_translation_route(source_mode, output_mode)
+    )
+    correct_chinese_legacy_layout = (
+        not broad_route
+        and source_mode in _CHINESE_SOURCE_MODES
+        and output_mode in _ENGLISH_OUTPUT_MODES
+    )
+    rows = merge_ocr_boxes_into_visual_lines(
+        ocr_rows,
+        correct_chinese_legacy_layout=correct_chinese_legacy_layout,
+    )
     rows["confidence"] = pd.to_numeric(rows.get("confidence", 0), errors="coerce").fillna(0)
     rows = rows.sort_values(["min_y", "min_x"]).reset_index(drop=True)
     _profile_count("merged OCR lines", len(rows))
 
-    if (
-        broad_translation.is_broad_translation_enabled()
-        and broad_translation.is_broad_translation_route(source_mode, output_mode)
-    ):
+    if broad_route:
         return broad_translation.translate_merged_ocr_lines_broad(
             rows,
             source_mode=source_mode,
@@ -260,7 +448,12 @@ def build_ocr_line_translations(
     eligible_positions = {
         position
         for position, (_row, cleaned, _translated) in enumerate(prepared)
-        if llm_fallback.should_use_llm(cleaned, llm_inputs[position], output_mode)
+        if llm_fallback.should_use_llm(
+            cleaned,
+            llm_inputs[position],
+            output_mode,
+            source_mode,
+        )
     }
     if diagnostic_logger is not None:
         diagnostic_logger(
@@ -271,30 +464,81 @@ def build_ocr_line_translations(
         )
 
     line_translation_start = time.perf_counter()
-    out = []
-    llm_call_ordinal = 0
-    for position, (row, cleaned, translated) in enumerate(prepared):
+    call_ordinals = (
+        {
+            position: ordinal
+            for ordinal, position in enumerate(sorted(eligible_positions), start=1)
+        }
+        if llm_provider is not None
+        else {}
+    )
+
+    def apply_fallback(
+        position: int,
+        call_ordinal: Optional[int],
+        use_bounded_slot: bool = False,
+    ) -> str:
+        _row, cleaned, translated = prepared[position]
         previous = prepared[position - 1][1] if position > 0 else ""
         following = prepared[position + 1][1] if position + 1 < len(prepared) else ""
-        call_ordinal = None
-        if llm_provider is not None and position in eligible_positions:
-            llm_call_ordinal += 1
-            call_ordinal = llm_call_ordinal
-        translated = llm_fallback.apply_llm_fallback(
-            source=cleaned,
-            deterministic=translated,
-            previous=previous,
-            following=following,
-            output_mode=output_mode,
-            df=df,
-            provider=llm_provider,
-            title_context=title_contexts[position],
-            semantic_context=semantic_context,
-            llm_input_text=llm_inputs[position],
-            llm_df=df if title_contexts[position] else llm_df,
-            diagnostic_logger=diagnostic_logger,
-            call_ordinal=call_ordinal,
+
+        def invoke() -> str:
+            return llm_fallback.apply_llm_fallback(
+                source=cleaned,
+                deterministic=translated,
+                previous=previous,
+                following=following,
+                output_mode=output_mode,
+                df=df,
+                provider=llm_provider,
+                title_context=title_contexts[position],
+                semantic_context=semantic_context,
+                llm_input_text=llm_inputs[position],
+                llm_df=df if title_contexts[position] else llm_df,
+                diagnostic_logger=diagnostic_logger,
+                call_ordinal=call_ordinal,
+                source_mode=source_mode,
+            )
+
+        if use_bounded_slot:
+            with _LEGACY_LLM_CALL_SLOTS:
+                return invoke()
+        return invoke()
+
+    concurrent_positions = (
+        sorted(eligible_positions) if llm_provider is not None else []
+    )
+    fallback_results: Dict[int, str] = {}
+    if len(concurrent_positions) == 1:
+        position = concurrent_positions[0]
+        fallback_results[position] = apply_fallback(
+            position,
+            call_ordinals[position],
+            True,
         )
+    elif concurrent_positions:
+        with ThreadPoolExecutor(
+            max_workers=min(LEGACY_LLM_MAX_CONCURRENCY, len(concurrent_positions))
+        ) as executor:
+            futures = {
+                position: executor.submit(
+                    copy_context().run,
+                    apply_fallback,
+                    position,
+                    call_ordinals[position],
+                    True,
+                )
+                for position in concurrent_positions
+            }
+            for position in concurrent_positions:
+                fallback_results[position] = futures[position].result()
+
+    out = []
+    for position, (row, cleaned, translated) in enumerate(prepared):
+        if position in fallback_results:
+            translated = fallback_results[position]
+        else:
+            translated = apply_fallback(position, None)
         changed = terminology.norm_text(cleaned) != terminology.norm_text(translated)
         out.append({
             "Original": cleaned,

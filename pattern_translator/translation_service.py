@@ -9,6 +9,7 @@ import platform
 import re
 import sys
 import tempfile
+import threading
 import time
 import unicodedata
 import uuid
@@ -1168,6 +1169,8 @@ def translate_image(request: TranslateImageRequest) -> TranslateImageResult:
 
     delivery_session_diagnostics = dict(request.session_diagnostics)
     delivery_diagnostic_events = list(request.diagnostic_events)
+    ai_fallback_diagnostics: List[Dict[str, object]] = []
+    ai_fallback_diagnostics_lock = threading.Lock()
     delivery_diagnostic_platform = request.diagnostic_platform
     total_start = time.perf_counter()
     timings = {
@@ -1257,6 +1260,33 @@ def translate_image(request: TranslateImageRequest) -> TranslateImageResult:
     profile_token = _TRANSLATION_PROFILE.set(translation_profile)
 
     def log_downstream_timing(phase: str, **fields: object) -> None:
+        if phase == "ai_request_end" and fields.get("route") in {"general", "title"}:
+            reason = str(fields.get("reason", ""))
+            outcome = str(fields.get("outcome", ""))
+            call_ordinal = fields.get("call_ordinal")
+            elapsed_seconds = fields.get("elapsed_seconds")
+            if (
+                reason in llm_fallback_engine.AI_TERMINAL_REASON_CODES
+                and isinstance(call_ordinal, int)
+                and not isinstance(call_ordinal, bool)
+                and isinstance(elapsed_seconds, (int, float))
+                and not isinstance(elapsed_seconds, bool)
+            ):
+                record = {
+                    "call_ordinal": call_ordinal,
+                    "outcome": outcome[:64],
+                    "reason": reason,
+                    "elapsed_seconds": round(float(elapsed_seconds), 4),
+                    "route": str(fields.get("route", ""))[:32],
+                    "model": str(fields.get("model", ""))[:64],
+                    "source_mode": str(fields.get("source_mode", ""))[:64],
+                    "target_mode": str(fields.get("target_mode", ""))[:64],
+                    "deterministic_fallback_returned": bool(
+                        fields.get("deterministic_fallback_returned", False)
+                    ),
+                }
+                with ai_fallback_diagnostics_lock:
+                    ai_fallback_diagnostics.append(record)
         try:
             log_app_ocr_timing(
                 diagnostic_request_id,
@@ -1388,6 +1418,10 @@ def translate_image(request: TranslateImageRequest) -> TranslateImageResult:
             "image_quality_status": quality_label,
             "session_diagnostics": delivery_session_diagnostics,
             "events": delivery_diagnostic_events,
+            "ai_fallback_diagnostics": sorted(
+                ai_fallback_diagnostics,
+                key=lambda record: int(record["call_ordinal"]),
+            ),
             "ocr_workload_diagnostics": ocr_workload_diagnostics,
             "ocr_box_rows": detected_ocr_rows,
             "ocr_call_diagnostics": ocr_call_diagnostics,

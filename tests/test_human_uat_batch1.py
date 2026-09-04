@@ -237,7 +237,7 @@ class LlmDebugOutcomeTests(unittest.TestCase):
         provider = mock.Mock(return_value="translated")
         with mock.patch.object(
             llm_fallback,
-            "_restore_if_valid",
+            "_restore_with_reason",
             side_effect=ValueError("private validation detail"),
         ):
             result, debug = self.capture(

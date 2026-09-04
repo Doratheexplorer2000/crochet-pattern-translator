@@ -1,8 +1,10 @@
 import io
 import json
 import os
+import threading
 import unittest
 import urllib.error
+from contextvars import ContextVar
 from unittest import mock
 
 import pandas as pd
@@ -20,7 +22,16 @@ class LlmFallbackTests(unittest.TestCase):
         cls.df = pd.read_csv("knowledge_base/data/master_stitches.csv")
         cls.english_index = terminology.build_term_index(cls.df, "English — US")
 
-    def apply(self, source, deterministic, target, provider, *, title_context=False):
+    def apply(
+        self,
+        source,
+        deterministic,
+        target,
+        provider,
+        *,
+        title_context=False,
+        source_mode=None,
+    ):
         return llm_fallback.apply_llm_fallback(
             source,
             deterministic,
@@ -30,7 +41,36 @@ class LlmFallbackTests(unittest.TestCase):
             self.df,
             provider,
             title_context=title_context,
+            source_mode=source_mode,
         )
+
+    @staticmethod
+    def rows_for(sources):
+        return pd.DataFrame([
+            {
+                "text": source,
+                "confidence": 0.99,
+                "min_x": 0,
+                "max_x": 320,
+                "min_y": position * 30,
+                "max_y": position * 30 + 20,
+            }
+            for position, source in enumerate(sources)
+        ])
+
+    @staticmethod
+    def positioned_rows(specifications):
+        return pd.DataFrame([
+            {
+                "text": text,
+                "confidence": 0.99,
+                "min_x": min_x,
+                "max_x": max_x,
+                "min_y": min_y,
+                "max_y": max_y,
+            }
+            for text, min_x, max_x, min_y, max_y in specifications
+        ])
 
     def test_unresolved_chinese_prose_to_english(self):
         def provider(_previous, current, _following, _target):
@@ -39,6 +79,323 @@ class LlmFallbackTests(unittest.TestCase):
         result = self.apply("眼睛在11-12行之间", "眼睛在11-12行之间", "English — US", provider)
         self.assertIn("11-12", result)
         self.assertNotEqual(result, "眼睛在11-12行之间")
+
+    def test_lettered_cjk_section_headings_bypass_stitch_symbol_parser(self):
+        traditional_index = terminology.build_term_index(
+            self.df, "Traditional Chinese"
+        )
+        for source in ("A.花", "B.葉", "C.莖"):
+            with self.subTest(source=source):
+                result = line_translation.translate_ocr_line(
+                    source,
+                    traditional_index,
+                    self.df,
+                    "English — US",
+                )
+                self.assertEqual(result, source)
+                self.assertNotIn("dec", result.lower())
+                self.assertTrue(
+                    llm_fallback.should_use_llm(
+                        source,
+                        result,
+                        "English — US",
+                        "Traditional Chinese",
+                    )
+                )
+
+    def test_lettered_heading_rule_preserves_legitimate_stitch_symbols(self):
+        traditional_index = terminology.build_term_index(
+            self.df, "Traditional Chinese"
+        )
+        for source, expected in (
+            ("A", "dec"),
+            ("X", "sc"),
+            ("A.X", "dec, sc"),
+            ("A.短針", "dec, sc"),
+        ):
+            with self.subTest(source=source):
+                self.assertEqual(
+                    line_translation.translate_ocr_line(
+                        source,
+                        traditional_index,
+                        self.df,
+                        "English — US",
+                    ),
+                    expected,
+                )
+
+    def test_single_residual_cjk_is_eligible_only_for_chinese_to_english(self):
+        cases = (
+            ("共480針", "共 480 sts"),
+            (
+                "立1針,120(短針,3鎖針),引拔",
+                "立 1 sts, (sc, 3 ch) x120, Slip stitch",
+            ),
+        )
+        for source_mode in ("Traditional Chinese", "Simplified Chinese"):
+            for source, deterministic in cases:
+                with self.subTest(source_mode=source_mode, source=source):
+                    self.assertTrue(
+                        llm_fallback.should_use_llm(
+                            source,
+                            deterministic,
+                            "English — US",
+                            source_mode,
+                        )
+                    )
+        self.assertFalse(
+            llm_fallback.should_use_llm(
+                "共480針",
+                "共 480 sts",
+                "English — US",
+                "English — US",
+            )
+        )
+
+    def test_single_residual_cjk_rule_excludes_resolved_and_noncontent_rows(self):
+        cases = (
+            ("R1: 6 sc", "R1: 6 sc"),
+            ("花.example.com", "花.example.com"),
+            ("花 https://example.com", "花 https://example.com"),
+            ("頁7", "頁 7"),
+            ("第 7 頁", "第 7 頁"),
+            ("-7-", "-7-"),
+            ("...", "..."),
+        )
+        for source, deterministic in cases:
+            with self.subTest(source=source):
+                self.assertFalse(
+                    llm_fallback.should_use_llm(
+                        source,
+                        deterministic,
+                        "English — US",
+                        "Traditional Chinese",
+                    )
+                )
+
+    def test_two_or_more_residual_cjk_remain_eligible(self):
+        self.assertTrue(
+            llm_fallback.should_use_llm(
+                "斷線後將線頭收好",
+                "斷線後將線頭收好",
+                "English — US",
+                "Traditional Chinese",
+            )
+        )
+
+    def test_round_one_geometry_keeps_total_out_of_open_parenthetical_note(self):
+        rows = self.positioned_rows((
+            ("環狀起針，立3鎖針，14長針，引拔。", 242.2, 754.3, 216.2, 251.4),
+            ("(鉤織長針時，開頭立起之3鎖針也算1針，因", 199.3, 821.8, 269.8, 309.7),
+            ("共27針", 854.0, 962.8, 263.7, 309.7),
+            ("此需引拔於第三個鎖針上。以下同理。)", 220.8, 780.4, 326.5, 369.5),
+        ))
+
+        merged = ocr_lines.merge_ocr_boxes_into_visual_lines(
+            rows,
+            correct_chinese_legacy_layout=True,
+        )
+
+        self.assertEqual(
+            merged["text"].tolist(),
+            [
+                "環狀起針，立3鎖針，14長針，引拔。 共27針",
+                "(鉤織長針時，開頭立起之3鎖針也算1針，因此需引拔於第三個鎖針上。以下同理。)",
+            ],
+        )
+        self.assertNotIn("共27針", merged.loc[1, "text"])
+
+    def test_aligned_instruction_totals_still_merge_without_known_fixture_counts(self):
+        rows = self.positioned_rows((
+            ("立3鎖針，長針，18長針加針，引拔", 258, 752, 10, 50),
+            ("共37針", 850, 970, 11, 51),
+            ("立3鎖針，長針，36長針加針，引拔", 258, 752, 80, 120),
+            ("共74針", 850, 970, 80, 120),
+            ("立3鎖針，長針，73長針加針，引拔", 258, 752, 150, 190),
+            ("共148針", 850, 970, 150, 190),
+        ))
+
+        merged = ocr_lines.merge_ocr_boxes_into_visual_lines(
+            rows,
+            correct_chinese_legacy_layout=True,
+        )
+
+        self.assertEqual(len(merged), 3)
+        self.assertEqual(
+            merged["text"].tolist(),
+            [
+                "立3鎖針，長針，18長針加針，引拔 共37針",
+                "立3鎖針，長針，36長針加針，引拔 共74針",
+                "立3鎖針，長針，73長針加針，引拔 共148針",
+            ],
+        )
+
+    def test_vertically_distant_right_side_total_remains_standalone(self):
+        rows = self.positioned_rows((
+            ("立1針，196(短針，3鎖針)，引拔", 255, 754, 10, 50),
+            ("共784針", 845, 975, 175, 225),
+        ))
+
+        merged = ocr_lines.merge_ocr_boxes_into_visual_lines(
+            rows,
+            correct_chinese_legacy_layout=True,
+        )
+
+        self.assertEqual(
+            merged["text"].tolist(),
+            ["立1針，196(短針，3鎖針)，引拔", "共784針"],
+        )
+
+    def test_parenthetical_continuation_requires_parenthesis_and_geometry(self):
+        parenthetical = self.positioned_rows((
+            ("(說明文字尚未結束，因", 200, 820, 10, 50),
+            ("此處接續說明。)", 220, 780, 60, 100),
+        ))
+        ordinary = self.positioned_rows((
+            ("第一段普通說明", 200, 820, 10, 50),
+            ("第二段普通說明", 220, 780, 60, 100),
+        ))
+
+        merged_parenthetical = ocr_lines.merge_ocr_boxes_into_visual_lines(
+            parenthetical,
+            correct_chinese_legacy_layout=True,
+        )
+        merged_ordinary = ocr_lines.merge_ocr_boxes_into_visual_lines(
+            ordinary,
+            correct_chinese_legacy_layout=True,
+        )
+
+        self.assertEqual(
+            merged_parenthetical["text"].tolist(),
+            ["(說明文字尚未結束，因此處接續說明。)"],
+        )
+        self.assertEqual(
+            merged_ordinary["text"].tolist(),
+            ["第一段普通說明", "第二段普通說明"],
+        )
+
+    def test_parenthetical_continuation_does_not_swallow_urls_or_page_labels(self):
+        cases = (
+            ("(詳見", "example.org）"),
+            ("(頁碼見", "第7頁）"),
+            ("(補充說明", "[2] 註解）"),
+            ("(參照", "圖9 說明）"),
+        )
+        for first, second in cases:
+            with self.subTest(second=second):
+                rows = self.positioned_rows((
+                    (first, 200, 820, 10, 50),
+                    (second, 220, 780, 60, 100),
+                ))
+                merged = ocr_lines.merge_ocr_boxes_into_visual_lines(
+                    rows,
+                    correct_chinese_legacy_layout=True,
+                )
+                self.assertEqual(merged["text"].tolist(), [first, second])
+
+    def test_provider_receives_complete_line_when_residual_cjk_exists_outside_span(self):
+        deterministic = "立 1 sts, (sc, 3 ch) x120, 引拔"
+        calls = []
+
+        def provider(_context, current, _following, _target):
+            calls.append(current)
+            return current.replace("立", "Start with").replace("引拔", "slip stitch")
+
+        result = self.apply(
+            "立1針,120(短針,3鎖針),引拔",
+            deterministic,
+            "English — US",
+            provider,
+            source_mode="Traditional Chinese",
+        )
+
+        self.assertEqual(len(calls), 1)
+        self.assertIn("立", calls[0])
+        self.assertIn("引拔", calls[0])
+        self.assertEqual(result, "Start with 1 sts, (sc, 3 ch) x120, slip stitch")
+
+    def test_safe_embedded_span_is_retained_when_it_contains_all_residual_cjk(self):
+        deterministic = "R8: 12 sc 結束留長線 R9: 12 sc"
+        provider = mock.Mock(return_value="finish off and leave a long yarn tail")
+
+        result = self.apply(
+            deterministic,
+            deterministic,
+            "English — US",
+            provider,
+            source_mode="Traditional Chinese",
+        )
+
+        provider.assert_called_once()
+        self.assertEqual(provider.call_args.args[1], "結束留長線")
+        self.assertEqual(
+            result,
+            "R8: 12 sc finish off and leave a long yarn tail R9: 12 sc",
+        )
+
+    def test_chinese_to_english_rejects_provider_output_with_residual_cjk(self):
+        deterministic = "立 1 sts, (sc, 3 ch) x120, 引拔"
+        for source_mode in ("Traditional Chinese", "Simplified Chinese"):
+            with self.subTest(source_mode=source_mode):
+                provider = mock.Mock(
+                    side_effect=lambda _p, current, _n, _t: current.replace(
+                        "引拔", "slip stitch"
+                    )
+                )
+                result = self.apply(
+                    "立1針,120(短針,3鎖針),引拔",
+                    deterministic,
+                    "English — US",
+                    provider,
+                    source_mode=source_mode,
+                )
+                self.assertEqual(result, deterministic)
+                provider.assert_called_once()
+
+    def test_chinese_to_english_accepts_fully_english_provider_output(self):
+        deterministic = "立 1 sts, (sc, 3 ch) x120, 引拔"
+        provider = mock.Mock(
+            side_effect=lambda _p, current, _n, _t: current.replace(
+                "立", "Start with"
+            ).replace("引拔", "slip stitch")
+        )
+
+        result = self.apply(
+            "立1針,120(短針,3鎖針),引拔",
+            deterministic,
+            "English — US",
+            provider,
+            source_mode="Traditional Chinese",
+        )
+
+        self.assertEqual(result, "Start with 1 sts, (sc, 3 ch) x120, slip stitch")
+        provider.assert_called_once()
+
+    def test_rejected_single_residual_cjk_result_returns_deterministic(self):
+        deterministic = "共 480 sts"
+        provider = mock.Mock(return_value="Total: 481 stitches")
+        result = self.apply(
+            "共480針",
+            deterministic,
+            "English — US",
+            provider,
+            source_mode="Traditional Chinese",
+        )
+        self.assertEqual(result, deterministic)
+        provider.assert_called_once()
+
+    def test_failed_single_residual_cjk_call_returns_deterministic(self):
+        deterministic = "共 480 sts"
+        provider = mock.Mock(side_effect=TimeoutError())
+        result = self.apply(
+            "共480針",
+            deterministic,
+            "English — US",
+            provider,
+            source_mode="Traditional Chinese",
+        )
+        self.assertEqual(result, deterministic)
+        provider.assert_called_once()
 
     def test_unresolved_english_prose_to_chinese(self):
         result = self.apply(
@@ -277,6 +634,121 @@ class LlmFallbackTests(unittest.TestCase):
             ["timeout"],
         )
         self.assertNotIn(deterministic, json.dumps(events, ensure_ascii=False))
+
+    def test_terminal_reason_codes_are_precise_and_content_free(self):
+        secret = "sk-secret-provider-payload"
+
+        def raising(error):
+            def provider(*_args):
+                raise error
+            return provider
+
+        cases = (
+            (
+                "success",
+                "測試內容",
+                "測試內容",
+                lambda *_args: "fully translated sentence",
+                "success",
+                False,
+            ),
+            (
+                "residual_cjk",
+                "測試內容",
+                "測試內容",
+                lambda _p, current, _n, _t: current,
+                "validation_rejected_residual_cjk",
+                True,
+            ),
+            (
+                "placeholder_contract",
+                "立3針測試",
+                "立 3 sts, 測試",
+                lambda *_args: "translated without placeholders",
+                "validation_rejected_placeholder_contract",
+                True,
+            ),
+            (
+                "validation_other",
+                "測試內容",
+                "測試內容",
+                lambda *_args: "translated inc",
+                "validation_rejected_other",
+                True,
+            ),
+            (
+                "timeout",
+                "測試內容",
+                "測試內容",
+                raising(TimeoutError(secret)),
+                "timeout",
+                True,
+            ),
+            (
+                "network",
+                "測試內容",
+                "測試內容",
+                raising(urllib.error.URLError(secret)),
+                "network_error",
+                True,
+            ),
+            (
+                "malformed",
+                "測試內容",
+                "測試內容",
+                raising(ValueError(secret)),
+                "malformed_response",
+                True,
+            ),
+            (
+                "empty",
+                "測試內容",
+                "測試內容",
+                lambda *_args: "   ",
+                "empty_response",
+                True,
+            ),
+            (
+                "provider_error",
+                "測試內容",
+                "測試內容",
+                raising(RuntimeError(secret)),
+                "provider_error",
+                True,
+            ),
+        )
+        for label, source, deterministic, provider, reason, fallback in cases:
+            with self.subTest(label=label):
+                events = []
+                result = llm_fallback.apply_llm_fallback(
+                    source=source,
+                    deterministic=deterministic,
+                    previous="",
+                    following="",
+                    output_mode="English — US",
+                    df=self.df,
+                    provider=provider,
+                    diagnostic_logger=lambda phase, **fields: events.append(
+                        {"phase": phase, **fields}
+                    ),
+                    call_ordinal=7,
+                    source_mode="Traditional Chinese",
+                )
+
+                terminal = [
+                    event for event in events if event["phase"] == "ai_request_end"
+                ]
+                self.assertEqual(len(terminal), 1)
+                self.assertEqual(terminal[0]["call_ordinal"], 7)
+                self.assertEqual(terminal[0]["reason"], reason)
+                self.assertEqual(
+                    terminal[0]["deterministic_fallback_returned"], fallback
+                )
+                self.assertNotIn(secret, json.dumps(events, ensure_ascii=False))
+                if fallback:
+                    self.assertEqual(result, deterministic)
+                else:
+                    self.assertEqual(result, "fully translated sentence")
 
     def test_title_provider_uses_strict_mode_b_contract(self):
         captured = {}
@@ -605,6 +1077,329 @@ class LlmFallbackTests(unittest.TestCase):
         self.assertEqual(contexts, ["Body brown yarn"])
         self.assertNotIn("OUTSIDE_SELECTED_AREA", contexts[0])
 
+    @mock.patch.dict(
+        os.environ,
+        {
+            "PATTERN_BROAD_TRANSLATION_ENABLED": "0",
+            "PATTERN_LUNA_TITLE_PRIMARY_ENABLED": "0",
+            "PATTERN_LUNA_TITLE_SHADOW_ENABLED": "0",
+        },
+        clear=False,
+    )
+    def test_legacy_fallback_uses_at_most_four_workers_and_preserves_row_order(self):
+        sources = tuple(f"測試內容{suffix}" for suffix in "甲乙丙丁戊己庚辛")
+        translations = (
+            "alpha result",
+            "bravo result",
+            "charlie result",
+            "delta result",
+            "echo result",
+            "foxtrot result",
+            "golf result",
+            "hotel result",
+        )
+        source_positions = {source: position for position, source in enumerate(sources)}
+        first_wave = threading.Barrier(ocr_lines.LEGACY_LLM_MAX_CONCURRENCY)
+        second_completed = threading.Event()
+        lock = threading.Lock()
+        active = 0
+        peak_active = 0
+        completion_order = []
+        events = []
+
+        def diagnostic_logger(phase, **fields):
+            with lock:
+                events.append((phase, fields))
+
+        def provider(_context, current, _following, _target):
+            nonlocal active, peak_active
+            position = source_positions[current]
+            with lock:
+                active += 1
+                peak_active = max(peak_active, active)
+            try:
+                if position < ocr_lines.LEGACY_LLM_MAX_CONCURRENCY:
+                    first_wave.wait(timeout=2)
+                if position == 0:
+                    if not second_completed.wait(timeout=2):
+                        raise AssertionError("second row did not complete first")
+                elif position == 1:
+                    with lock:
+                        completion_order.append(position)
+                    second_completed.set()
+                    return translations[position]
+                with lock:
+                    completion_order.append(position)
+                return translations[position]
+            finally:
+                with lock:
+                    active -= 1
+
+        result = ocr_lines.build_ocr_line_translations(
+            self.rows_for(sources),
+            terminology.build_term_index(self.df, "Traditional Chinese"),
+            self.df,
+            "English — US",
+            "Traditional Chinese",
+            llm_provider=provider,
+            diagnostic_logger=diagnostic_logger,
+        )
+
+        self.assertEqual(peak_active, ocr_lines.LEGACY_LLM_MAX_CONCURRENCY)
+        self.assertLessEqual(peak_active, 4)
+        self.assertEqual(len(completion_order), len(sources))
+        self.assertLess(completion_order.index(1), completion_order.index(0))
+        self.assertEqual(result["Original"].tolist(), list(sources))
+        self.assertEqual(result["Translation"].tolist(), list(translations))
+        expected_ordinals = list(range(1, len(sources) + 1))
+        self.assertEqual(
+            sorted(
+                fields["call_ordinal"]
+                for phase, fields in events
+                if phase == "ai_request_begin"
+            ),
+            expected_ordinals,
+        )
+        self.assertEqual(
+            sorted(
+                fields["call_ordinal"]
+                for phase, fields in events
+                if phase == "ai_request_end"
+            ),
+            expected_ordinals,
+        )
+
+    @mock.patch.dict(
+        os.environ,
+        {
+            "PATTERN_BROAD_TRANSLATION_ENABLED": "0",
+            "PATTERN_LUNA_TITLE_PRIMARY_ENABLED": "0",
+            "PATTERN_LUNA_TITLE_SHADOW_ENABLED": "0",
+        },
+        clear=False,
+    )
+    def test_parallel_failure_and_rejection_keep_each_deterministic_row_isolated(self):
+        sources = (
+            "鄰居內容甲",
+            "故障內容乙",
+            "拒絕內容丙",
+            "鄰居內容丁",
+        )
+
+        def provider(_context, current, _following, _target):
+            if "故障" in current:
+                raise TimeoutError()
+            if "拒絕" in current:
+                return "rejected translation 9"
+            if "甲" in current:
+                return "first translated"
+            return "last translated"
+
+        events = []
+        result = ocr_lines.build_ocr_line_translations(
+            self.rows_for(sources),
+            terminology.build_term_index(self.df, "Traditional Chinese"),
+            self.df,
+            "English — US",
+            "Traditional Chinese",
+            llm_provider=provider,
+            diagnostic_logger=lambda phase, **fields: events.append(
+                {"phase": phase, **fields}
+            ),
+        )
+
+        self.assertEqual(
+            result["Translation"].tolist(),
+            [
+                "first translated",
+                sources[1],
+                sources[2],
+                "last translated",
+            ],
+        )
+        self.assertEqual(
+            {
+                event["call_ordinal"]: event["reason"]
+                for event in events
+                if event["phase"] == "ai_request_end"
+            },
+            {
+                1: "success",
+                2: "timeout",
+                3: "validation_rejected_placeholder_contract",
+                4: "success",
+            },
+        )
+
+    @mock.patch.dict(
+        os.environ,
+        {
+            "PATTERN_BROAD_TRANSLATION_ENABLED": "0",
+            "PATTERN_LUNA_TITLE_PRIMARY_ENABLED": "0",
+            "PATTERN_LUNA_TITLE_SHADOW_ENABLED": "0",
+        },
+        clear=False,
+    )
+    def test_parallel_path_keeps_existing_fallback_eligibility(self):
+        sources = ("測試內容甲", "R3: 6 sc")
+        provider = mock.Mock(return_value="translated prose")
+
+        result = ocr_lines.build_ocr_line_translations(
+            self.rows_for(sources),
+            terminology.build_term_index(self.df, "Traditional Chinese"),
+            self.df,
+            "English — US",
+            "Traditional Chinese",
+            llm_provider=provider,
+        )
+
+        provider.assert_called_once()
+        self.assertEqual(
+            result["Translation"].tolist(),
+            ["translated prose", "R3: 6 sc"],
+        )
+
+    @mock.patch.dict(
+        os.environ,
+        {
+            "PATTERN_BROAD_TRANSLATION_ENABLED": "0",
+            "PATTERN_LUNA_TITLE_PRIMARY_ENABLED": "0",
+            "PATTERN_LUNA_TITLE_SHADOW_ENABLED": "0",
+        },
+        clear=False,
+    )
+    def test_single_residual_cjk_rows_use_parallel_path_and_keep_row_order(self):
+        sources = ("共480針", "共30針")
+        wave = threading.Barrier(len(sources))
+        lock = threading.Lock()
+        active = 0
+        peak_active = 0
+
+        def provider(_context, current, _following, _target):
+            nonlocal active, peak_active
+            with lock:
+                active += 1
+                peak_active = max(peak_active, active)
+            try:
+                wave.wait(timeout=2)
+                return current.replace("共", "Total:")
+            finally:
+                with lock:
+                    active -= 1
+
+        result = ocr_lines.build_ocr_line_translations(
+            self.rows_for(sources),
+            terminology.build_term_index(self.df, "Traditional Chinese"),
+            self.df,
+            "English — US",
+            "Traditional Chinese",
+            llm_provider=provider,
+        )
+
+        self.assertEqual(peak_active, len(sources))
+        self.assertEqual(result["Original"].tolist(), list(sources))
+        self.assertEqual(
+            result["Translation"].tolist(),
+            ["Total: 480 sts", "Total: 30 sts"],
+        )
+
+    @mock.patch.dict(
+        os.environ,
+        {
+            "PATTERN_BROAD_TRANSLATION_ENABLED": "0",
+            "PATTERN_LUNA_TITLE_PRIMARY_ENABLED": "0",
+            "PATTERN_LUNA_TITLE_SHADOW_ENABLED": "0",
+        },
+        clear=False,
+    )
+    def test_parallel_workers_inherit_and_isolate_request_context(self):
+        request_marker = ContextVar("legacy_fallback_test_request", default="")
+        observations = {}
+        errors = []
+        lock = threading.Lock()
+        wave = threading.Barrier(ocr_lines.LEGACY_LLM_MAX_CONCURRENCY)
+        active = 0
+        peak_active = 0
+
+        def provider(_context, current, _following, _target):
+            nonlocal active, peak_active
+            with lock:
+                active += 1
+                peak_active = max(peak_active, active)
+            try:
+                wave.wait(timeout=2)
+                with lock:
+                    observations[current] = request_marker.get()
+                return "translated result"
+            finally:
+                with lock:
+                    active -= 1
+
+        def run_request(marker, sources):
+            token = request_marker.set(marker)
+            try:
+                ocr_lines.build_ocr_line_translations(
+                    self.rows_for(sources),
+                    terminology.build_term_index(self.df, "Traditional Chinese"),
+                    self.df,
+                    "English — US",
+                    "Traditional Chinese",
+                    llm_provider=provider,
+                )
+            except Exception as error:
+                errors.append(error)
+            finally:
+                request_marker.reset(token)
+
+        first_sources = tuple(f"第一請求{suffix}" for suffix in "甲乙丙丁")
+        second_sources = tuple(f"第二請求{suffix}" for suffix in "戊己庚辛")
+        first = threading.Thread(target=run_request, args=("request-a", first_sources))
+        second = threading.Thread(target=run_request, args=("request-b", second_sources))
+        first.start()
+        second.start()
+        first.join(timeout=5)
+        second.join(timeout=5)
+
+        self.assertFalse(first.is_alive())
+        self.assertFalse(second.is_alive())
+        self.assertEqual(errors, [])
+        self.assertEqual(peak_active, ocr_lines.LEGACY_LLM_MAX_CONCURRENCY)
+        self.assertLessEqual(peak_active, 4)
+        for source in first_sources:
+            self.assertEqual(observations[source], "request-a")
+        for source in second_sources:
+            self.assertEqual(observations[source], "request-b")
+
+    @mock.patch.dict(
+        os.environ,
+        {"PATTERN_BROAD_TRANSLATION_ENABLED": "1"},
+        clear=False,
+    )
+    def test_broad_route_bypasses_legacy_executor(self):
+        expected = pd.DataFrame([
+            {"Original": "Rnd 1: 6 sc", "Translation": "第 1 圈：6 短針"}
+        ])
+        with mock.patch.object(
+            ocr_lines.broad_translation,
+            "translate_merged_ocr_lines_broad",
+            return_value=expected,
+        ) as broad_translate, mock.patch.object(
+            ocr_lines,
+            "ThreadPoolExecutor",
+            side_effect=AssertionError("legacy executor used"),
+        ):
+            result = ocr_lines.build_ocr_line_translations(
+                self.rows_for(("Rnd 1: 6 sc",)),
+                self.english_index,
+                self.df,
+                "Traditional Chinese",
+                "English — US",
+                llm_provider=mock.Mock(),
+            )
+
+        broad_translate.assert_called_once()
+        self.assertIs(result, expected)
+
     def test_twelve_general_prose_cases_route_through_contextual_luna_boundary(self):
         sources = (
             "Body (brown yarn)",
@@ -638,15 +1433,26 @@ class LlmFallbackTests(unittest.TestCase):
             "以相同方式製作另一個部件",
             "改用白色毛線並繼續鈎織",
         )
-        call_index = 0
+        translations_by_prefix = {
+            source.split()[0]: value
+            for source, value in zip(sources, translated)
+        }
+        provider_calls = 0
         contexts = []
+        calls_lock = threading.Lock()
 
         def provider(context, current, _following, _target):
-            nonlocal call_index
-            contexts.append(context)
+            nonlocal provider_calls
+            prefix = next(
+                candidate
+                for candidate in translations_by_prefix
+                if current.startswith(candidate)
+            )
             placeholders = llm_fallback._PLACEHOLDER_RE.findall(current)
-            value = translated[call_index]
-            call_index += 1
+            value = translations_by_prefix[prefix]
+            with calls_lock:
+                contexts.append(context)
+                provider_calls += 1
             return value.format(*placeholders) if placeholders else value
 
         result = ocr_lines.build_ocr_line_translations(
@@ -657,7 +1463,7 @@ class LlmFallbackTests(unittest.TestCase):
             "English — US",
             llm_provider=provider,
         )
-        self.assertEqual(call_index, len(sources))
+        self.assertEqual(provider_calls, len(sources))
         self.assertEqual(len(set(contexts)), 1)
         self.assertEqual(
             result["Translation"].tolist(),

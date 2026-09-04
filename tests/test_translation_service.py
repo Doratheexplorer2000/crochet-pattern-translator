@@ -16,6 +16,7 @@ from PIL import Image
 
 from pattern_translator.engine import line_translation as line_translation_engine
 from pattern_translator.engine import overlay as overlay_engine
+from pattern_translator.engine import result_delivery as result_delivery_engine
 from pattern_translator.engine import terminology as terminology_engine
 from pattern_translator.translation_service import (
     TranslateImageRequest,
@@ -657,6 +658,113 @@ class TranslationServiceOrchestrationTests(unittest.TestCase):
         source = Path("pattern_translator/translation_service.py").read_text(encoding="utf-8")
         self.assertNotIn("session_state", source)
         self.assertIsNone(re.search(r"\bst\.", source))
+
+    @mock.patch("pattern_translator.translation_service.overlay_engine.image_to_png_bytes")
+    @mock.patch("pattern_translator.translation_service.overlay_engine.make_line_translation_overlay")
+    @mock.patch("pattern_translator.translation_service.ocr_lines_engine.build_ocr_line_translations")
+    @mock.patch("pattern_translator.translation_service.run_primary_ocr")
+    def test_post_translation_ai_terminal_events_reach_downloadable_report(
+        self,
+        mock_run_primary_ocr,
+        mock_build_lines,
+        mock_make_overlay,
+        mock_png_bytes,
+    ):
+        ocr_rows, line_df, overlay_image = self._mock_pipeline()
+        mock_run_primary_ocr.return_value = {
+            "selected_name": "PaddleOCR",
+            "selected_text": "R1: 6X",
+            "selected_rows": ocr_rows,
+            "paddle_inference_seconds": 0.1,
+        }
+
+        def build_lines(*_args, **kwargs):
+            logger = kwargs["diagnostic_logger"]
+            common = {
+                "model": "gpt-5.6-luna",
+                "route": "general",
+                "source_mode": "Traditional Chinese",
+                "target_mode": "English — US",
+                "elapsed_seconds": 0.25,
+                "raw_response": "never-store-this-provider-content",
+                "api_key": "sk-never-store-this-secret",
+            }
+            barrier = threading.Barrier(2)
+
+            def emit(call_ordinal, outcome, reason, fallback):
+                barrier.wait(timeout=1)
+                logger(
+                    "ai_request_end",
+                    **common,
+                    call_ordinal=call_ordinal,
+                    outcome=outcome,
+                    reason=reason,
+                    deterministic_fallback_returned=fallback,
+                )
+
+            workers = (
+                threading.Thread(
+                    target=emit,
+                    args=(
+                        2,
+                        "validation_rejected",
+                        "validation_rejected_residual_cjk",
+                        True,
+                    ),
+                ),
+                threading.Thread(
+                    target=emit,
+                    args=(1, "success", "success", False),
+                ),
+            )
+            for worker in workers:
+                worker.start()
+            for worker in workers:
+                worker.join(timeout=2)
+                self.assertFalse(worker.is_alive())
+            logger(
+                "ai_request_end",
+                **{
+                    **common,
+                    "route": "broad",
+                    "call_ordinal": 99,
+                    "outcome": "success",
+                    "reason": "success",
+                    "deterministic_fallback_returned": False,
+                },
+            )
+            return line_df
+
+        mock_build_lines.side_effect = build_lines
+        mock_make_overlay.return_value = (overlay_image, "[1] R1: 6 sc", line_df)
+        mock_png_bytes.return_value = b"png-bytes"
+
+        result = translate_image(self._base_request())
+        records = result.primary_result["diagnostic_report_inputs"][
+            "ai_fallback_diagnostics"
+        ]
+        self.assertEqual([record["call_ordinal"] for record in records], [1, 2])
+        self.assertEqual(
+            [record["reason"] for record in records],
+            ["success", "validation_rejected_residual_cjk"],
+        )
+        serialized = str(records)
+        self.assertNotIn("never-store-this-provider-content", serialized)
+        self.assertNotIn("sk-never-store-this-secret", serialized)
+
+        report = result_delivery_engine.build_deferred_diagnostic_report(
+            result.primary_result,
+            terminology_dataframe=self.df,
+        )
+        self.assertIn("=== AI Fallback Diagnostics ===", report)
+        self.assertIn("Call 1 | outcome=success | reason=success", report)
+        self.assertIn(
+            "Call 2 | outcome=validation_rejected | "
+            "reason=validation_rejected_residual_cjk",
+            report,
+        )
+        self.assertNotIn("never-store-this-provider-content", report)
+        self.assertNotIn("sk-never-store-this-secret", report)
 
 
 class DirectCorpusParityTests(unittest.TestCase):

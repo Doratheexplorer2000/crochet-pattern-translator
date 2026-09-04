@@ -374,6 +374,19 @@ class ResultDeliveryTests(unittest.TestCase):
                 "image_quality_status": "Good",
                 "session_diagnostics": {"ocr_running": False},
                 "events": [{"event": "snapshot"}],
+                "ai_fallback_diagnostics": [
+                    {
+                        "call_ordinal": 1,
+                        "outcome": "validation_rejected",
+                        "reason": "validation_rejected_residual_cjk",
+                        "elapsed_seconds": 0.25,
+                        "route": "general",
+                        "model": "gpt-5.6-luna",
+                        "source_mode": "Traditional Chinese",
+                        "target_mode": "English — US",
+                        "deterministic_fallback_returned": True,
+                    }
+                ],
                 "ocr_workload_diagnostics": {"ocr_box_count": 1},
                 "ocr_box_rows": ocr_boxes,
                 "ocr_call_diagnostics": {
@@ -436,6 +449,12 @@ class ResultDeliveryTests(unittest.TestCase):
         self.assertIn("CSV rows loaded: 7", round_tripped)
         self.assertIn("Image quality status: Good", round_tripped)
         self.assertIn("Resolution: 120 x 80 px", round_tripped)
+        self.assertIn("=== AI Fallback Diagnostics ===", round_tripped)
+        self.assertIn(
+            "Call 1 | outcome=validation_rejected | "
+            "reason=validation_rejected_residual_cjk",
+            round_tripped,
+        )
         self.assertEqual(
             "Good",
             restored.result["diagnostic_report_inputs"]["image_quality_status"],

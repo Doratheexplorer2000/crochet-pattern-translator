@@ -5,6 +5,14 @@ import unicodedata
 from typing import Dict, Optional
 
 
+_LETTERED_CJK_HEADING_RE = re.compile(
+    r"^(?P<prefix>[A-Za-z])\s*\.\s*(?P<label>[\u3400-\u9fff][\u3400-\u9fff\s]{0,7})$"
+)
+_CROCHET_EXPRESSION_CJK_MARKERS = frozenset(
+    "針针鎖锁辮辫短長长鉤钩鈎勾加減减引拔環环圈起立"
+)
+
+
 SECTION_TRANSLATIONS: Dict[str, Dict[str, str]] = {
     "上半部分": {"Traditional Chinese": "上半部分", "Simplified Chinese": "上半部分", "English — US": "Upper section", "English — UK": "Upper section", "Japanese": "上半分"},
     "上半部份": {"Traditional Chinese": "上半部分", "Simplified Chinese": "上半部分", "English — US": "Upper section", "English — UK": "Upper section", "Japanese": "上半分"},
@@ -33,6 +41,15 @@ def clean_section_candidate(text: str) -> str:
 
 
 def detect_section_header(original: str, output_mode: str) -> Optional[str]:
+    normalized = unicodedata.normalize("NFKC", str(original or "")).strip()
+    lettered = _LETTERED_CJK_HEADING_RE.fullmatch(normalized)
+    if lettered and not any(
+        marker in lettered.group("label")
+        for marker in _CROCHET_EXPRESSION_CJK_MARKERS
+    ):
+        label = re.sub(r"\s+", "", lettered.group("label"))
+        return f"{lettered.group('prefix')}.{label}"
+
     candidate = clean_section_candidate(original)
     if not candidate:
         return None
