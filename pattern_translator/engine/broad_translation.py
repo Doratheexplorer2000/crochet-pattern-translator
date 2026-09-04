@@ -115,16 +115,16 @@ CHINESE_ARABIC_ORDINAL_PATTERNS = {
     for digit in ENGLISH_ORDINAL_WORD_TO_DIGIT.values()
 }
 ROUND_EN_RE = re.compile(
-    r"\b(?:rnd|round|r)\s*(\d+)(?:\s*[-–—]\s*(?:r\s*)?(\d+))?",
+    r"\b(?:rnds?|rounds?|r)\s*(\d+)(?:\s*[-–—]\s*(?:r\s*)?(\d+))?",
     re.IGNORECASE,
 )
 ROW_EN_RE = re.compile(
-    r"\brow\s*(\d+)(?:\s*[-–—]\s*(\d+))?",
+    r"\brows?\s*(\d+)(?:\s*[-–—]\s*(\d+))?",
     re.IGNORECASE,
 )
-ROUND_CN_RE = re.compile(r"第\s*(\d+)\s*[圈輪]")
-ROUND_SIMPLIFIED_CN_RE = re.compile(r"第\s*(\d+)\s*[圈轮]")
-ROW_CN_RE = re.compile(r"第\s*(\d+)\s*行")
+ROUND_CN_RE = re.compile(r"第\s*(\d+)(?:\s*[-–—]\s*(\d+))?\s*[圈輪]")
+ROUND_SIMPLIFIED_CN_RE = re.compile(r"第\s*(\d+)(?:\s*[-–—]\s*(\d+))?\s*[圈轮]")
+ROW_CN_RE = re.compile(r"第\s*(\d+)(?:\s*[-–—]\s*(\d+))?\s*行")
 ROUND_SC_RE = re.compile(
     r"\bR(?:ND)?\s*(\d+)(?:\s*[-–—]\s*R?\s*(\d+))?",
     re.IGNORECASE,
@@ -138,12 +138,23 @@ MEASURE_RE = re.compile(
     r"(mm|cm|in(?:ch(?:es)?)?|英寸|厘米|毫米)(?![A-Za-z])",
     re.IGNORECASE,
 )
-ROUND_ID_EN_RE = re.compile(r"\b(?:rnd|round)\s*(\d+)", re.IGNORECASE)
-ROUND_ID_R_RE = re.compile(r"\bR(\d+)", re.IGNORECASE)
-ROUND_ID_CN_RE = re.compile(r"第\s*(\d+)\s*[圈輪]")
-ROUND_ID_SIMPLIFIED_CN_RE = re.compile(r"第\s*(\d+)\s*[圈轮]")
-ROW_ID_EN_RE = re.compile(r"\brow\s*(\d+)", re.IGNORECASE)
-ROW_ID_CN_RE = re.compile(r"第\s*(\d+)\s*行")
+ROUND_ID_EN_RE = re.compile(
+    r"\b(?:rnds?|rounds?)\s*(\d+)(?:\s*[-–—]\s*(\d+))?",
+    re.IGNORECASE,
+)
+ROUND_ID_R_RE = re.compile(
+    r"\bR\s*(\d+)(?:\s*[-–—]\s*R?\s*(\d+))?",
+    re.IGNORECASE,
+)
+ROUND_ID_CN_RE = re.compile(r"第\s*(\d+)(?:\s*[-–—]\s*(\d+))?\s*[圈輪]")
+ROUND_ID_SIMPLIFIED_CN_RE = re.compile(
+    r"第\s*(\d+)(?:\s*[-–—]\s*(\d+))?\s*[圈轮]"
+)
+ROW_ID_EN_RE = re.compile(
+    r"\brows?\s*(\d+)(?:\s*[-–—]\s*(\d+))?",
+    re.IGNORECASE,
+)
+ROW_ID_CN_RE = re.compile(r"第\s*(\d+)(?:\s*[-–—]\s*(\d+))?\s*行")
 
 MEASUREMENT_UNIT_CANONICAL = {
     "mm": "mm",

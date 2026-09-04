@@ -94,6 +94,89 @@ class BroadValidationRegressionTests(unittest.TestCase):
     def test_row_cannot_become_round(self):
         self._assert_rejects("Row 2: 2 sc (2)", "第2圈", en_us_source=True)
 
+    def test_production_row_range_with_spaced_chinese_marker_accepted(self):
+        self._assert_accepts(
+            "Row 6-7: sc all around",
+            "第 6-7 行：整圈鉤短針",
+            en_us_source=True,
+        )
+
+    def test_english_row_identity_to_chinese_row_identity_accepted(self):
+        self._assert_accepts("Row 6", "第6行", en_us_source=True)
+
+    def test_plural_english_row_range_to_chinese_row_range_accepted(self):
+        self._assert_accepts("Rows 6-7", "第6-7行", en_us_source=True)
+
+    def test_english_round_identity_to_chinese_round_identity_accepted(self):
+        self._assert_accepts("Round 3", "第3圈", en_us_source=True)
+
+    def test_plural_english_round_range_to_chinese_round_range_accepted(self):
+        self._assert_accepts("Rounds 3-5", "第3-5圈", en_us_source=True)
+
+    def test_english_ranges_to_simplified_chinese_identity_forms_accepted(self):
+        for source, translation in (
+            ("Rows 6-7", "第 6-7 行"),
+            ("Rounds 3-5", "第 3-5 轮"),
+        ):
+            with self.subTest(source=source, translation=translation):
+                segments = self._segments(source)
+                broad_translation.validate_semantic_units(
+                    _valid_units(segments, [translation]),
+                    segments,
+                    _route_config("English — US", "Simplified Chinese"),
+                )
+
+    def test_simplified_chinese_ranges_to_plural_english_identities_accepted(self):
+        for source, translation in (
+            ("第6-7行", "Rows 6-7"),
+            ("第3-5轮", "Rounds 3-5"),
+        ):
+            with self.subTest(source=source, translation=translation):
+                self._assert_accepts(source, translation, en_us_source=False)
+
+    def test_row_range_missing_endpoint_rejected_by_identity_validator(self):
+        self.assertFalse(
+            broad_translation._validate_row_numbers(
+                "Row 6-7",
+                "第6行",
+                (broad_translation.ROW_EN_RE,),
+            )
+        )
+
+    def test_wrong_row_range_rejected_by_identity_validator(self):
+        self.assertFalse(
+            broad_translation._validate_row_numbers(
+                "Row 6-7",
+                "第6-8行",
+                (broad_translation.ROW_EN_RE,),
+            )
+        )
+
+    def test_stitch_count_range_does_not_satisfy_row_identity(self):
+        self.assertFalse(
+            broad_translation._validate_row_numbers(
+                "Row 6-7",
+                "6-7針",
+                (broad_translation.ROW_EN_RE,),
+            )
+        )
+
+    def test_row_and_round_identity_types_remain_distinct_for_ranges(self):
+        self.assertFalse(
+            broad_translation._validate_row_numbers(
+                "Row 6-7",
+                "第6-7圈",
+                (broad_translation.ROW_EN_RE,),
+            )
+        )
+
+    def test_separate_explicit_row_labels_preserve_existing_identity_semantics(self):
+        self._assert_accepts(
+            "Row 6-7",
+            "第6行，第7行",
+            en_us_source=True,
+        )
+
     def test_measurement_unit_substitution_rejected(self):
         self._assert_rejects("Cut a 5 cm tail", "剪下5英寸線尾", en_us_source=True)
 
