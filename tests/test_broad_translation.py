@@ -177,6 +177,120 @@ class BroadValidationRegressionTests(unittest.TestCase):
             en_us_source=True,
         )
 
+    def test_suffix_repeat_forms_preserve_repetition_semantics(self):
+        cases = (
+            ("(sc, incr) 6x", "（短針，加針）×6"),
+            ("(2 sc, incr) 5x", "（2短針，加針）重複5次"),
+            ("(3 sc, incr) 6x", "（3短針，加針）重覆6次"),
+        )
+        for source, translation in cases:
+            with self.subTest(source=source, translation=translation):
+                self._assert_accepts(source, translation, en_us_source=True)
+
+    def test_suffix_repeat_cannot_be_recast_as_stitch_count(self):
+        cases = (
+            ("(sc, incr) 6x", "（短針，加針）短針6針"),
+            ("(2 sc, incr) 5x", "（2短針，加針）短針5針"),
+            ("(3 sc, incr) 6x", "（3短針，加針）短針6針"),
+        )
+        for source, translation in cases:
+            with self.subTest(source=source, translation=translation):
+                self._assert_rejects(source, translation, en_us_source=True)
+
+    def test_suffix_repeat_forms_preserve_semantics_for_simplified_chinese(self):
+        cases = (
+            ("(sc, incr) 6x", "（短针，加针）×6"),
+            ("(2 sc, incr) 5x", "（2短针，加针）重复5次"),
+        )
+        config = _route_config("English — US", "Simplified Chinese")
+        for source, translation in cases:
+            with self.subTest(source=source, translation=translation):
+                segments = self._segments(source)
+                broad_translation.validate_semantic_units(
+                    _valid_units(segments, [translation]),
+                    segments,
+                    config,
+                )
+
+    def test_suffix_repeat_corruption_rejected_for_simplified_chinese(self):
+        cases = (
+            ("(sc, incr) 6x", "（短针，加针）短针6针"),
+            ("(2 sc, incr) 5x", "（2短针，加针）短针5针"),
+        )
+        config = _route_config("English — US", "Simplified Chinese")
+        for source, translation in cases:
+            with self.subTest(source=source, translation=translation):
+                segments = self._segments(source)
+                with self.assertRaises(broad_translation.BroadTranslationError):
+                    broad_translation.validate_semantic_units(
+                        _valid_units(segments, [translation]),
+                        segments,
+                        config,
+                    )
+
+    def test_prefix_repeat_forms_also_require_repetition_semantics(self):
+        for source in ("(sc, incr) x6", "(sc, incr) x 6"):
+            with self.subTest(source=source):
+                self._assert_accepts(source, "（短針，加針）×6", en_us_source=True)
+                self._assert_rejects(source, "（短針，加針）短針6針", en_us_source=True)
+
+    def test_ordinary_stitch_counts_are_not_repeat_multipliers(self):
+        for source, translation in (("6 sc", "6短針"), ("2 sc", "2短針")):
+            with self.subTest(source=source):
+                self._assert_accepts(source, translation, en_us_source=True)
+
+    def test_ordinary_stitch_counts_remain_counts_for_simplified_chinese(self):
+        config = _route_config("English — US", "Simplified Chinese")
+        for source, translation in (("6 sc", "6短针"), ("2 sc", "2短针")):
+            with self.subTest(source=source):
+                segments = self._segments(source)
+                broad_translation.validate_semantic_units(
+                    _valid_units(segments, [translation]),
+                    segments,
+                    config,
+                )
+
+    def test_repeat_multiplier_multiplicity_is_enforced(self):
+        cases = (
+            ("Traditional Chinese", "（短針，加針）×6，共6針"),
+            ("Simplified Chinese", "（短针，加针）×6，共6针"),
+        )
+        source = "(sc, incr) 6x, then (sc, incr) 6x"
+        for output_mode, translation in cases:
+            with self.subTest(output_mode=output_mode):
+                segments = self._segments(source)
+                with self.assertRaises(broad_translation.BroadTranslationError):
+                    broad_translation.validate_semantic_units(
+                        _valid_units(segments, [translation]),
+                        segments,
+                        _route_config("English — US", output_mode),
+                    )
+
+    def test_repeat_safety_does_not_change_rows_or_measurements(self):
+        self._assert_accepts("Row 6", "第6行", en_us_source=True)
+        self._assert_accepts("20-30 cm", "20-30 cm", en_us_source=True)
+
+    def test_repeat_prompt_contract_is_scoped_to_both_english_source_routes(self):
+        traditional_prompt = broad_translation.build_prompt(
+            [],
+            [],
+            _route_config("English — US", "Traditional Chinese"),
+        )
+        english_target_prompt = broad_translation.build_prompt(
+            [],
+            [],
+            _route_config("Simplified Chinese", "English — US"),
+        )
+        simplified_target_prompt = broad_translation.build_prompt(
+            [],
+            [],
+            _route_config("English — US", "Simplified Chinese"),
+        )
+        contract_excerpt = "(sc, incr) 6x means repeat the grouped unit 6 times"
+        self.assertIn(contract_excerpt, traditional_prompt)
+        self.assertNotIn(contract_excerpt, english_target_prompt)
+        self.assertIn(contract_excerpt, simplified_target_prompt)
+
     def test_measurement_unit_substitution_rejected(self):
         self._assert_rejects("Cut a 5 cm tail", "剪下5英寸線尾", en_us_source=True)
 
@@ -551,6 +665,73 @@ class BroadArabicDigitPromptContractTests(unittest.TestCase):
                 )
 
 
+class BroadTranslationCompletenessPromptContractTests(unittest.TestCase):
+    ROUTES = (
+        ("English — US", "Traditional Chinese"),
+        ("English — US", "Simplified Chinese"),
+        ("Simplified Chinese", "English — US"),
+    )
+
+    def test_all_routes_require_complete_translation_without_glossary_gating(self):
+        required_clauses = (
+            "Translate all clear, legible source-language content into the target language",
+            "including ordinary prose and section headings",
+            "The glossary provides domain guidance and does not limit what may be translated",
+            "use normal language knowledge for clear ordinary words that are absent from it",
+        )
+        for source_mode, output_mode in self.ROUTES:
+            with self.subTest(source_mode=source_mode, output_mode=output_mode):
+                prompt = broad_translation.build_prompt(
+                    [{"source_segment_id": "segment-0000", "text": "Clear heading"}],
+                    [],
+                    _route_config(source_mode, output_mode),
+                )
+                for clause in required_clauses:
+                    self.assertIn(clause, prompt)
+
+    def test_ocr_ambiguity_protection_remains_explicit(self):
+        for source_mode, output_mode in self.ROUTES:
+            with self.subTest(source_mode=source_mode, output_mode=output_mode):
+                prompt = broad_translation.build_prompt(
+                    [],
+                    [],
+                    _route_config(source_mode, output_mode),
+                )
+                self.assertIn(
+                    "Preserve source wording only when the OCR or input itself is genuinely "
+                    "unclear or ambiguous",
+                    prompt,
+                )
+                self.assertIn("do not hallucinate missing meaning", prompt)
+                self.assertIn("Do not repair or silently resolve ambiguous OCR", prompt)
+
+    def test_unknown_clear_prose_stays_in_payload_with_empty_scoped_glossary(self):
+        config = _route_config("English — US", "Traditional Chinese")
+        segments = [
+            {
+                "source_segment_id": "segment-0000",
+                "text": "Garden assembly notes",
+            }
+        ]
+        route_terms = broad_translation.build_glossary(
+            config.source_mode,
+            config.output_mode,
+        )
+        selected = broad_translation.select_request_glossary(
+            route_terms,
+            segments,
+            config,
+        )
+        self.assertEqual([], selected)
+        prompt = broad_translation.build_prompt(segments, selected, config)
+        self.assertIn('"text":"Garden assembly notes"', prompt)
+        self.assertIn('"authoritative_crochet_glossary":[]', prompt)
+        self.assertIn(
+            "use normal language knowledge for clear ordinary words that are absent from it",
+            prompt,
+        )
+
+
 class BroadIdCoverageDiagnosticsTests(unittest.TestCase):
     def _reject_with_ids(self, returned_ids: list[list[str]]):
         segments = [
@@ -742,6 +923,18 @@ class BroadValidationDiagnosticsTests(unittest.TestCase):
         self.assertIn("2", failure["missing_row_identities"])
         self.assertEqual("", str(exc))
 
+    def test_suffix_repeat_corruption_logs_missing_repeat_marker(self):
+        events, exc = self._reject_with_logger(
+            "(sc, incr) 6x",
+            "（短針，加針）短針6針",
+        )
+        failure = next(event for event in events if event.get("phase") == "objective_validation_failed")
+        self.assertEqual("repeat_multiplier", failure["failed_rule"])
+        self.assertEqual(["6"], failure["required_repeat_multipliers"])
+        self.assertEqual([], failure["present_repeat_multipliers"])
+        self.assertEqual(["6"], failure["missing_repeat_multipliers"])
+        self.assertEqual("", str(exc))
+
     def test_measurement_units_logs_compact_measurement_facts(self):
         events, exc = self._reject_with_logger("Cut a 5 cm tail", "剪下5英寸線尾")
         failure = next(event for event in events if event.get("phase") == "objective_validation_failed")
@@ -909,11 +1102,11 @@ class BroadRequestScopedGlossaryTests(unittest.TestCase):
             for index, text in enumerate(texts)
         ]
         self.assertEqual(
-            25217,
+            25947,
             len(broad_translation.build_prompt(segments, self.route_terms, self.config)),
         )
         self.assertEqual(
-            6522,
+            7252,
             len(broad_translation.build_prompt(segments, selected, self.config)),
         )
 
@@ -1127,6 +1320,35 @@ class BroadRoutingTests(unittest.TestCase):
             return payload, 0.01
 
         return caller
+
+    def test_translated_clear_ordinary_headings_are_accepted_without_glossary_entries(self):
+        sources = ["Vines (6-7)", "Pot", "Dirt", "Garden notes"]
+        translations = ["藤蔓（6-7）", "花盆", "泥土", "花園說明"]
+        rows = pd.DataFrame(
+            [_ocr_row(source, y=index * 30) for index, source in enumerate(sources)]
+        )
+        segments, _ = broad_translation.build_source_segments(rows)
+        config = _route_config("English — US", "Traditional Chinese")
+        route_terms = broad_translation.build_glossary(
+            config.source_mode,
+            config.output_mode,
+        )
+        self.assertEqual(
+            [],
+            broad_translation.select_request_glossary(route_terms, segments, config),
+        )
+        caller = mock.Mock(side_effect=self._fake_luna(segments, translations))
+
+        result = broad_translation.translate_merged_ocr_lines_broad(
+            rows,
+            config.source_mode,
+            config.output_mode,
+            environ={"OPENAI_API_KEY": "test-key"},
+            luna_caller=caller,
+        )
+
+        self.assertEqual(translations, result["Translation"].tolist())
+        caller.assert_called_once()
 
     @mock.patch.dict(os.environ, {"PATTERN_BROAD_TRANSLATION_ENABLED": "0"}, clear=False)
     def test_broad_flag_off_uses_legacy_path(self):

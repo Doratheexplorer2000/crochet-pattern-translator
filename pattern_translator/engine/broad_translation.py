@@ -50,6 +50,19 @@ SHARED_ARABIC_DIGIT_PROMPT_CONTRACT = (
     "not infer or invent Arabic digits absent from the assigned source segments. Natural "
     "fluency must never override explicit Arabic-digit preservation.\n"
 )
+SHARED_TRANSLATION_COMPLETENESS_PROMPT_CONTRACT = (
+    "Translate all clear, legible source-language content into the target language, "
+    "including ordinary prose and section headings. The glossary provides domain guidance "
+    "and does not limit what may be translated; use normal language knowledge for clear "
+    "ordinary words that are absent from it. Preserve source wording only when the OCR or "
+    "input itself is genuinely unclear or ambiguous, and do not hallucinate missing meaning.\n"
+)
+ENGLISH_CROCHET_REPEAT_PROMPT_CONTRACT = (
+    "Treat an explicit x multiplier before or after a crochet unit as repetition, not "
+    "as a stitch count. For example, (sc, incr) 6x means repeat the grouped unit 6 "
+    "times; it does not mean work 6 single crochet stitches. Preserve x6, x 6, 6x, "
+    "and equivalent multiplication-sign forms as an explicit repetition fact.\n"
+)
 
 DOMAIN_CRITICAL_PATTERN_INSTRUCTION_IDS = frozenset(
     {
@@ -132,7 +145,15 @@ ROUND_SC_RE = re.compile(
 TOTAL_PAREN_END_RE = re.compile(r"\((\d+)\)\s*$")
 TOTAL_EQUALS_RE = re.compile(r"=(\d+)")
 TOTAL_CN_RE = re.compile(r"共\s*(\d+)")
-REPEAT_RE = re.compile(r"(?:\bx\s*|\u00d7\s*|[×*]\s*)(\d+)\b", re.IGNORECASE)
+REPEAT_PREFIX_RE = re.compile(
+    r"(?<![A-Za-z0-9])(?:x|×|\*)\s*(\d+)(?!\d)",
+    re.IGNORECASE,
+)
+REPEAT_SUFFIX_RE = re.compile(
+    r"(?<!\d)(\d+)\s*(?:x|×)(?![A-Za-z0-9])",
+    re.IGNORECASE,
+)
+REPEAT_CHINESE_RE = re.compile(r"重[複覆复]\s*(\d+)\s*次")
 MEASURE_RE = re.compile(
     r"(?<!\d)(\d+(?:\.\d+)?)(?!\d)\s*"
     r"(mm|cm|in(?:ch(?:es)?)?|英寸|厘米|毫米)(?![A-Za-z])",
@@ -611,9 +632,16 @@ def build_prompt(
             "terminology guidance, not as a phrase-replacement table. Do not repair or "
             "silently resolve ambiguous OCR.\n"
         )
+    repeat_contract = (
+        ENGLISH_CROCHET_REPEAT_PROMPT_CONTRACT
+        if config.en_us_source
+        else ""
+    )
     return (
         task
+        + SHARED_TRANSLATION_COMPLETENESS_PROMPT_CONTRACT
         + SHARED_ARABIC_DIGIT_PROMPT_CONTRACT
+        + repeat_contract
         + "Segments are visual OCR fragments. Combine adjacent segments when they form one "
         "instruction. Return JSON only with exactly two object keys: segment_assignments and "
         "semantic_units. Every input source_segment_id must appear exactly once as a key in "
@@ -993,11 +1021,36 @@ def _validate_totals(source: str, translation: str) -> bool:
     return True
 
 
-def _validate_repeats(source: str, translation: str) -> bool:
-    multipliers = REPEAT_RE.findall(source)
-    if multipliers and not _numbers_present(translation, multipliers):
-        return False
-    return True
+def _repeat_multipliers(
+    text: str,
+    patterns: Sequence[re.Pattern[str]],
+) -> List[str]:
+    return _identity_numbers(text, patterns)
+
+
+def _validate_repeats(
+    source: str,
+    translation: str,
+    config: _RouteConfig,
+) -> bool:
+    strict_repeat_markers = config.en_us_source
+    source_patterns = (
+        (REPEAT_PREFIX_RE, REPEAT_SUFFIX_RE)
+        if strict_repeat_markers
+        else (REPEAT_PREFIX_RE,)
+    )
+    multipliers = _repeat_multipliers(source, source_patterns)
+    if not multipliers:
+        return True
+    if not strict_repeat_markers:
+        return _numbers_present(translation, multipliers)
+    present = Counter(
+        _repeat_multipliers(
+            translation,
+            (REPEAT_PREFIX_RE, REPEAT_SUFFIX_RE, REPEAT_CHINESE_RE),
+        )
+    )
+    return not (Counter(multipliers) - present)
 
 
 def _measurement_fact_present(
@@ -1088,16 +1141,30 @@ def _total_fields(source: str, translation: str) -> Dict[str, object]:
     }
 
 
-def _repeat_fields(source: str, translation: str) -> Dict[str, object]:
-    multipliers = REPEAT_RE.findall(source)
-    required = Counter(multipliers)
-    available = _arabic_multiset(translation)
-    missing: List[str] = []
-    for multiplier, needed in required.items():
-        if available[multiplier] < needed:
-            missing.extend([multiplier] * (needed - available[multiplier]))
+def _repeat_fields(
+    source: str,
+    translation: str,
+    config: _RouteConfig,
+) -> Dict[str, object]:
+    strict_repeat_markers = config.en_us_source
+    source_patterns = (
+        (REPEAT_PREFIX_RE, REPEAT_SUFFIX_RE)
+        if strict_repeat_markers
+        else (REPEAT_PREFIX_RE,)
+    )
+    multipliers = _repeat_multipliers(source, source_patterns)
+    if strict_repeat_markers:
+        present = _repeat_multipliers(
+            translation,
+            (REPEAT_PREFIX_RE, REPEAT_SUFFIX_RE, REPEAT_CHINESE_RE),
+        )
+        missing = list((Counter(multipliers) - Counter(present)).elements())
+    else:
+        present = list(_arabic_multiset(translation).elements())
+        missing = list((Counter(multipliers) - Counter(present)).elements())
     return {
         "required_repeat_multipliers": multipliers,
+        "present_repeat_multipliers": present,
         "missing_repeat_multipliers": missing,
     }
 
@@ -1168,7 +1235,7 @@ def _objective_validation_failure_fields(
     elif failed_rule == "stitch_totals":
         fields.update(_total_fields(source, translation))
     elif failed_rule == "repeat_multiplier":
-        fields.update(_repeat_fields(source, translation))
+        fields.update(_repeat_fields(source, translation, config))
     elif failed_rule == "measurement_units":
         fields.update(_measurement_fields(source, translation, config))
     return fields
@@ -1230,7 +1297,7 @@ def _validate_objective_facts(
 
     if not _validate_totals(source, translation):
         fail("stitch_totals")
-    if not _validate_repeats(source, translation):
+    if not _validate_repeats(source, translation, config):
         fail("repeat_multiplier")
     if not _validate_measurements(source, translation, config):
         fail("measurement_units")
