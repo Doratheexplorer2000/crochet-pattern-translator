@@ -153,6 +153,73 @@ class BroadValidationRegressionTests(unittest.TestCase):
     def test_valid_arabic_digit_traditional_chinese_accepted(self):
         self._assert_accepts("Rnd 1: 6 sc", "第 1 圈：6 短針", en_us_source=True)
 
+    def test_english_ordinal_word_may_supply_matching_target_arabic_ordinal(self):
+        self._assert_accepts(
+            "Vines (6-7) ch length of vine (20-30 cm) "
+            "ch 10, slst back in first st",
+            "藤蔓（6-7條），鎖針編織藤蔓長度（20-30 cm）："
+            "鎖針10，在第1個針目上回引拔針",
+            en_us_source=True,
+        )
+
+    def test_ordinal_allowance_does_not_hide_missing_explicit_source_digit(self):
+        self._assert_rejects(
+            "Round 2: work in first st",
+            "在第1針鉤織",
+            en_us_source=True,
+        )
+
+    def test_ordinal_allowance_does_not_hide_unrelated_extra_digit(self):
+        self._assert_rejects(
+            "Round 2: work in first st",
+            "第2圈：在第1針鉤織，共30針",
+            en_us_source=True,
+        )
+
+    def test_one_ordinal_word_cannot_allow_two_extra_matching_digits(self):
+        self._assert_rejects(
+            "Work in first st",
+            "在第1針鉤織，再做1次",
+            en_us_source=True,
+        )
+
+    def test_two_ordinal_word_occurrences_allow_two_target_ordinals(self):
+        self._assert_accepts(
+            "Work in the first st and the first chain",
+            "在第1針和第1個鎖針鉤織",
+            en_us_source=True,
+        )
+
+    def test_bounded_english_ordinal_vocabulary_maps_first_through_tenth(self):
+        for word, digit in broad_translation.ENGLISH_ORDINAL_WORD_TO_DIGIT.items():
+            with self.subTest(word=word, digit=digit):
+                self._assert_accepts(
+                    f"Work in the {word} st",
+                    f"在第{digit}針鉤織",
+                    en_us_source=True,
+                )
+
+    def test_ordinal_word_boundaries_do_not_authorize_substrings_or_compounds(self):
+        for source in ("Work firstly", "Work in breakfastfirst st", "Work in twenty-first st"):
+            with self.subTest(source=source):
+                self._assert_rejects(source, "在第1針鉤織", en_us_source=True)
+
+    def test_ordinal_word_only_authorizes_target_ordinal_marker(self):
+        self._assert_rejects(
+            "Work in first st",
+            "鉤織短針並重複1次",
+            en_us_source=True,
+        )
+
+    def test_ordinal_allowance_applies_to_simplified_chinese_target(self):
+        segments = self._segments("Work in the second st")
+        units = _valid_units(segments, ["在第2针钩织"])
+        broad_translation.validate_semantic_units(
+            units,
+            segments,
+            _route_config("English — US", "Simplified Chinese"),
+        )
+
     def test_trio_may_translate_to_one_arabic_three(self):
         self._assert_accepts("Add a trio of peas", "放入 3 顆豌豆", en_us_source=True)
 

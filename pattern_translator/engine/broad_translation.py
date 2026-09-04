@@ -91,6 +91,29 @@ ARABIC_TOKEN_RE = re.compile(r"(?<!\d)\d+(?:\.\d+)?(?!\d)")
 TRIO_EN_RE = re.compile(r"\btrio\b", re.IGNORECASE)
 TRIO_TRADITIONAL_DIGIT_RE = re.compile(r"(?<!\d)3(?!\d)\s*顆")
 TRIO_SIMPLIFIED_DIGIT_RE = re.compile(r"(?<!\d)3(?!\d)\s*颗")
+ENGLISH_ORDINAL_WORD_TO_DIGIT = {
+    "first": "1",
+    "second": "2",
+    "third": "3",
+    "fourth": "4",
+    "fifth": "5",
+    "sixth": "6",
+    "seventh": "7",
+    "eighth": "8",
+    "ninth": "9",
+    "tenth": "10",
+}
+ENGLISH_ORDINAL_WORD_PATTERNS = {
+    word: re.compile(
+        rf"(?<![A-Za-z0-9_-]){re.escape(word)}(?![A-Za-z0-9_-])",
+        re.IGNORECASE,
+    )
+    for word in ENGLISH_ORDINAL_WORD_TO_DIGIT
+}
+CHINESE_ARABIC_ORDINAL_PATTERNS = {
+    digit: re.compile(rf"第\s*{re.escape(digit)}(?!\d)")
+    for digit in ENGLISH_ORDINAL_WORD_TO_DIGIT.values()
+}
 ROUND_EN_RE = re.compile(
     r"\b(?:rnd|round|r)\s*(\d+)(?:\s*[-–—]\s*(?:r\s*)?(\d+))?",
     re.IGNORECASE,
@@ -869,6 +892,17 @@ def _validate_arabic_digit_multiset(
         return False
 
     extras = translation_counts - source_counts
+    if config.en_us_source and extras:
+        for word, digit in ENGLISH_ORDINAL_WORD_TO_DIGIT.items():
+            if not extras[digit]:
+                continue
+            ordinal_allowance = min(
+                len(ENGLISH_ORDINAL_WORD_PATTERNS[word].findall(source)),
+                len(CHINESE_ARABIC_ORDINAL_PATTERNS[digit].findall(translation)),
+            )
+            extras[digit] -= min(extras[digit], ordinal_allowance)
+            if extras[digit] == 0:
+                del extras[digit]
     if config.source_mode == EN_US_SOURCE and extras["3"]:
         trio_target_pattern = (
             TRIO_SIMPLIFIED_DIGIT_RE
