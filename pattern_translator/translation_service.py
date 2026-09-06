@@ -1347,6 +1347,9 @@ def translate_image(request: TranslateImageRequest) -> TranslateImageResult:
 
         txt_start = time.perf_counter()
         translation_txt = line_translation_engine.build_overlay_export_text(line_df)
+        request_warning = str(
+            line_df.attrs.get("request_warning", "") if line_df is not None else ""
+        ).strip()
         txt_seconds = time.perf_counter() - txt_start
         log_downstream_timing(
             "export_end",
@@ -1401,6 +1404,7 @@ def translate_image(request: TranslateImageRequest) -> TranslateImageResult:
         "unmatched": unmatched,
         "readable_translation": readable_translation,
         "translation_txt": translation_txt,
+        "request_warning": request_warning,
         "quality_metrics": quality_metrics,
         "quality_errors": quality_errors,
         "quality_warnings": quality_warnings,

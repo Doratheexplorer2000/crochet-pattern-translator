@@ -428,6 +428,7 @@ def make_line_translation_overlay(
     """
     if line_df is None or line_df.empty:
         return None, "", pd.DataFrame()
+    request_warning = str(line_df.attrs.get("request_warning", "") or "").strip()
 
     img = image.convert("RGBA")
     w, h = img.size
@@ -539,7 +540,7 @@ def make_line_translation_overlay(
         drawn_count += 1
 
     if drawn_count == 0:
-        return None, "", pd.DataFrame()
+        return None, request_warning, pd.DataFrame()
 
     legend_df = pd.DataFrame(legend_rows)
     legend_lines = []
@@ -549,6 +550,8 @@ def make_line_translation_overlay(
         translated = str(r.get("Translation", "")).strip()
         prefix = f"{marker} " if marker else ""
         legend_lines.append(f"{prefix}{original} → {translated}".strip())
+    if request_warning:
+        legend_lines.insert(0, request_warning)
     legend_text = "\n".join(legend_lines)
     return Image.alpha_composite(img, overlay).convert("RGB"), legend_text, legend_df
 

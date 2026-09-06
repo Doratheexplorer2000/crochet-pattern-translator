@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 import csv
+import http.client
 import json
 import os
 import re
+import socket
+import ssl
 import time
 import unicodedata
 import urllib.error
 import urllib.request
 from collections import Counter
+from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
@@ -30,8 +34,11 @@ BROAD_MODEL = "gpt-5.6-luna"
 BROAD_REASONING = "low"
 BROAD_MAX_OUTPUT_TOKENS = 6000
 BROAD_TIMEOUT_SECONDS = 90.0
+BROAD_MIN_RETRY_BUDGET_SECONDS = 1.0
+BROAD_FAST_TRANSIENT_SECONDS = 10.0
 BROAD_FLAG_ENV = "PATTERN_BROAD_TRANSLATION_ENABLED"
 VALIDATION_DIAGNOSTIC_EXCERPT_CHARS = 400
+REQUEST_WARNING_ATTR = "request_warning"
 
 EN_US_SOURCE = "English — US"
 TRADITIONAL_CHINESE_TARGET = "Traditional Chinese"
@@ -44,6 +51,20 @@ _UNRESOLVED_WARNING_PREFIX_BY_TARGET = {
     SIMPLIFIED_CHINESE_TARGET: "⚠ 无法可靠翻译：",
     EN_US_TARGET: "⚠ Could not translate reliably: ",
 }
+_REQUEST_WARNING_BY_TARGET = {
+    TRADITIONAL_CHINESE_TARGET: "⚠ 自動翻譯未能可靠完成；部分內容可能保留原文。",
+    SIMPLIFIED_CHINESE_TARGET: "⚠ 自动翻译未能可靠完成；部分内容可能保留原文。",
+    EN_US_TARGET: (
+        "⚠ Automatic translation could not be completed reliably; "
+        "some original text may remain."
+    ),
+    "Japanese": "⚠ 自動翻訳を確実に完了できなかったため、一部に原文が残る場合があります。",
+}
+
+_BROAD_CALL_TIMEOUT_SECONDS: ContextVar[float] = ContextVar(
+    "broad_call_timeout_seconds",
+    default=BROAD_TIMEOUT_SECONDS,
+)
 
 _TRUE_VALUES = {"1", "true", "yes", "on"}
 KEYED_RESPONSE_SHAPE = "object_with_segment_assignments_and_semantic_units_objects"
@@ -214,6 +235,23 @@ MEASUREMENT_TARGET_ALIASES = {
 
 class BroadTranslationError(RuntimeError):
     """Controlled broad-translation failure without provider or OCR details."""
+
+
+class BroadRecoverableError(BroadTranslationError):
+    """Typed terminal translation-layer failure safe for deterministic fallback."""
+
+    def __init__(
+        self,
+        reason: str,
+        failure_classification: str,
+        *,
+        attempt_count: int,
+    ) -> None:
+        super().__init__()
+        self.reason = reason
+        self.failure_classification = failure_classification
+        self.attempt_count = attempt_count
+        self.retry_attempted = attempt_count > 1
 
 
 class _ObjectiveValidationError(BroadTranslationError):
@@ -841,7 +879,13 @@ def _parse_semantic_units(
             semantic_unit_count=semantic_unit_count,
             expected_segment_count=len(expected_ids),
         )
-        raise BroadTranslationError()
+        raise _BroadResponseParsingError(
+            "semantic_unit_schema",
+            "source_segment_coverage_invalid",
+            expected_top_level_shape=expected_shape,
+            actual_top_level_json_type="object",
+            semantic_unit_count=semantic_unit_count,
+        )
 
     referenced_unit_ids = set(assignments.values())
     defined_unit_ids = set(translations_by_unit)
@@ -921,7 +965,13 @@ def _validate_id_coverage(
             semantic_unit_count=len(units),
             expected_segment_count=len(expected_ids),
         )
-        raise BroadTranslationError()
+        raise _BroadResponseParsingError(
+            "semantic_unit_schema",
+            "normalized_source_segment_coverage_invalid",
+            expected_top_level_shape=KEYED_RESPONSE_SHAPE,
+            actual_top_level_json_type="object",
+            semantic_unit_count=len(units),
+        )
 
     if claimed != list(expected_ids):
         fail()
@@ -1346,6 +1396,14 @@ def _unresolved_translation(source: str, config: _RouteConfig) -> str:
     return prefix + source
 
 
+def request_warning_for_target(output_mode: str) -> str:
+    """Return the localized, content-free request warning for safe partial output."""
+    return _REQUEST_WARNING_BY_TARGET.get(
+        output_mode,
+        _REQUEST_WARNING_BY_TARGET[EN_US_TARGET],
+    )
+
+
 def _resolve_objective_validation_failures(
     units: Sequence[dict[str, Any]],
     segments: Sequence[Dict[str, str]],
@@ -1384,14 +1442,16 @@ def _resolve_objective_validation_failures(
             resolved["validation_failure_reason"] = ""
         resolved_units.append(resolved)
 
-    if failures and len(failures) == len(resolved_units):
-        raise BroadTranslationError()
-
     for error in failures:
         _log(
             diagnostic_logger,
-            "partial_validation_failure",
+            (
+                "all_units_validation_failed"
+                if len(failures) == len(resolved_units)
+                else "partial_validation_failure"
+            ),
             partial_validation_failure=True,
+            all_units_validation_failed=len(failures) == len(resolved_units),
             **error.diagnostic_fields,
         )
 
@@ -1412,14 +1472,12 @@ def call_luna_once(prompt: str, api_key: str) -> Tuple[dict[str, Any], float]:
         method="POST",
     )
     started = time.perf_counter()
-    with urllib.request.urlopen(request, timeout=BROAD_TIMEOUT_SECONDS) as response:
+    timeout_seconds = max(
+        0.001,
+        min(BROAD_TIMEOUT_SECONDS, _BROAD_CALL_TIMEOUT_SECONDS.get()),
+    )
+    with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
         payload = json.load(response)
-    if not isinstance(payload, dict):
-        raise _BroadResponseParsingError(
-            "provider_envelope",
-            "provider_response_not_object",
-            expected_top_level_shape="object_with_output_array",
-        )
     return payload, time.perf_counter() - started
 
 
@@ -1543,6 +1601,48 @@ def _provider_failure_diagnostics(error: BaseException) -> Dict[str, str]:
     return fields
 
 
+def _provider_failure_policy(
+    error: BaseException,
+    elapsed_seconds: float,
+) -> Tuple[str, str, bool]:
+    """Classify documented transport failures without inspecting provider content."""
+    if isinstance(error, urllib.error.HTTPError):
+        status = int(error.code)
+        retryable = status in {500, 502, 503, 504}
+        return (
+            f"http_{status}",
+            "http_transient" if retryable else "http_non_retryable",
+            retryable,
+        )
+
+    reason: object = error.reason if isinstance(error, urllib.error.URLError) else error
+    if isinstance(reason, TimeoutError):
+        return "timeout", "request_timeout", False
+    if isinstance(reason, (ConnectionResetError, http.client.RemoteDisconnected)):
+        retryable = elapsed_seconds <= BROAD_FAST_TRANSIENT_SECONDS
+        return (
+            "connection_reset",
+            "fast_transient_disconnect" if retryable else "transport_failure",
+            retryable,
+        )
+    if isinstance(reason, ConnectionRefusedError):
+        return "connection_refused", "transport_non_retryable", False
+    if isinstance(reason, socket.gaierror):
+        return "dns_failure", "transport_non_retryable", False
+    if isinstance(reason, ssl.SSLError):
+        return "tls_failure", "transport_non_retryable", False
+    if isinstance(error, json.JSONDecodeError):
+        retryable = elapsed_seconds <= BROAD_FAST_TRANSIENT_SECONDS
+        return (
+            "provider_json_malformed",
+            "malformed_response" if retryable else "late_malformed_response",
+            retryable,
+        )
+    if isinstance(error, (urllib.error.URLError, OSError)):
+        return "transport_failure", "transport_non_retryable", False
+    return "provider_failure", "unexpected_provider_failure", False
+
+
 def _log(diagnostic_logger: Optional[DiagnosticLogger], phase: str, **fields: object) -> None:
     if diagnostic_logger is None:
         return
@@ -1607,21 +1707,141 @@ def translate_merged_ocr_lines_broad(
 
     broad_start = time.perf_counter()
     _log(diagnostic_logger, "broad_translation_begin", visual_line_count=len(segments))
-    luna_start = time.perf_counter()
-    _log(
-        diagnostic_logger,
-        "ai_request_begin",
-        call_ordinal=1,
-        model=BROAD_MODEL,
-        route="broad",
-    )
-    try:
-        payload, luna_elapsed = caller(prompt, api_key)
-        units = _parse_semantic_units(
-            _parse_response_payload(payload),
-            [segment["source_segment_id"] for segment in segments],
-            diagnostic_logger=diagnostic_logger,
+    expected_ids = [segment["source_segment_id"] for segment in segments]
+    attempt = 1
+    while attempt <= 2:
+        luna_start = time.perf_counter()
+        remaining_budget = BROAD_TIMEOUT_SECONDS - (luna_start - broad_start)
+        if remaining_budget <= 0:
+            raise BroadRecoverableError(
+                "shared_budget_exhausted",
+                "request_timeout",
+                attempt_count=attempt - 1,
+            )
+        _log(
+            diagnostic_logger,
+            "ai_request_begin",
+            call_ordinal=attempt,
+            model=BROAD_MODEL,
+            route="broad",
+            remaining_budget_seconds=remaining_budget,
         )
+        timeout_token = _BROAD_CALL_TIMEOUT_SECONDS.set(remaining_budget)
+        luna_elapsed = 0.0
+        try:
+            payload, luna_elapsed = caller(prompt, api_key)
+        except (
+            TimeoutError,
+            urllib.error.HTTPError,
+            urllib.error.URLError,
+            json.JSONDecodeError,
+            OSError,
+        ) as error:
+            elapsed_seconds = time.perf_counter() - luna_start
+            reason, classification, retryable = _provider_failure_policy(
+                error,
+                elapsed_seconds,
+            )
+            remaining_after_failure = BROAD_TIMEOUT_SECONDS - (
+                time.perf_counter() - broad_start
+            )
+            retry_scheduled = (
+                attempt == 1
+                and retryable
+                and remaining_after_failure >= BROAD_MIN_RETRY_BUDGET_SECONDS
+            )
+            provider_diagnostics = _provider_failure_diagnostics(error)
+            provider_diagnostics["failure_classification"] = classification
+            _log(
+                diagnostic_logger,
+                "ai_request_end",
+                elapsed_seconds=elapsed_seconds,
+                call_ordinal=attempt,
+                model=BROAD_MODEL,
+                route="broad",
+                outcome="provider_error",
+                retry_scheduled=retry_scheduled,
+                remaining_budget_seconds=max(0.0, remaining_after_failure),
+                **provider_diagnostics,
+            )
+            if retry_scheduled:
+                _log(
+                    diagnostic_logger,
+                    "broad_retry_scheduled",
+                    call_ordinal=attempt,
+                    reason=reason,
+                    failure_classification=classification,
+                    retry_scheduled=True,
+                )
+                attempt += 1
+                continue
+            raise BroadRecoverableError(
+                reason,
+                classification,
+                attempt_count=attempt,
+            ) from None
+        finally:
+            _BROAD_CALL_TIMEOUT_SECONDS.reset(timeout_token)
+            if profile_count is not None:
+                profile_count("broad Luna translation calls", 1.0)
+            if profile_add_time is not None:
+                profile_add_time(
+                    "broad Luna translation",
+                    luna_elapsed or max(0.0, time.perf_counter() - luna_start),
+                )
+
+        try:
+            units = _parse_semantic_units(
+                _parse_response_payload(payload),
+                expected_ids,
+                diagnostic_logger=diagnostic_logger,
+            )
+        except _BroadResponseParsingError as error:
+            elapsed_seconds = time.perf_counter() - luna_start
+            _log_response_parsing_failure(
+                diagnostic_logger,
+                error,
+                elapsed_seconds,
+                attempt,
+            )
+            remaining_after_failure = BROAD_TIMEOUT_SECONDS - (
+                time.perf_counter() - broad_start
+            )
+            retry_scheduled = (
+                attempt == 1
+                and elapsed_seconds <= BROAD_FAST_TRANSIENT_SECONDS
+                and remaining_after_failure >= BROAD_MIN_RETRY_BUDGET_SECONDS
+            )
+            _log(
+                diagnostic_logger,
+                "ai_request_end",
+                elapsed_seconds=elapsed_seconds,
+                call_ordinal=attempt,
+                model=BROAD_MODEL,
+                route="broad",
+                outcome="validation_rejected",
+                reason=error.reason,
+                failure_classification="malformed_response",
+                retry_scheduled=retry_scheduled,
+                remaining_budget_seconds=max(0.0, remaining_after_failure),
+            )
+            if retry_scheduled:
+                _log(
+                    diagnostic_logger,
+                    "broad_retry_scheduled",
+                    call_ordinal=attempt,
+                    reason=error.reason,
+                    failure_classification="malformed_response",
+                    retry_scheduled=True,
+                )
+                attempt += 1
+                continue
+            raise BroadRecoverableError(
+                error.reason,
+                "malformed_response",
+                attempt_count=attempt,
+            ) from None
+
         units, partial_failure_count = _resolve_objective_validation_failures(
             units,
             segments,
@@ -1629,19 +1849,20 @@ def translate_merged_ocr_lines_broad(
             diagnostic_logger=diagnostic_logger,
         )
         result = adapt_semantic_units_to_line_df(units, segments, segment_rows)
-        if profile_count is not None:
-            profile_count("broad Luna translation calls", 1.0)
-        if profile_add_time is not None:
-            profile_add_time("broad Luna translation", luna_elapsed)
+        all_units_invalid = bool(units) and partial_failure_count == len(units)
+        if all_units_invalid:
+            result.attrs[REQUEST_WARNING_ATTR] = request_warning_for_target(output_mode)
         _log(
             diagnostic_logger,
             "ai_request_end",
             elapsed_seconds=luna_elapsed,
-            call_ordinal=1,
+            call_ordinal=attempt,
             model=BROAD_MODEL,
             route="broad",
             outcome="partial_success" if partial_failure_count else "success",
             partial_validation_failure_count=partial_failure_count,
+            all_units_validation_failed=all_units_invalid,
+            retry_scheduled=False,
         )
         _log(
             diagnostic_logger,
@@ -1650,55 +1871,8 @@ def translate_merged_ocr_lines_broad(
             visual_line_count=len(result),
             outcome="partial_success" if partial_failure_count else "success",
             partial_validation_failure_count=partial_failure_count,
+            all_units_validation_failed=all_units_invalid,
         )
         return result
-    except _BroadResponseParsingError as error:
-        elapsed_seconds = time.perf_counter() - luna_start
-        _log_response_parsing_failure(
-            diagnostic_logger,
-            error,
-            elapsed_seconds,
-            1,
-        )
-        _log(
-            diagnostic_logger,
-            "ai_request_end",
-            elapsed_seconds=elapsed_seconds,
-            call_ordinal=1,
-            model=BROAD_MODEL,
-            route="broad",
-            outcome="validation_rejected",
-        )
-        raise BroadTranslationError() from None
-    except BroadTranslationError:
-        _log(
-            diagnostic_logger,
-            "ai_request_end",
-            elapsed_seconds=time.perf_counter() - luna_start,
-            call_ordinal=1,
-            model=BROAD_MODEL,
-            route="broad",
-            outcome="validation_rejected",
-        )
-        raise
-    except (
-        TimeoutError,
-        urllib.error.URLError,
-        urllib.error.HTTPError,
-        json.JSONDecodeError,
-        ValueError,
-        OSError,
-        TypeError,
-        AttributeError,
-    ) as error:
-        _log(
-            diagnostic_logger,
-            "ai_request_end",
-            elapsed_seconds=time.perf_counter() - luna_start,
-            call_ordinal=1,
-            model=BROAD_MODEL,
-            route="broad",
-            outcome="provider_error",
-            **_provider_failure_diagnostics(error),
-        )
-        raise BroadTranslationError() from None
+
+    raise BroadTranslationError()

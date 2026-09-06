@@ -324,6 +324,11 @@ class ResultDeliveryTests(unittest.TestCase):
                 }
             ]
         )
+        warning = (
+            "⚠ Automatic translation could not be completed reliably; "
+            "some original text may remain."
+        )
+        line_df.attrs["request_warning"] = warning
         ocr_boxes = pd.DataFrame(
             [
                 {
@@ -353,7 +358,8 @@ class ResultDeliveryTests(unittest.TestCase):
                 ]
             ),
             "unmatched": ["R1"],
-            "readable_translation": "R1: 6X\n→ R1: 6 sc",
+            "readable_translation": warning + "\n\nR1: 6X\n→ R1: 6 sc",
+            "request_warning": warning,
             "quality_metrics": {"width_px": 120, "height_px": 80},
             "timings": {"Translation processing": 0.2, "Total runtime": 1.0},
             "runtime_profile": {
@@ -417,6 +423,9 @@ class ResultDeliveryTests(unittest.TestCase):
             interface_language="English",
             platform="unit-test-agent",
         )
+        self.assertEqual(warning, restored.result["request_warning"])
+        self.assertEqual(warning, restored.result["line_df"].attrs["request_warning"])
+        self.assertTrue(restored.result["readable_translation"].startswith(warning))
 
         with mock.patch(
             "pattern_translator.engine.result_delivery.time.perf_counter",

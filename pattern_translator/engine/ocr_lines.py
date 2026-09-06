@@ -344,6 +344,36 @@ def _merge_parenthetical_continuation_records(
     return merged
 
 
+def _source_preserving_line_df(rows: pd.DataFrame) -> pd.DataFrame:
+    """Project already-trusted visual rows without inventing translation content."""
+    out = []
+    for _, row in rows.iterrows():
+        source = str(row.get("text", "")).strip()
+        if not source:
+            continue
+        min_x = float(row.get("min_x", row.get("x", 0)))
+        max_x = float(row.get("max_x", row.get("x", 0) + 80))
+        min_y = float(row.get("min_y", row.get("y", 0)))
+        max_y = float(row.get("max_y", row.get("y", 0) + 20))
+        out.append(
+            {
+                "Original": source,
+                "Translation": source,
+                "Confidence": round(float(row.get("confidence", 0)), 3),
+                "Changed": "",
+                "Validation Status": "unresolved",
+                "Validation Failure Reason": "broad_terminal_failure",
+                "min_x": min_x,
+                "max_x": max_x,
+                "min_y": min_y,
+                "max_y": max_y,
+            }
+        )
+    if not out:
+        raise broad_translation.BroadTranslationError()
+    return pd.DataFrame(out)
+
+
 @profile_function("line-by-line translation: build_ocr_line_translations", "build_ocr_line_translations calls")
 def build_ocr_line_translations(
     ocr_rows: pd.DataFrame,
@@ -353,12 +383,18 @@ def build_ocr_line_translations(
     source_mode: str,
     llm_provider: Optional[llm_fallback.Provider] = None,
     diagnostic_logger: Optional[llm_fallback.DiagnosticLogger] = None,
+    *,
+    _deterministic_only: bool = False,
 ) -> pd.DataFrame:
     if ocr_rows is None or ocr_rows.empty:
         return pd.DataFrame()
 
+    if _deterministic_only:
+        llm_provider = None
+
     broad_route = (
-        broad_translation.is_broad_translation_enabled()
+        not _deterministic_only
+        and broad_translation.is_broad_translation_enabled()
         and broad_translation.is_broad_translation_route(source_mode, output_mode)
     )
     correct_chinese_legacy_layout = (
@@ -375,14 +411,53 @@ def build_ocr_line_translations(
     _profile_count("merged OCR lines", len(rows))
 
     if broad_route:
-        return broad_translation.translate_merged_ocr_lines_broad(
-            rows,
-            source_mode=source_mode,
-            output_mode=output_mode,
-            diagnostic_logger=diagnostic_logger,
-            profile_count=_profile_count,
-            profile_add_time=_profile_add_time,
-        )
+        try:
+            return broad_translation.translate_merged_ocr_lines_broad(
+                rows,
+                source_mode=source_mode,
+                output_mode=output_mode,
+                diagnostic_logger=diagnostic_logger,
+                profile_count=_profile_count,
+                profile_add_time=_profile_add_time,
+            )
+        except broad_translation.BroadRecoverableError as error:
+            if diagnostic_logger is not None:
+                diagnostic_logger(
+                    "broad_terminal_fallback_begin",
+                    terminal_fallback_reason=error.reason,
+                    failure_classification=error.failure_classification,
+                    retry_attempted=error.retry_attempted,
+                    deterministic_legacy_fallback_ran=True,
+                )
+            try:
+                result = build_ocr_line_translations(
+                    ocr_rows,
+                    index,
+                    df,
+                    output_mode,
+                    source_mode,
+                    llm_provider=None,
+                    diagnostic_logger=diagnostic_logger,
+                    _deterministic_only=True,
+                )
+                fallback_outcome = "deterministic_legacy"
+            except (KeyError, IndexError, TypeError, ValueError, RuntimeError):
+                result = _source_preserving_line_df(rows)
+                fallback_outcome = "source_preserved"
+            result.attrs[broad_translation.REQUEST_WARNING_ATTR] = (
+                broad_translation.request_warning_for_target(output_mode)
+            )
+            result.attrs["broad_fallback_mode"] = fallback_outcome
+            if diagnostic_logger is not None:
+                diagnostic_logger(
+                    "broad_terminal_fallback_end",
+                    outcome=fallback_outcome,
+                    terminal_fallback_reason=error.reason,
+                    failure_classification=error.failure_classification,
+                    retry_attempted=error.retry_attempted,
+                    deterministic_legacy_fallback_ran=True,
+                )
+            return result
 
     deterministic_start = time.perf_counter()
     if diagnostic_logger is not None:
@@ -405,9 +480,10 @@ def build_ocr_line_translations(
         )
 
     cleaned_lines = [cleaned for _row, cleaned, _translated in prepared]
-    shadow_title_classifier.record_shadow_comparison_if_enabled(
-        cleaned_lines=cleaned_lines,
-    )
+    if not _deterministic_only:
+        shadow_title_classifier.record_shadow_comparison_if_enabled(
+            cleaned_lines=cleaned_lines,
+        )
     title_contexts = []
     for position, (_row, cleaned, _translated) in enumerate(prepared):
         nearby_lines = [

@@ -16,6 +16,7 @@ from PIL import Image, ImageOps
 
 from pattern_translator import api as pattern_api
 from pattern_translator.api import app
+from pattern_translator.engine import broad_translation
 from pattern_translator.engine import translation_area_state as translation_area_state_engine
 from pattern_translator.translation_service import (
     TranslateImageRequest,
@@ -189,6 +190,56 @@ class PatternApiHttpTests(unittest.TestCase):
         self.assertTrue(payload["overlay_png"]["base64"])
         self.assertEqual("poor", payload["quality"]["level"])
         self.assertTrue(payload["quality"]["requires_confirmation"])
+
+    @mock.patch.dict(
+        "os.environ",
+        {"PATTERN_BROAD_TRANSLATION_ENABLED": "1", "OPENAI_API_KEY": "test-key"},
+        clear=False,
+    )
+    def test_recoverable_broad_failure_returns_200_with_warned_artifacts(self):
+        rows = pd.DataFrame(
+            [
+                {
+                    **self._ocr_rows().iloc[0].to_dict(),
+                    "text": "Rnd 1: 6 sc",
+                }
+            ]
+        )
+        ocr_result = dict(self._mock_primary_ocr())
+        ocr_result.update(
+            {
+                "selected_text": "Rnd 1: 6 sc",
+                "selected_rows": rows,
+            }
+        )
+        with mock.patch(
+            "pattern_translator.translation_service.run_primary_ocr",
+            return_value=ocr_result,
+        ), mock.patch.object(
+            broad_translation,
+            "call_luna_once",
+            return_value=({"output": []}, 0.01),
+        ) as broad_provider:
+            response = self._multipart(
+                files={"image": ("pattern.png", self._png_bytes(), "image/png")},
+                source_mode="English — US",
+                output_mode="Traditional Chinese",
+                area_mode="Whole Pattern",
+            )
+
+        self.assertEqual(200, response.status_code, response.text)
+        payload = response.json()
+        warning = broad_translation.request_warning_for_target(
+            "Traditional Chinese"
+        )
+        self.assertEqual(2, broad_provider.call_count)
+        self.assertTrue(payload["readable_translation"].startswith(warning))
+        self.assertTrue(payload["translation_txt"].startswith(warning))
+        self.assertTrue(payload["overlay_png"]["base64"])
+        self.assertEqual(
+            warning,
+            payload["diagnostic_context"]["result"]["request_warning"],
+        )
 
     def test_quality_preflight_assesses_full_image_and_exact_crop_without_ocr(self):
         observed_sizes = []

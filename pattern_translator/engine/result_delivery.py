@@ -465,7 +465,12 @@ def create_diagnostic_snapshot(
     snapshot = {
         "schema_version": DIAGNOSTIC_SNAPSHOT_SCHEMA_VERSION,
         "result": {
-            key: _json_safe_value(result.get(key), result_budget)
+            key: _json_safe_value(
+                str(result.get(key, "") or "")
+                if key == "request_warning"
+                else result.get(key),
+                result_budget,
+            )
             for key in (
                 "source_mode",
                 "output_mode",
@@ -475,6 +480,7 @@ def create_diagnostic_snapshot(
                 "timings",
                 "runtime_profile",
                 "translation_profile",
+                "request_warning",
                 "overlay_legend",
                 "raw_ocr_text",
                 "clean_text",
@@ -648,6 +654,9 @@ def restore_diagnostic_snapshot(
     ):
         if not isinstance(result_payload.get(key), dict):
             raise ValueError("diagnostic result value is invalid")
+    request_warning_value = result_payload.get("request_warning", "")
+    if not isinstance(request_warning_value, str):
+        raise ValueError("diagnostic result text is invalid")
     for key in ("overlay_legend", "raw_ocr_text", "clean_text"):
         if not isinstance(result_payload.get(key), str):
             raise ValueError("diagnostic result text is invalid")
@@ -688,6 +697,9 @@ def restore_diagnostic_snapshot(
         frames.get("line_df"),
         expected_columns=_DIAGNOSTIC_LINE_COLUMNS,
     )
+    request_warning = request_warning_value.strip()
+    if request_warning:
+        line_df.attrs["request_warning"] = request_warning
     matches_df = _restore_dataframe(frames.get("matches_df"))
     ocr_box_rows = _restore_dataframe(
         frames.get("ocr_box_rows"),

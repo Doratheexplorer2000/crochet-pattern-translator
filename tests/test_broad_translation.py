@@ -12,6 +12,7 @@ from pattern_translator.engine import diagnostic_report
 from pattern_translator.engine import line_translation
 from pattern_translator.engine import ocr_lines
 from pattern_translator.engine import overlay
+from pattern_translator.engine import shadow_title_classifier
 from pattern_translator.engine import terminology
 from pattern_translator.translation_service import (
     TranslateImageRequest,
@@ -565,7 +566,10 @@ class BroadArabicDigitPromptContractTests(unittest.TestCase):
             source,
             translation,
         )
-        self.assertIsNone(result)
+        self.assertIsNotNone(result)
+        self.assertEqual("unresolved", result.loc[0, "Validation Status"])
+        self.assertIn(source, result.loc[0, "Translation"])
+        self.assertTrue(result.attrs.get("request_warning"))
         failure = next(
             event for event in events if event["phase"] == "objective_validation_failed"
         )
@@ -983,20 +987,21 @@ class BroadValidationDiagnosticsTests(unittest.TestCase):
             clear=False,
         ):
             with mock.patch.object(broad_translation, "call_luna_once", side_effect=fake_luna):
-                with self.assertRaises(broad_translation.BroadTranslationError):
-                    broad_translation.translate_merged_ocr_lines_broad(
-                        rows,
-                        source_mode="English — US",
-                        output_mode="Traditional Chinese",
-                        diagnostic_logger=logger,
-                        environ={"OPENAI_API_KEY": "test-key"},
-                    )
+                result = broad_translation.translate_merged_ocr_lines_broad(
+                    rows,
+                    source_mode="English — US",
+                    output_mode="Traditional Chinese",
+                    diagnostic_logger=logger,
+                    environ={"OPENAI_API_KEY": "test-key"},
+                )
 
         failure = next(event for event in events if event.get("phase") == "objective_validation_failed")
         end = next(event for event in events if event.get("phase") == "ai_request_end")
         self.assertEqual("arabic_digit_multiset", failure["failed_rule"])
         self.assertEqual(["2"], failure["missing_digits"])
-        self.assertEqual("validation_rejected", end["outcome"])
+        self.assertEqual("unresolved", result.loc[0, "Validation Status"])
+        self.assertEqual("partial_success", end["outcome"])
+        self.assertTrue(end["all_units_validation_failed"])
 
 
 class BroadGlossaryTests(unittest.TestCase):
@@ -1416,7 +1421,7 @@ class BroadPartialFailClosedTests(unittest.TestCase):
             result.loc[1, "Translation"],
         )
 
-    def test_all_objective_failures_remain_request_fatal(self):
+    def test_all_objective_failures_return_unresolved_with_request_warning(self):
         response = _keyed_response_from_units(
             _valid_units(
                 self.segments,
@@ -1425,18 +1430,22 @@ class BroadPartialFailClosedTests(unittest.TestCase):
         )
         events: list[dict] = []
         caller = mock.Mock(return_value=(self._provider_payload(response), 0.01))
-        with self.assertRaises(broad_translation.BroadTranslationError):
-            broad_translation.translate_merged_ocr_lines_broad(
-                self.rows,
-                source_mode="Simplified Chinese",
-                output_mode="English — US",
-                diagnostic_logger=lambda phase, **fields: events.append(
-                    {"phase": phase, **fields}
-                ),
-                environ={"OPENAI_API_KEY": "test-key"},
-                luna_caller=caller,
-            )
+        result = broad_translation.translate_merged_ocr_lines_broad(
+            self.rows,
+            source_mode="Simplified Chinese",
+            output_mode="English — US",
+            diagnostic_logger=lambda phase, **fields: events.append(
+                {"phase": phase, **fields}
+            ),
+            environ={"OPENAI_API_KEY": "test-key"},
+            luna_caller=caller,
+        )
         caller.assert_called_once()
+        self.assertEqual(["unresolved"] * 3, result["Validation Status"].tolist())
+        self.assertEqual(
+            broad_translation.request_warning_for_target("English — US"),
+            result.attrs["request_warning"],
+        )
         self.assertEqual(
             3,
             len(
@@ -1447,11 +1456,19 @@ class BroadPartialFailClosedTests(unittest.TestCase):
                 ]
             ),
         )
-        self.assertFalse(
-            any(event["phase"] == "partial_validation_failure" for event in events)
+        self.assertEqual(
+            3,
+            len(
+                [
+                    event
+                    for event in events
+                    if event["phase"] == "all_units_validation_failed"
+                ]
+            ),
         )
         end = next(event for event in events if event["phase"] == "ai_request_end")
-        self.assertEqual("validation_rejected", end["outcome"])
+        self.assertEqual("partial_success", end["outcome"])
+        self.assertTrue(end["all_units_validation_failed"])
 
     def test_structural_and_ownership_failures_remain_request_fatal(self):
         cases = []
@@ -1477,7 +1494,7 @@ class BroadPartialFailClosedTests(unittest.TestCase):
                         environ={"OPENAI_API_KEY": "test-key"},
                         luna_caller=caller,
                     )
-                caller.assert_called_once()
+                self.assertEqual(2, caller.call_count)
 
     def test_invalid_multi_segment_unit_falls_back_together_with_geometry(self):
         response = {
@@ -1832,7 +1849,7 @@ class BroadRoutingTests(unittest.TestCase):
         },
         clear=False,
     )
-    def test_new_route_malformed_responses_fail_closed_without_legacy(self):
+    def test_new_route_malformed_responses_use_deterministic_legacy(self):
         cases = (
             ("English — US", "Simplified Chinese", self.english_index, "Rnd 1: 6 sc"),
         )
@@ -1847,18 +1864,19 @@ class BroadRoutingTests(unittest.TestCase):
                 ) as luna_mock, mock.patch.object(
                     line_translation,
                     "translate_ocr_line",
-                    side_effect=AssertionError("legacy fallback executed"),
+                    return_value="deterministic",
                 ) as legacy_mock:
-                    with self.assertRaises(broad_translation.BroadTranslationError):
-                        ocr_lines.build_ocr_line_translations(
-                            rows,
-                            index,
-                            self.df,
-                            output_mode,
-                            source_mode,
-                        )
-                self.assertEqual(1, luna_mock.call_count)
-                legacy_mock.assert_not_called()
+                    result = ocr_lines.build_ocr_line_translations(
+                        rows,
+                        index,
+                        self.df,
+                        output_mode,
+                        source_mode,
+                    )
+                self.assertEqual(2, luna_mock.call_count)
+                legacy_mock.assert_called()
+                self.assertEqual("deterministic", result.loc[0, "Translation"])
+                self.assertTrue(result.attrs.get("request_warning"))
 
     @mock.patch.dict(
         os.environ,
@@ -1921,7 +1939,7 @@ class BroadRoutingTests(unittest.TestCase):
         },
         clear=False,
     )
-    def test_supported_route_broad_failures_skip_legacy_fallback(self):
+    def test_supported_route_broad_timeouts_use_deterministic_legacy_without_retry(self):
         cases = (
             (
                 "English — US",
@@ -1952,18 +1970,19 @@ class BroadRoutingTests(unittest.TestCase):
                 ) as luna_mock, mock.patch.object(
                     line_translation,
                     "translate_ocr_line",
-                    side_effect=AssertionError("legacy"),
+                    return_value="deterministic",
                 ) as legacy_mock:
-                    with self.assertRaises(broad_translation.BroadTranslationError):
-                        ocr_lines.build_ocr_line_translations(
-                            rows,
-                            index,
-                            self.df,
-                            output_mode,
-                            source_mode,
-                        )
+                    result = ocr_lines.build_ocr_line_translations(
+                        rows,
+                        index,
+                        self.df,
+                        output_mode,
+                        source_mode,
+                    )
                 self.assertEqual(1, luna_mock.call_count)
-                legacy_mock.assert_not_called()
+                legacy_mock.assert_called()
+                self.assertEqual("deterministic", result.loc[0, "Translation"])
+                self.assertTrue(result.attrs.get("request_warning"))
 
     @mock.patch.dict(
         os.environ,
@@ -2255,7 +2274,7 @@ class BroadProviderTests(unittest.TestCase):
         failures = [
             event for event in events if event.get("phase") == "broad_response_parse_failed"
         ]
-        self.assertEqual(1, len(failures))
+        self.assertEqual(2, len(failures))
         return failures[0]
 
     def _assert_safe_parse_events(self, events: list[dict]) -> None:
@@ -2280,7 +2299,7 @@ class BroadProviderTests(unittest.TestCase):
         self.assertEqual(broad_translation.BROAD_MODEL, failure["model"])
         self.assertEqual(1, failure["call_ordinal"])
         self.assertGreaterEqual(failure["elapsed_seconds"], 0)
-        self.assertEqual(type(exc), broad_translation.BroadTranslationError)
+        self.assertIsInstance(exc, broad_translation.BroadRecoverableError)
         self.assertEqual((), exc.args)
         self._assert_safe_parse_events(events)
 
@@ -2300,7 +2319,7 @@ class BroadProviderTests(unittest.TestCase):
         self.assertEqual("JSONDecodeError", failure["exception_type"])
         self.assertEqual("model_output_not_valid_json", failure["reason"])
         self.assertEqual("json_object", failure["expected_top_level_shape"])
-        self.assertEqual(type(exc), broad_translation.BroadTranslationError)
+        self.assertIsInstance(exc, broad_translation.BroadRecoverableError)
         self.assertEqual((), exc.args)
         self._assert_safe_parse_events(events)
 
@@ -2340,7 +2359,7 @@ class BroadProviderTests(unittest.TestCase):
         )
         self.assertEqual("object", failure["actual_top_level_json_type"])
         self.assertEqual(1, failure["semantic_unit_count"])
-        self.assertEqual(type(exc), broad_translation.BroadTranslationError)
+        self.assertIsInstance(exc, broad_translation.BroadRecoverableError)
         self.assertEqual((), exc.args)
         self._assert_safe_parse_events(events)
 
@@ -2355,7 +2374,7 @@ class BroadProviderTests(unittest.TestCase):
         self.assertEqual("semantic_unit_schema", failure["stage"])
         self.assertEqual("decoded_json_not_object", failure["reason"])
         self.assertEqual("array", failure["actual_top_level_json_type"])
-        self.assertEqual(type(exc), broad_translation.BroadTranslationError)
+        self.assertIsInstance(exc, broad_translation.BroadRecoverableError)
         self.assertEqual((), exc.args)
         self._assert_safe_parse_events(events)
 
@@ -2415,7 +2434,7 @@ class BroadProviderTests(unittest.TestCase):
 
     def _provider_end_event(self, events: list[dict]) -> dict:
         end_events = [event for event in events if event.get("phase") == "ai_request_end"]
-        self.assertEqual(1, len(end_events))
+        self.assertGreaterEqual(len(end_events), 1)
         return end_events[0]
 
     def _assert_no_sensitive_diagnostics(self, events: list[dict]) -> None:
@@ -2442,7 +2461,7 @@ class BroadProviderTests(unittest.TestCase):
         self.assertEqual("provider_error", end_event["outcome"])
         self.assertEqual("http_error", end_event["provider_failure_type"])
         self.assertEqual("HTTPError", end_event["exception_type"])
-        self.assertEqual("http_transport_rejected", end_event["failure_classification"])
+        self.assertEqual("http_non_retryable", end_event["failure_classification"])
         self.assertEqual("429", end_event["http_status"])
         self.assertEqual("Too_Many_Requests", end_event["http_reason"])
         self.assertEqual("", str(exc))
@@ -2454,7 +2473,7 @@ class BroadProviderTests(unittest.TestCase):
         end_event = self._provider_end_event(events)
         self.assertEqual("url_error", end_event["provider_failure_type"])
         self.assertEqual("URLError", end_event["exception_type"])
-        self.assertEqual("url_transport_failed", end_event["failure_classification"])
+        self.assertEqual("transport_non_retryable", end_event["failure_classification"])
         self.assertEqual("network_unreachable", end_event["url_error_reason"])
         self.assertEqual("", str(exc))
         self._assert_no_sensitive_diagnostics(events)
@@ -2475,19 +2494,335 @@ class BroadProviderTests(unittest.TestCase):
         end_event = self._provider_end_event(events)
         self.assertEqual("json_decode", end_event["provider_failure_type"])
         self.assertEqual("JSONDecodeError", end_event["exception_type"])
-        self.assertEqual("response_json_parse_failed", end_event["failure_classification"])
+        self.assertEqual("malformed_response", end_event["failure_classification"])
         self.assertEqual("", str(exc))
         self._assert_no_sensitive_diagnostics(events)
 
-    def test_value_error_records_classification_and_raises_controlled_error(self):
-        events, exc = self._provider_failure_events(ValueError("bad provider value"))
-        end_event = self._provider_end_event(events)
-        self.assertEqual("value_error", end_event["provider_failure_type"])
-        self.assertEqual("ValueError", end_event["exception_type"])
-        self.assertEqual("provider_value_error", end_event["failure_classification"])
-        self.assertEqual("", str(exc))
-        self.assertNotIn("bad provider value", json.dumps(events))
-        self._assert_no_sensitive_diagnostics(events)
+    def test_unexpected_value_error_remains_fatal_and_unclassified(self):
+        rows = pd.DataFrame([_ocr_row("Rnd 1: 6 sc")])
+        events: list[dict] = []
+        with mock.patch.object(
+            broad_translation,
+            "call_luna_once",
+            side_effect=ValueError("internal invariant"),
+        ):
+            with self.assertRaisesRegex(ValueError, "internal invariant"):
+                broad_translation.translate_merged_ocr_lines_broad(
+                    rows,
+                    source_mode="English — US",
+                    output_mode="Traditional Chinese",
+                    diagnostic_logger=lambda phase, **fields: events.append(
+                        {"phase": phase, **fields}
+                    ),
+                    environ={"OPENAI_API_KEY": "test-key"},
+                )
+        self.assertFalse(any(event["phase"] == "broad_retry_scheduled" for event in events))
+
+
+class BroadRetryAndEmergencyFallbackTests(unittest.TestCase):
+    def setUp(self):
+        self.rows = pd.DataFrame([_ocr_row("Rnd 1: 6 sc")])
+        self.segments, _ = broad_translation.build_source_segments(self.rows)
+        self.valid_response = _keyed_response_from_units(
+            _valid_units(self.segments, ["第 1 圈：6 短針"])
+        )
+
+    @staticmethod
+    def _payload(response):
+        return {
+            "output": [
+                {
+                    "content": [
+                        {"type": "output_text", "text": json.dumps(response)}
+                    ]
+                }
+            ]
+        }
+
+    def _translate(self, caller, events=None):
+        return broad_translation.translate_merged_ocr_lines_broad(
+            self.rows,
+            source_mode="English — US",
+            output_mode="Traditional Chinese",
+            diagnostic_logger=(
+                None
+                if events is None
+                else lambda phase, **fields: events.append(
+                    {"phase": phase, **fields}
+                )
+            ),
+            environ={"OPENAI_API_KEY": "test-key"},
+            luna_caller=caller,
+        )
+
+    def test_malformed_first_response_retries_exact_prompt_then_succeeds(self):
+        malformed = {
+            "output": [
+                {
+                    "content": [
+                        {"type": "output_text", "text": "{SECRET_FIRST_ATTEMPT"}
+                    ]
+                }
+            ]
+        }
+        prompts = []
+        events = []
+
+        def caller(prompt, api_key):
+            self.assertEqual("test-key", api_key)
+            prompts.append(prompt)
+            if len(prompts) == 1:
+                return malformed, 0.01
+            return self._payload(self.valid_response), 0.01
+
+        result = self._translate(caller, events)
+        self.assertEqual(2, len(prompts))
+        self.assertEqual(prompts[0], prompts[1])
+        self.assertEqual("第 1 圈：6 短針", result.loc[0, "Translation"])
+        self.assertNotIn("SECRET_FIRST_ATTEMPT", result.to_string())
+        self.assertEqual(
+            [1, 2],
+            [
+                event["call_ordinal"]
+                for event in events
+                if event["phase"] == "ai_request_begin"
+            ],
+        )
+
+    @mock.patch.dict(
+        os.environ,
+        {"PATTERN_BROAD_TRANSLATION_ENABLED": "1", "OPENAI_API_KEY": "test-key"},
+        clear=False,
+    )
+    def test_all_invalid_units_do_not_retry_or_enter_legacy(self):
+        invalid_response = _keyed_response_from_units(
+            _valid_units(self.segments, ["第 1 圈：5 短針"])
+        )
+        with mock.patch.object(
+            broad_translation,
+            "call_luna_once",
+            return_value=(self._payload(invalid_response), 0.01),
+        ) as provider, mock.patch.object(
+            line_translation,
+            "translate_ocr_line",
+            side_effect=AssertionError("legacy fallback"),
+        ) as legacy:
+            result = ocr_lines.build_ocr_line_translations(
+                self.rows,
+                {},
+                pd.DataFrame(),
+                "Traditional Chinese",
+                "English — US",
+            )
+        provider.assert_called_once()
+        legacy.assert_not_called()
+        self.assertEqual("unresolved", result.loc[0, "Validation Status"])
+        self.assertTrue(result.attrs.get("request_warning"))
+
+    def test_retryable_http_statuses_get_exactly_one_retry(self):
+        for status in (500, 502, 503, 504):
+            with self.subTest(status=status):
+                calls = 0
+
+                def caller(_prompt, _api_key):
+                    nonlocal calls
+                    calls += 1
+                    if calls == 1:
+                        raise urllib.error.HTTPError(
+                            "https://api.openai.com/v1/responses",
+                            status,
+                            "transient",
+                            None,
+                            io.BytesIO(b""),
+                        )
+                    return self._payload(self.valid_response), 0.01
+
+                result = self._translate(caller)
+                self.assertEqual(2, calls)
+                self.assertEqual("第 1 圈：6 短針", result.loc[0, "Translation"])
+
+    def test_timeout_and_nonretryable_http_errors_never_retry(self):
+        errors = (
+            TimeoutError(),
+            urllib.error.URLError(TimeoutError()),
+            urllib.error.HTTPError("https://example.invalid", 429, "rate", None, None),
+            urllib.error.HTTPError("https://example.invalid", 400, "bad", None, None),
+        )
+        for error in errors:
+            with self.subTest(error=type(error).__name__, status=getattr(error, "code", None)):
+                caller = mock.Mock(side_effect=error)
+                with self.assertRaises(broad_translation.BroadRecoverableError):
+                    self._translate(caller)
+                caller.assert_called_once()
+
+    def test_fast_connection_reset_retries_but_connection_refusal_does_not(self):
+        reset_caller = mock.Mock(
+            side_effect=[
+                urllib.error.URLError(ConnectionResetError()),
+                (self._payload(self.valid_response), 0.01),
+            ]
+        )
+        result = self._translate(reset_caller)
+        self.assertEqual(2, reset_caller.call_count)
+        self.assertEqual("第 1 圈：6 短針", result.loc[0, "Translation"])
+
+        refused_caller = mock.Mock(
+            side_effect=urllib.error.URLError(ConnectionRefusedError())
+        )
+        with self.assertRaises(broad_translation.BroadRecoverableError):
+            self._translate(refused_caller)
+        refused_caller.assert_called_once()
+
+    def test_two_attempts_share_budget_and_no_retry_starts_without_one_second(self):
+        now = [0.0]
+        observed_timeouts = []
+        calls = 0
+
+        def clock():
+            return now[0]
+
+        def caller(_prompt, _api_key):
+            nonlocal calls
+            calls += 1
+            observed_timeouts.append(
+                broad_translation._BROAD_CALL_TIMEOUT_SECONDS.get()
+            )
+            if calls == 1:
+                now[0] = 10.0
+                return {"output": []}, 10.0
+            return self._payload(self.valid_response), 0.01
+
+        with mock.patch.object(broad_translation.time, "perf_counter", side_effect=clock):
+            self._translate(caller)
+        self.assertEqual([90.0, 80.0], observed_timeouts)
+
+        now[0] = 0.0
+        calls = 0
+
+        def budget_exhausting_caller(_prompt, _api_key):
+            nonlocal calls
+            calls += 1
+            now[0] = 89.5
+            return {"output": []}, 89.5
+
+        with mock.patch.object(broad_translation.time, "perf_counter", side_effect=clock):
+            with self.assertRaises(broad_translation.BroadRecoverableError):
+                self._translate(budget_exhausting_caller)
+        self.assertEqual(1, calls)
+
+        now[0] = 0.0
+        calls = 0
+
+        def late_malformed_caller(_prompt, _api_key):
+            nonlocal calls
+            calls += 1
+            now[0] = 20.0
+            return {"output": []}, 20.0
+
+        with mock.patch.object(broad_translation.time, "perf_counter", side_effect=clock):
+            with self.assertRaises(broad_translation.BroadRecoverableError):
+                self._translate(late_malformed_caller)
+        self.assertEqual(1, calls)
+
+    @mock.patch.dict(
+        os.environ,
+        {"PATTERN_BROAD_TRANSLATION_ENABLED": "1", "OPENAI_API_KEY": "test-key"},
+        clear=False,
+    )
+    def test_emergency_legacy_reuses_original_rows_and_disables_all_providers(self):
+        rows = pd.DataFrame(
+            [
+                _ocr_row("第1圈：", min_x=0, max_x=35, min_y=0, max_y=20),
+                _ocr_row("6短针", min_x=40, max_x=80, min_y=0, max_y=20),
+            ]
+        )
+        malformed = {"output": []}
+        supplied_legacy_provider = mock.Mock(side_effect=AssertionError("legacy provider"))
+        real_merge = ocr_lines.merge_ocr_boxes_into_visual_lines
+        merge_calls = []
+
+        def merge_wrapper(candidate_rows, **kwargs):
+            merge_calls.append((candidate_rows is rows, dict(kwargs)))
+            return real_merge(candidate_rows, **kwargs)
+
+        with mock.patch.object(
+            broad_translation,
+            "call_luna_once",
+            return_value=(malformed, 0.01),
+        ) as broad_provider, mock.patch.object(
+            ocr_lines,
+            "merge_ocr_boxes_into_visual_lines",
+            side_effect=merge_wrapper,
+        ), mock.patch.object(
+            shadow_title_classifier,
+            "record_shadow_comparison_if_enabled",
+            side_effect=AssertionError("title provider path"),
+        ) as title_route:
+            result = ocr_lines.build_ocr_line_translations(
+                rows,
+                {},
+                pd.DataFrame(),
+                "English — US",
+                "Simplified Chinese",
+                llm_provider=supplied_legacy_provider,
+            )
+
+        self.assertEqual(2, broad_provider.call_count)
+        supplied_legacy_provider.assert_not_called()
+        title_route.assert_not_called()
+        self.assertEqual(2, len(merge_calls))
+        self.assertTrue(all(used_original for used_original, _ in merge_calls))
+        self.assertFalse(merge_calls[0][1]["correct_chinese_legacy_layout"])
+        self.assertTrue(merge_calls[1][1]["correct_chinese_legacy_layout"])
+        self.assertEqual(0.0, result.loc[0, "min_x"])
+        self.assertEqual(80.0, result.loc[0, "max_x"])
+        self.assertEqual("deterministic_legacy", result.attrs["broad_fallback_mode"])
+        self.assertTrue(result.attrs.get("request_warning"))
+
+    @mock.patch.dict(
+        os.environ,
+        {"PATTERN_BROAD_TRANSLATION_ENABLED": "1", "OPENAI_API_KEY": "test-key"},
+        clear=False,
+    )
+    def test_deterministic_failure_preserves_trusted_source_but_invariant_stays_fatal(self):
+        malformed = {"output": []}
+        with mock.patch.object(
+            broad_translation,
+            "call_luna_once",
+            return_value=(malformed, 0.01),
+        ), mock.patch.object(
+            line_translation,
+            "translate_ocr_line",
+            side_effect=ValueError("deterministic lookup failed"),
+        ):
+            result = ocr_lines.build_ocr_line_translations(
+                self.rows,
+                {},
+                pd.DataFrame(),
+                "Traditional Chinese",
+                "English — US",
+            )
+        self.assertEqual("Rnd 1: 6 sc", result.loc[0, "Original"])
+        self.assertEqual("Rnd 1: 6 sc", result.loc[0, "Translation"])
+        self.assertEqual("source_preserved", result.attrs["broad_fallback_mode"])
+
+        with mock.patch.object(
+            broad_translation,
+            "call_luna_once",
+            return_value=(malformed, 0.01),
+        ), mock.patch.object(
+            line_translation,
+            "translate_ocr_line",
+            side_effect=AssertionError("unexpected invariant"),
+        ):
+            with self.assertRaisesRegex(AssertionError, "unexpected invariant"):
+                ocr_lines.build_ocr_line_translations(
+                    self.rows,
+                    {},
+                    pd.DataFrame(),
+                    "Traditional Chinese",
+                    "English — US",
+                )
 
 
 class BroadServiceIntegrationTests(unittest.TestCase):
@@ -2641,6 +2976,48 @@ class BroadServiceIntegrationTests(unittest.TestCase):
         self.assertIn(warning, primary["readable_translation"])
         self.assertIn(warning, primary["translation_txt"])
         self.assertIn(warning, primary["overlay_legend"])
+        self.assertIsNotNone(primary["overlay_png"])
+
+    @mock.patch("pattern_translator.translation_service.run_primary_ocr")
+    @mock.patch.dict(
+        os.environ,
+        {"PATTERN_BROAD_TRANSLATION_ENABLED": "1", "OPENAI_API_KEY": "test-key"},
+        clear=False,
+    )
+    def test_terminal_broad_failure_delivers_warned_service_artifacts(
+        self, mock_run_primary_ocr
+    ):
+        ocr_rows = pd.DataFrame([_ocr_row("Rnd 1: 6 sc")])
+        mock_run_primary_ocr.return_value = {
+            "selected_name": "PaddleOCR",
+            "selected_text": "Rnd 1: 6 sc",
+            "selected_rows": ocr_rows,
+            "paddle_inference_seconds": 0.1,
+        }
+        with mock.patch.object(
+            broad_translation,
+            "call_luna_once",
+            return_value=({"output": []}, 0.01),
+        ) as broad_provider:
+            result = translate_image(
+                self._request(
+                    "English — US",
+                    "Traditional Chinese",
+                    self.index_en,
+                    self.df_en,
+                )
+            )
+
+        primary = result.primary_result
+        warning = broad_translation.request_warning_for_target(
+            "Traditional Chinese"
+        )
+        self.assertEqual(2, broad_provider.call_count)
+        self.assertEqual(warning, primary["request_warning"])
+        self.assertTrue(primary["readable_translation"].startswith(warning + "\n\n"))
+        self.assertTrue(primary["translation_txt"].startswith(warning + "\n\n"))
+        self.assertIn(warning, primary["overlay_legend"])
+        self.assertFalse(primary["line_df"].loc[0, "Translation"].startswith("⚠"))
         self.assertIsNotNone(primary["overlay_png"])
 
 

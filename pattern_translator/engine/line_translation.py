@@ -1025,7 +1025,8 @@ def translate_ocr_line(original: str, index: Dict[str, int], df: pd.DataFrame, o
 def build_readable_line_translation(line_df: pd.DataFrame) -> str:
     if line_df is None or line_df.empty:
         return ""
-    lines = []
+    request_warning = str(line_df.attrs.get("request_warning", "") or "").strip()
+    lines = [request_warning] if request_warning else []
     for _, row in line_df.iterrows():
         original = str(row.get("Original", "")).strip()
         translated = str(row.get("Translation", "")).strip()
