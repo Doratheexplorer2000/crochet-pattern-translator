@@ -2,9 +2,7 @@
 
 Mobile-first OCR translation for crochet pattern images.
 
-Current production baseline: **Known-good pre-cache tree** (`c49755b59686e58298febba445e5ae51a6cb6e05`)
-
-Validated equivalent tree: `8dccd17518344d7d2152dc49fc3e13c0e95e3fd0`
+Current production baseline: `f1a9b45cad9e361bcdeb4c7066fe66f1d45ec07d` (`Improve Broad translation failure recovery`)
 
 Application entry point:
 
@@ -24,14 +22,14 @@ pattern_translator/app.py
 
 ## Current Product Status
 
-The current production revision is revert commit `c49755b59686e58298febba445e5ae51a6cb6e05`, deployed from GitHub `main` to Railway and publicly available at `https://pattern.crochetintelligence.com`. Its tree is byte-identical to the known-good pre-cache tree at `8dccd17518344d7d2152dc49fc3e13c0e95e3fd0`. It includes the production-validated Portal Centralization, Contextual LLM translation, completed RC54 Components V2 analytics, custom-domain, isolated OCR-worker, canonical translation-state, and rerun-safe result-delivery baselines.
+The current production revision is `f1a9b45cad9e361bcdeb4c7066fe66f1d45ec07d`, deployed from GitHub `main` to Railway and publicly available at `https://pattern.crochetintelligence.com`. It includes the production-validated Portal Centralization, Broad and Legacy translation routes, completed RC54 Components V2 analytics, custom domain, isolated OCR worker, canonical translation state, and rerun-safe result delivery. Railway deployment of this revision is human-confirmed.
 
 Key validated behavior:
 
 - Core OCR and translation workflow was successfully validated by real crochet users.
 - Overlay translation concept was validated.
 - Google Sheets analytics successfully collected real-world usage data.
-- The primary remaining issues are UX improvements rather than translation accuracy.
+- Broad translation is released for the three production routes documented below; Traditional Chinese to English US and all other routes retain existing Legacy behavior.
 - Whole Pattern proved more reliable in real-world testing and is now the default workflow.
 - Select Area remains available as an advanced / experimental feature until a future deployment platform improves cropper reliability.
 - RC26 passed local developer validation and Human UAT.
@@ -103,6 +101,31 @@ Key validated behavior:
 - UI development now follows the Product-driven approval workflow in `ENGINEERING_RULES.md`. `UI_SPEC.md` is updated only after Human Visual UAT and explicit Product Owner approval. Logo work and GIF/onboarding guidance remain deferred.
 - Regression evidence is stored under `regression/regression_test/Reports/`.
 
+## Broad Translation Production Status
+
+Production routes:
+
+- English US → Traditional Chinese: Broad.
+- English US → Simplified Chinese: Broad.
+- Simplified Chinese → English US: Broad.
+- Traditional Chinese → English US: Legacy.
+- All other routes remain Legacy unless explicitly documented otherwise.
+
+Commit `f1a9b45cad9e361bcdeb4c7066fe66f1d45ec07d` (`Improve Broad translation failure recovery`) keeps a normal successful Broad translation to one provider call. Selected promptly returned malformed/schema failures and selected transient provider failures may retry Broad once within the shared existing 90-second budget; timeouts do not retry.
+
+Objective validation remains fail-closed per translation unit. An invalid unit returns its exact source with a localized warning, while valid units remain deliverable. An all-units-invalid result is non-fatal and returns unresolved, source-preserving output. A final classified Broad failure uses deterministic-only Legacy emergency fallback from the original OCR rows, without Legacy provider or title-shadow calls. Trusted OCR/source is preserved whenever safe instead of turning a recoverable local failure into a whole-request HTTP 500; unexpected internal or invariant failures remain fatal.
+
+Release verification passed `361 / 361` complete regression tests, `66 / 66` final staged-tree focused tests, Python compilation, and diff checks. Human UAT A passed the normal Broad path. Human UAT B passed the Simplified Chinese → English US fail-soft path, and Railway production deployment was confirmed.
+
+Cross-language UAT status:
+
+- Case 1, English US → Traditional Chinese / Broad: PASS.
+- Case 2, English US → Simplified Chinese / Broad: PASS.
+- Case 3, Simplified Chinese → English US / Broad: PASS. Partial warnings correctly protect OCR-fused or otherwise unsafe units without failing the request.
+- Next formal case: Traditional Chinese → English US / Legacy.
+
+Known non-blocking translation-quality issue: Simplified Chinese crochet notation `4F` was preserved as `4F` in Broad output instead of resolving to English US `4 dc`. This is deferred and is not a release blocker.
+
 ## Contextual LLM Translation
 
 The production Contextual LLM translation architecture keeps the deterministic engine authoritative for crochet-critical terminology and structure. Eligible ordinary natural-language content is handled by `gpt-5.6-luna`; the validated title route remains separate where applicable. The general Luna route uses low reasoning effort and `max_output_tokens=400`. `gpt-5-nano` is no longer an active production translation route.
@@ -117,13 +140,12 @@ Validation passed: Hybrid/Human-UAT automated suite `73 / 73`; feature-flag-OFF 
 
 ## Current Project Status
 
-- Current production baseline: known-good pre-cache tree (`c49755b59686e58298febba445e5ae51a6cb6e05`)
-- Validated equivalent tree: `8dccd17518344d7d2152dc49fc3e13c0e95e3fd0`
+- Current production baseline: `f1a9b45cad9e361bcdeb4c7066fe66f1d45ec07d`
 - Current app version string: `Pattern OCR Translator (Beta RC26)`
 - Current phase: staged Pattern Translator Streamlit removal; Portal, analytics, and custom-domain production baselines remain closed and preserved.
 - Latest Pattern Translator analytics milestone: RC54B Analytics Transport Migration completed with Production Human UAT PASS.
 - Current production database: `knowledge_base/data/master_stitches.csv`
-- Current focus: staged removal of Streamlit from Pattern Translator, beginning with a framework-neutral `translate_image()` service that the existing Streamlit app calls. Production testing bounds the active blocker to browser/WebSocket/AppSession delivery; the exact reconnect trigger remains unproven.
+- Current Cross-language UAT focus: Traditional Chinese → English US / Legacy.
 - Translation performance is paused until migration stability. The reverted cache optimization remains useful validated evidence rather than rejected work.
 - Future testing: continue with occasional trusted-user testing and incremental fixes based on production evidence.
 

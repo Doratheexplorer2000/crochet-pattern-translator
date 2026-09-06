@@ -1,10 +1,10 @@
 # Crochet Pattern Translator Project Status
 
-Last updated: 2026-08-30
+Last updated: 2026-09-06
 
 ## Current Version
 
-Current FastAPI production application baseline: `778703b981fd2ef97c447eedca96021e553f3d3c` (`Fix FastAPI Plausible initialization`)
+Current FastAPI production application baseline: `f1a9b45cad9e361bcdeb4c7066fe66f1d45ec07d` (`Improve Broad translation failure recovery`)
 
 Application version string: `Pattern OCR Translator (Beta RC26)`
 
@@ -22,7 +22,7 @@ pattern_translator/app.py
 
 ## Current Production Status
 
-The FastAPI/browser Crochet Pattern Translator is live at `https://pattern.crochetintelligence.com` from GitHub `main`, using the existing Railway service and custom domain. The production application baseline is `778703b981fd2ef97c447eedca96021e553f3d3c`. Railway uses this validated Custom Start Command with one Uvicorn worker:
+The FastAPI/browser Crochet Pattern Translator is live at `https://pattern.crochetintelligence.com` from GitHub `main`, using the existing Railway service and custom domain. The production application baseline is `f1a9b45cad9e361bcdeb4c7066fe66f1d45ec07d`, whose Railway deployment is human-confirmed. Railway uses this validated Custom Start Command with one Uvicorn worker:
 
 ```sh
 sh -c 'python -m uvicorn pattern_translator.api:app --host 0.0.0.0 --port "$PORT" --workers 1'
@@ -33,6 +33,33 @@ The `sh -c` wrapper is required so Railway's `PORT` variable is expanded. Passin
 Production smoke UAT passed for the public browser UI, custom domain, upload, image-quality assessment, Whole Pattern and Select Area workflows, OCR, translation, overlay/result rendering, PNG/TXT downloads, Diagnostic Report, physical mobile workflow, and redeploy/startup behavior. Plausible production verification also passed: each approved event (`pattern_image_uploaded`, `pattern_translation_completed`, `pattern_png_downloaded`, `pattern_txt_downloaded`, and `pattern_feedback_clicked`) arrived exactly once in the intended shared `crochetintelligence.com` site, with no duplicate firing observed.
 
 Streamlit remains preserved as rollback-only and has not been removed. The Dockerfile default and `railway_start.sh` remain the rollback startup path. The cutover added no HEIC support and required no Redis, database session, queue, cache, persistent volume, or new Railway service. Streamlit retirement and other cleanup remain separate future work.
+
+## Broad Translation Production Release — 2026-09-06
+
+Production routes:
+
+- English US → Traditional Chinese: Broad.
+- English US → Simplified Chinese: Broad.
+- Simplified Chinese → English US: Broad.
+- Traditional Chinese → English US: Legacy.
+- All other routes remain Legacy unless explicitly documented otherwise.
+
+Production commit `f1a9b45cad9e361bcdeb4c7066fe66f1d45ec07d` (`Improve Broad translation failure recovery`) preserves the normal one-call Broad success path. Selected promptly returned malformed/schema failures and selected transient provider failures may retry Broad once, sharing the existing 90-second budget. Timeouts do not retry.
+
+The `0fe35553e914446734f45ea39399859be4a3df56` baseline referenced by the 2026-09-01 translation-architecture research closeout was the historical production baseline at the time of that closeout, not the current production revision.
+
+Objective validation remains fail-closed at translation-unit level. Invalid units return their exact source with a localized warning; all-units-invalid is non-fatal and returns unresolved source-preserving results. A final classified Broad failure invokes deterministic-only Legacy emergency fallback from the original OCR rows with no Legacy provider or title-shadow calls. Trusted OCR/source is preserved whenever safe instead of producing a whole-request HTTP 500. Unexpected internal and invariant failures remain fatal.
+
+Verification passed the complete `361 / 361` regression suite, final staged-tree focused verification `66 / 66`, Python compilation, and diff checks. Human UAT A passed the normal Broad path, Human UAT B passed the Simplified Chinese → English US fail-soft path, and Railway production deployment was confirmed.
+
+Cross-language UAT status:
+
+- Case 1, English US → Traditional Chinese / Broad: PASS.
+- Case 2, English US → Simplified Chinese / Broad: PASS.
+- Case 3, Simplified Chinese → English US / Broad: PASS. Partial warnings correctly protect OCR-fused or otherwise unsafe units without failing the request.
+- Next formal case: Traditional Chinese → English US / Legacy.
+
+Deferred non-blocking translation-quality issue: Simplified Chinese crochet notation `4F` was preserved as `4F` in Broad output instead of resolving to English US `4 dc`. This is not a release blocker.
 
 RC42 completed the first Engine Extraction by moving the CSV terminology / lookup engine into `pattern_translator/engine/terminology.py`. RC43 extracted pure line-translation logic into `pattern_translator/engine/line_translation.py`. RC44 extracted Diagnostic Report construction and formatting into `pattern_translator/engine/diagnostic_report.py`. RC45 completed Boundary Cleanup. RC46 extracted overlay rendering into `pattern_translator/engine/overlay.py`. RC47 extracted Pattern Document responsibilities into `pattern_translator/engine/pattern_document.py`. RC48 extracted OCR line assembly into `pattern_translator/engine/ocr_lines.py`. RC49 extracted deterministic OCR cleanup into `pattern_translator/engine/ocr_cleanup.py`, completing Engine Migration and Domain Layer extraction. Regression and Human UAT passed with no user-visible behavior changes, and the completed engine layer is included in the current production release.
 
