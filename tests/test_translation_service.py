@@ -12,7 +12,7 @@ from pathlib import Path
 from unittest import mock
 
 import pandas as pd
-from PIL import Image
+from PIL import Image, ImageDraw
 
 from pattern_translator.engine import line_translation as line_translation_engine
 from pattern_translator.engine import overlay as overlay_engine
@@ -22,6 +22,7 @@ from pattern_translator.translation_service import (
     TranslateImageRequest,
     _TRANSLATION_PROFILE,
     _classify_image_quality,
+    _main_text_height_metrics,
     assess_image_quality,
     get_quality_status,
     prepare_translation_dataframe,
@@ -68,47 +69,104 @@ class TranslationServiceImportTests(unittest.TestCase):
 
 
 class ImageQualityAssessmentTests(unittest.TestCase):
-    def test_resolution_boundaries_are_preserved(self):
-        errors, warnings = _classify_image_quality(999, 600, 120, 28)
-        self.assertEqual(1, len(errors))
-        self.assertIn("too small", errors[0])
-        self.assertEqual([], warnings)
+    @staticmethod
+    def _component_image(
+        width: int = 414,
+        height: int = 394,
+        component_height: int = 14,
+        component_count: int = 30,
+        tiny_count: int = 0,
+    ) -> Image.Image:
+        image = Image.new("RGB", (width, height), "white")
+        draw = ImageDraw.Draw(image)
+        columns = 5 if width < 300 else 10
+        for index in range(component_count):
+            box_height = 5 if index < tiny_count else component_height
+            x = 15 + (index % columns) * 35
+            y = 15 + (index // columns) * 35
+            draw.rectangle(
+                (x, y, x + 8, y + box_height - 1),
+                outline="black",
+                width=2,
+            )
+        return image
 
-        errors, warnings = _classify_image_quality(1000, 600, 120, 28)
-        self.assertEqual([], errors)
-        self.assertEqual(1, len(warnings))
-        self.assertIn("acceptable but not ideal", warnings[0])
+    def test_small_readable_crop_is_good_and_dimensions_do_not_control_status(self):
+        errors, warnings, metrics = assess_image_quality(self._component_image())
 
-        errors, warnings = _classify_image_quality(1500, 600, 120, 28)
-        self.assertEqual([], errors)
-        self.assertEqual([], warnings)
+        self.assertEqual("good", get_quality_status(errors, warnings)[0])
+        self.assertEqual(414, metrics["assessment_width_px"])
+        self.assertEqual(394, metrics["assessment_height_px"])
+        self.assertGreaterEqual(metrics["main_text_height_px"], 10)
+        self.assertTrue(metrics["main_text_height_reliable"])
+        self.assertNotIn("pixel_count", metrics)
 
-        errors, _warnings = _classify_image_quality(1500, 599, 120, 28)
-        self.assertEqual(1, len(errors))
+    def test_assessment_image_caps_longest_side_and_never_upscales(self):
+        large = self._component_image(width=828, height=1104, component_count=60)
+        small = self._component_image(width=414, height=394)
 
-    def test_sharpness_and_contrast_boundaries_are_preserved(self):
-        errors, warnings = _classify_image_quality(1500, 600, 59.9, 28)
-        self.assertEqual(1, len(errors))
-        self.assertIn("blurry", errors[0])
-        self.assertEqual([], warnings)
+        large_metrics = assess_image_quality(large)[2]
+        small_metrics = assess_image_quality(small)[2]
 
-        errors, warnings = _classify_image_quality(1500, 600, 60, 28)
-        self.assertEqual([], errors)
-        self.assertEqual(1, len(warnings))
-        self.assertIn("slightly soft", warnings[0])
+        self.assertEqual((750, 1000), (
+            large_metrics["assessment_width_px"],
+            large_metrics["assessment_height_px"],
+        ))
+        self.assertEqual((414, 394), (
+            small_metrics["assessment_width_px"],
+            small_metrics["assessment_height_px"],
+        ))
 
-        errors, warnings = _classify_image_quality(1500, 600, 119.9, 28)
-        self.assertEqual([], errors)
-        self.assertEqual(1, len(warnings))
+    def test_tiny_main_text_is_poor(self):
+        errors, warnings, reason = _classify_image_quality(120, 28, 6.9, True)
+        self.assertEqual("poor", get_quality_status(errors, warnings)[0])
+        self.assertEqual("main_text_too_small", reason)
 
-        errors, warnings = _classify_image_quality(1500, 600, 120, 27.9)
-        self.assertEqual([], errors)
-        self.assertEqual(1, len(warnings))
-        self.assertIn("contrast", warnings[0])
+    def test_severe_blur_is_poor_only_with_moderately_small_main_text(self):
+        errors, warnings, reason = _classify_image_quality(4.9, 28, 17.9, True)
+        self.assertEqual("poor", get_quality_status(errors, warnings)[0])
+        self.assertEqual("severe_blur_with_small_main_text", reason)
 
-        errors, warnings = _classify_image_quality(1500, 600, 120, 28)
-        self.assertEqual([], errors)
-        self.assertEqual([], warnings)
+        errors, warnings, reason = _classify_image_quality(4.9, 28, 18.0, True)
+        self.assertEqual("fair", get_quality_status(errors, warnings)[0])
+        self.assertEqual("low_sharpness", reason)
+
+    def test_low_contrast_alone_is_fair(self):
+        errors, warnings, reason = _classify_image_quality(120, 11.9, 14, True)
+        self.assertEqual("fair", get_quality_status(errors, warnings)[0])
+        self.assertEqual("low_contrast", reason)
+
+    def test_unreliable_or_sparse_main_text_estimate_is_always_fair(self):
+        sparse = _main_text_height_metrics([14.0] * 19)
+        ambiguous = _main_text_height_metrics(
+            ([5.0] * 5) + ([20.0] * 5) + ([50.0] * 5) + ([90.0] * 5)
+        )
+        self.assertFalse(sparse["main_text_height_reliable"])
+        self.assertFalse(ambiguous["main_text_height_reliable"])
+
+        for metrics in (sparse, ambiguous):
+            errors, warnings, reason = _classify_image_quality(
+                0,
+                0,
+                metrics["main_text_height_px"],
+                bool(metrics["main_text_height_reliable"]),
+            )
+            self.assertEqual("fair", get_quality_status(errors, warnings)[0])
+            self.assertEqual("unreliable_main_text_scale", reason)
+
+    def test_isolated_tiny_components_do_not_override_dominant_text(self):
+        metrics = _main_text_height_metrics(([5.0] * 5) + ([14.0] * 25))
+        errors, warnings, reason = _classify_image_quality(
+            120,
+            28,
+            metrics["main_text_height_px"],
+            bool(metrics["main_text_height_reliable"]),
+        )
+
+        self.assertEqual(14.0, metrics["main_text_height_px"])
+        self.assertTrue(metrics["main_text_height_reliable"])
+        self.assertEqual("good", get_quality_status(errors, warnings)[0])
+        self.assertEqual("main_text_readable", reason)
 
     def test_status_precedence_is_error_then_warning_then_good(self):
         self.assertEqual("poor", get_quality_status(["error"], ["warning"])[0])
@@ -129,10 +187,9 @@ class ImageQualityAssessmentTests(unittest.TestCase):
         self.assertEqual(600, metrics["height_px"])
         self.assertIsInstance(metrics["sharpness_score"], float)
         self.assertIsInstance(metrics["contrast_score"], float)
-        self.assertEqual(
-            get_quality_status(errors, warnings)[0],
-            "poor" if errors else "fair" if warnings else "good",
-        )
+        self.assertFalse(metrics["main_text_height_reliable"])
+        self.assertEqual("unreliable_main_text_scale", metrics["classification_reason"])
+        self.assertEqual("fair", get_quality_status(errors, warnings)[0])
 
 
 class OverlayScalingTests(unittest.TestCase):

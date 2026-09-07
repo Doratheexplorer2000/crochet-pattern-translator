@@ -360,7 +360,20 @@ class ResultDeliveryTests(unittest.TestCase):
             "unmatched": ["R1"],
             "readable_translation": warning + "\n\nR1: 6X\n→ R1: 6 sc",
             "request_warning": warning,
-            "quality_metrics": {"width_px": 120, "height_px": 80},
+            "quality_metrics": {
+                "width_px": 120,
+                "height_px": 80,
+                "assessment_width_px": 120,
+                "assessment_height_px": 80,
+                "sharpness_score": 120.0,
+                "contrast_score": 28.0,
+                "plausible_component_count": 30,
+                "main_text_height_px": 14.0,
+                "main_text_height_reliable": True,
+                "dominant_band_component_count": 25,
+                "dominant_band_component_percent": 83.3,
+                "classification_reason": "main_text_readable",
+            },
             "timings": {"Translation processing": 0.2, "Total runtime": 1.0},
             "runtime_profile": {
                 "translation": 0.2,
@@ -458,6 +471,15 @@ class ResultDeliveryTests(unittest.TestCase):
         self.assertIn("CSV rows loaded: 7", round_tripped)
         self.assertIn("Image quality status: Good", round_tripped)
         self.assertIn("Resolution: 120 x 80 px", round_tripped)
+        self.assertIn("Assessment resolution: 120 x 80 px", round_tripped)
+        self.assertIn("Plausible text-like components: 30", round_tripped)
+        self.assertIn("Main text height (H_main): 14.0", round_tripped)
+        self.assertIn("Main text height reliable: Yes", round_tripped)
+        self.assertIn("Dominant height band: 25 components (83.3%)", round_tripped)
+        self.assertIn(
+            "Image quality classification reason: main_text_readable",
+            round_tripped,
+        )
         self.assertIn("=== AI Fallback Diagnostics ===", round_tripped)
         self.assertIn(
             "Call 1 | outcome=validation_rejected | "
@@ -468,10 +490,7 @@ class ResultDeliveryTests(unittest.TestCase):
             "Good",
             restored.result["diagnostic_report_inputs"]["image_quality_status"],
         )
-        self.assertEqual(
-            {"width_px": 120, "height_px": 80},
-            restored.result["quality_metrics"],
-        )
+        self.assertEqual(result["quality_metrics"], restored.result["quality_metrics"])
 
     def test_large_diagnostic_snapshot_remains_bounded_and_restorable(self):
         line_df = pd.DataFrame(

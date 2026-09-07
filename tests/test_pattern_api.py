@@ -12,7 +12,7 @@ from unittest import mock
 
 import pandas as pd
 from fastapi.testclient import TestClient
-from PIL import Image, ImageOps
+from PIL import Image, ImageDraw, ImageOps
 
 from pattern_translator import api as pattern_api
 from pattern_translator.api import app
@@ -61,6 +61,32 @@ class PatternApiHttpTests(unittest.TestCase):
     def _png_bytes(width: int = 120, height: int = 80, colour: str = "white") -> bytes:
         output = io.BytesIO()
         Image.new("RGB", (width, height), colour).save(output, format="PNG")
+        return output.getvalue()
+
+    @staticmethod
+    def _component_pattern_image(
+        width: int = 414,
+        height: int = 394,
+        component_height: int = 14,
+        component_count: int = 30,
+    ) -> Image.Image:
+        image = Image.new("RGB", (width, height), "white")
+        draw = ImageDraw.Draw(image)
+        columns = 5 if width < 300 else 10
+        for index in range(component_count):
+            x = 15 + (index % columns) * 35
+            y = 15 + (index // columns) * 35
+            draw.rectangle(
+                (x, y, x + 8, y + component_height - 1),
+                outline="black",
+                width=2,
+            )
+        return image
+
+    @staticmethod
+    def _image_bytes(image: Image.Image) -> bytes:
+        output = io.BytesIO()
+        image.save(output, format="PNG")
         return output.getvalue()
 
     @staticmethod
@@ -188,8 +214,8 @@ class PatternApiHttpTests(unittest.TestCase):
         self.assertIsNotNone(payload["overlay_png"])
         self.assertEqual("image/png", payload["overlay_png"]["media_type"])
         self.assertTrue(payload["overlay_png"]["base64"])
-        self.assertEqual("poor", payload["quality"]["level"])
-        self.assertTrue(payload["quality"]["requires_confirmation"])
+        self.assertEqual("fair", payload["quality"]["level"])
+        self.assertFalse(payload["quality"]["requires_confirmation"])
 
     @mock.patch.dict(
         "os.environ",
@@ -470,7 +496,54 @@ class PatternApiHttpTests(unittest.TestCase):
         self.assertEqual(400, unsupported_extension.status_code)
         self.assertEqual(400, invalid_image.status_code)
 
+    def test_small_readable_select_area_is_good_without_poor_confirmation(self):
+        crop = self._component_pattern_image()
+        uploaded = Image.new("RGB", (500, 480), "white")
+        crop_box = (40, 40, 454, 434)
+        uploaded.paste(crop, crop_box[:2])
+        image_bytes = self._image_bytes(uploaded)
+
+        with mock.patch(
+            "pattern_translator.translation_service.run_primary_ocr",
+            return_value=self._mock_primary_ocr(),
+        ) as ocr_spy:
+            preflight = self.client.post(
+                "/api/v1/image-quality",
+                data={
+                    "area_mode": "Select Area",
+                    "crop_left": "40",
+                    "crop_top": "40",
+                    "crop_right": "454",
+                    "crop_bottom": "434",
+                },
+                files={"image": ("pattern.png", image_bytes, "image/png")},
+            )
+            translated = self._multipart(
+                files={"image": ("pattern.png", image_bytes, "image/png")},
+                source_mode=self.source_mode,
+                output_mode=self.output_mode,
+                area_mode="Select Area",
+                crop_left="40",
+                crop_top="40",
+                crop_right="454",
+                crop_bottom="434",
+                force_run="false",
+            )
+
+        self.assertEqual(200, preflight.status_code, preflight.text)
+        self.assertEqual("good", preflight.json()["quality"]["level"])
+        self.assertFalse(preflight.json()["quality"]["requires_confirmation"])
+        self.assertEqual(200, translated.status_code, translated.text)
+        self.assertEqual("good", translated.json()["quality"]["level"])
+        self.assertFalse(translated.json()["quality"]["requires_confirmation"])
+        ocr_spy.assert_called_once()
+
     def test_poor_preflight_is_canonical_and_never_starts_ocr(self):
+        tiny_text = self._component_pattern_image(
+            width=212,
+            height=300,
+            component_height=6,
+        )
         with mock.patch.object(
             pattern_api,
             "translate_image",
@@ -483,7 +556,7 @@ class PatternApiHttpTests(unittest.TestCase):
                 files={
                     "image": (
                         "pattern.png",
-                        self._png_bytes(200, 160),
+                        self._image_bytes(tiny_text),
                         "image/png",
                     )
                 },
@@ -495,7 +568,11 @@ class PatternApiHttpTests(unittest.TestCase):
         self.assertEqual("poor", payload["quality"]["level"])
         self.assertEqual("Poor", payload["quality"]["label"])
         self.assertTrue(payload["quality"]["requires_confirmation"])
-        self.assertEqual(200, payload["quality"]["metrics"]["width_px"])
+        self.assertEqual(212, payload["quality"]["metrics"]["width_px"])
+        self.assertEqual(
+            "main_text_too_small",
+            payload["quality"]["metrics"]["classification_reason"],
+        )
         translate_spy.assert_not_called()
         ocr_spy.assert_not_called()
 
@@ -839,7 +916,7 @@ class PatternApiHttpTests(unittest.TestCase):
                 self.assertIn("Interface language: Japanese", response.text)
                 self.assertIn("Platform: Phase3B1-Test-Agent", response.text)
                 self.assertIn(
-                    "Image quality status: Poor",
+                    "Image quality status: Fair",
                     response.text,
                 )
                 restored_result = report_builder.call_args.args[0]

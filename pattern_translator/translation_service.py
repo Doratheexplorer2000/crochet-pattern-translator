@@ -44,52 +44,131 @@ _TRANSLATION_PROFILE: ContextVar[Optional[Dict[str, Dict[str, float]]]] = Contex
 )
 
 _MIN_CONF_FOR_CLEAN_TEXT = 0.45
+_IMAGE_QUALITY_MAX_SIDE = 1000
+
+
+def _normalize_quality_assessment_image(image: Image.Image) -> Image.Image:
+    """Match the app-level OCR readiness scale without ever upscaling."""
+    img_rgb = image.convert("RGB")
+    width, height = img_rgb.size
+    longest = max(width, height)
+    if longest <= _IMAGE_QUALITY_MAX_SIDE:
+        return img_rgb
+    ratio = _IMAGE_QUALITY_MAX_SIDE / float(longest)
+    return img_rgb.resize(
+        (
+            max(1, int(round(width * ratio))),
+            max(1, int(round(height * ratio))),
+        ),
+        Image.Resampling.LANCZOS,
+    )
+
+
+def _main_text_height_metrics(component_heights: List[float]) -> Dict[str, object]:
+    count = len(component_heights)
+    if not count:
+        return {
+            "plausible_component_count": 0,
+            "main_text_height_px": None,
+            "main_text_height_reliable": False,
+            "dominant_band_component_count": 0,
+            "dominant_band_component_percent": 0.0,
+        }
+
+    main_height = float(np.percentile(component_heights, 60))
+    tolerance = max(2.0, main_height * 0.30)
+    dominant_count = sum(
+        1 for height in component_heights
+        if abs(float(height) - main_height) <= tolerance
+    )
+    dominant_percent = (dominant_count / count) * 100.0
+    return {
+        "plausible_component_count": count,
+        "main_text_height_px": round(main_height, 1),
+        "main_text_height_reliable": bool(
+            count >= 20 and dominant_percent >= 30.0
+        ),
+        "dominant_band_component_count": dominant_count,
+        "dominant_band_component_percent": round(dominant_percent, 1),
+    }
+
+
+def _estimate_main_text_height(gray: np.ndarray, cv2_module: object) -> Dict[str, object]:
+    """Estimate dominant text scale using deliberately simple component statistics."""
+    binary = cv2_module.adaptiveThreshold(
+        gray,
+        255,
+        cv2_module.ADAPTIVE_THRESH_GAUSSIAN_C,
+        cv2_module.THRESH_BINARY_INV,
+        31,
+        11,
+    )
+    component_count, _labels, stats, _centroids = (
+        cv2_module.connectedComponentsWithStats(binary, connectivity=8)
+    )
+    image_height, image_width = gray.shape
+    plausible_heights: List[float] = []
+    for _x, _y, width, height, area in stats[1:component_count]:
+        if not (4 <= height <= min(100, image_height * 0.12)):
+            continue
+        if not (2 <= width <= min(140, image_width * 0.20)):
+            continue
+        box_area = width * height
+        if area < 8 or area > box_area * 0.95:
+            continue
+        aspect_ratio = width / max(height, 1)
+        fill_ratio = area / max(box_area, 1)
+        if 0.08 <= aspect_ratio <= 4.0 and 0.08 <= fill_ratio <= 0.90:
+            plausible_heights.append(float(height))
+    return _main_text_height_metrics(plausible_heights)
 
 
 def _classify_image_quality(
-    width: int,
-    height: int,
     sharpness: float,
     contrast: float,
-) -> Tuple[List[str], List[str]]:
+    main_text_height: Optional[float],
+    main_text_height_reliable: bool,
+) -> Tuple[List[str], List[str], str]:
     errors: List[str] = []
     warnings: List[str] = []
-    shortest = min(width, height)
-    longest = max(width, height)
 
-    if longest < 1000 or shortest < 600:
-        errors.append(
-            "Image is probably too small for reliable OCR. Recommended: crop the pattern area and use an image at least 1000px wide, preferably 1500px+."
-        )
-    elif longest < 1500:
+    if not main_text_height_reliable or main_text_height is None:
         warnings.append(
-            "Image size is acceptable but not ideal. For small crochet text, 1500px+ on the longer side usually works better."
+            "Main text readability is uncertain, but the image is still worth trying with OCR."
         )
-
+        return errors, warnings, "unreliable_main_text_scale"
+    if main_text_height < 7:
+        errors.append(
+            "The main pattern text appears too small for reliable OCR."
+        )
+        return errors, warnings, "main_text_too_small"
+    if sharpness < 5 and main_text_height < 18:
+        errors.append(
+            "The main pattern text appears both severely blurred and too small for reliable OCR."
+        )
+        return errors, warnings, "severe_blur_with_small_main_text"
+    if main_text_height < 10:
+        warnings.append("The main pattern text is small, so OCR may contain some errors.")
+        return errors, warnings, "main_text_small"
     if sharpness < 60:
-        errors.append(
-            "Image appears blurry. Retake the photo or upload a sharper screenshot before running OCR."
-        )
-    elif sharpness < 120:
-        warnings.append(
-            "Image is slightly soft. OCR may confuse punctuation such as X.V, commas, colons, or R10/R11."
-        )
-
-    if contrast < 28:
-        warnings.append(
-            "Text contrast seems low. Fancy backgrounds, watermarks, or pale text may reduce OCR accuracy. Try cropping closer to the text area."
-        )
-
-    return errors, warnings
+        warnings.append("The image is soft, but the main text may still be OCR-readable.")
+        return errors, warnings, "low_sharpness"
+    if contrast < 12:
+        warnings.append("Text contrast is low, but OCR may still succeed.")
+        return errors, warnings, "low_contrast"
+    return errors, warnings, "main_text_readable"
 
 
 def assess_image_quality(
     image: Image.Image,
 ) -> Tuple[List[str], List[str], Dict[str, object]]:
-    """Return the existing blocking issues, warnings, and quality metrics."""
+    """Return pre-OCR readability issues, warnings, and auditable metrics."""
     img_rgb = image.convert("RGB")
     width, height = img_rgb.size
-    pixels = np.array(img_rgb)
+    assessment_image = _normalize_quality_assessment_image(img_rgb)
+    assessment_width, assessment_height = assessment_image.size
+    pixels = np.array(assessment_image)
+    component_metrics = _main_text_height_metrics([])
 
     try:
         import cv2
@@ -97,24 +176,33 @@ def assess_image_quality(
         gray = cv2.cvtColor(pixels, cv2.COLOR_RGB2GRAY)
         sharpness = float(cv2.Laplacian(gray, cv2.CV_64F).var())
         contrast = float(gray.std())
+        try:
+            component_metrics = _estimate_main_text_height(gray, cv2)
+        except Exception:
+            # Estimator uncertainty is intentionally Fair, never Poor.
+            component_metrics = _main_text_height_metrics([])
     except Exception:
         gray = np.dot(pixels[..., :3], [0.299, 0.587, 0.114])
         gradient_y, gradient_x = np.gradient(gray.astype(float))
         sharpness = float((gradient_x ** 2 + gradient_y ** 2).mean())
         contrast = float(gray.std())
 
-    errors, warnings = _classify_image_quality(
-        width,
-        height,
+    errors, warnings, classification_reason = _classify_image_quality(
         sharpness,
         contrast,
+        component_metrics["main_text_height_px"],
+        bool(component_metrics["main_text_height_reliable"]),
     )
     metrics = {
         "width_px": width,
         "height_px": height,
         "megapixels": round((width * height) / 1_000_000, 2),
+        "assessment_width_px": assessment_width,
+        "assessment_height_px": assessment_height,
         "sharpness_score": round(sharpness, 1),
         "contrast_score": round(contrast, 1),
+        **component_metrics,
+        "classification_reason": classification_reason,
     }
     return errors, warnings, metrics
 
