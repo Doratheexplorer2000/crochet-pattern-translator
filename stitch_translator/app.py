@@ -213,8 +213,29 @@ body, .stApp, [data-testid="stAppViewContainer"] {
     width: 100%;
     max-width: 720px;
     margin: 0 auto;
-    padding: 24px 20px 32px;
+    padding: 0 20px 32px;
     overflow-x: hidden;
+}
+
+.block-container > div[data-testid="stVerticalBlock"] {
+    gap: 8px;
+}
+
+.back-link {
+    display: inline-block;
+    margin: 0;
+    color: var(--ci-primary) !important;
+    font-family: var(--ci-font) !important;
+    font-size: 16px;
+    line-height: 24px;
+    font-weight: 600;
+    text-decoration: none !important;
+}
+
+.back-link:hover {
+    color: var(--ci-primary-hover) !important;
+    text-decoration: underline !important;
+    text-underline-offset: 3px;
 }
 
 .product-kicker {
@@ -226,23 +247,27 @@ body, .stApp, [data-testid="stAppViewContainer"] {
 }
 
 .app-title {
-    margin: 0;
-    padding: 0;
+    margin: 0 !important;
+    padding: 0 !important;
     color: var(--ci-primary) !important;
-    font-size: 30px;
-    line-height: 36px;
-    font-weight: 700;
+    font-family: var(--ci-font) !important;
+    font-size: 30px !important;
+    line-height: 36px !important;
+    font-weight: 700 !important;
 }
 
 .app-subtitle {
     margin: 4px 0 24px;
     color: var(--ci-text-secondary);
+    font-family: var(--ci-font) !important;
     font-size: 16px;
     line-height: 24px;
 }
 
 h1, h2, h3 { color: var(--ci-text-primary) !important; }
 h3 {
+    margin: 16px 0 8px !important;
+    padding: 0 !important;
     font-size: 18px !important;
     line-height: 26px !important;
     font-weight: 600 !important;
@@ -273,7 +298,7 @@ h3 {
 .symbol-card {
     margin: 12px 0;
     border: 1px solid var(--ci-border);
-    border-radius: var(--ci-radius-lg);
+    border-radius: var(--ci-radius-md);
     background: var(--ci-surface);
     box-shadow: var(--ci-shadow-sm);
 }
@@ -337,7 +362,7 @@ h3 {
     padding-top: 8px;
     border-top: 1px solid var(--ci-border);
 }
-.footer-push { height: min(12vh, 80px); }
+.footer-push { height: 24px; }
 
 div[data-testid="stSelectbox"] {
     max-width: 176px;
@@ -358,7 +383,23 @@ div[data-testid="stTextInput"] input {
 div[data-testid="stTextInput"] input {
     min-height: 52px;
     padding: 0 16px;
+    border: 0 !important;
+    border-radius: var(--ci-radius-md);
+    background: transparent;
+    font-family: var(--ci-font) !important;
     font-size: 16px;
+}
+
+div[data-testid="stTextInput"] [data-baseweb="input"] {
+    min-height: 52px;
+    border: 1px solid var(--ci-border) !important;
+    border-radius: var(--ci-radius-md);
+    background: var(--ci-surface) !important;
+    box-shadow: none !important;
+}
+
+div[data-testid="stTextInput"] [data-baseweb="input"]:focus-within {
+    border-color: var(--ci-primary) !important;
 }
 
 div[data-baseweb="select"] > div { min-height: 44px; }
@@ -914,7 +955,7 @@ def main() -> None:
     st.session_state["ui_lang"] = selected
     text = UI_TEXT[selected]
     st.markdown(
-        f'<a href="{html.escape(portal_url_for_language(selected), quote=True)}" '
+        f'<a class="back-link" href="{html.escape(portal_url_for_language(selected), quote=True)}" '
         f'target="_self">← {html.escape(text["back_to_portal"])}</a>',
         unsafe_allow_html=True,
     )
