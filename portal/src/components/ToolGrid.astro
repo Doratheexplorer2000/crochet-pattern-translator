@@ -24,33 +24,64 @@ const fallbackContent = {
     action: "Coming later",
   },
 } as const;
+
+const demoContent = {
+  pattern: {
+    label: "Written pattern translation example",
+    input: "UK: R1: MR 6 dc",
+    output: "US: R1: MR 6 sc",
+  },
+  stitch: {
+    label: "Stitch terminology lookup example",
+    input: "single crochet",
+    output: "UK: double crochet 繁中: 短針",
+  },
+} as const;
 ---
 
 <section class="page-shell section-block" data-i18n-aria-label="tools.ariaLabel" aria-label="Crochet tools">
   <div class="tool-grid">
-    {tools.filter((tool) => tool.visible).map((tool) => (
-      <article class:list={["tool-card", { "tool-card--future": !tool.available }]} data-tool-id={tool.id}>
-        <div>
-          <h3 data-i18n={`tools.${tool.translationKey}.name`}>{fallbackContent[tool.translationKey].name}</h3>
-          <p data-i18n={`tools.${tool.translationKey}.description`}>
-            {fallbackContent[tool.translationKey].description}
-          </p>
-        </div>
-        {tool.available && tool.href ? (
-          <a
-            class:list={["button-link", tool.analyticsEvent && `plausible-event-name=${tool.analyticsEvent}`]}
-            href={tool.href}
-            data-tool-href={tool.href}
-            data-i18n={`tools.${tool.translationKey}.action`}
-          >
-            {fallbackContent[tool.translationKey].action}
-          </a>
-        ) : (
-          <button type="button" disabled data-i18n={`tools.${tool.translationKey}.action`}>
-            {fallbackContent[tool.translationKey].action}
-          </button>
-        )}
-      </article>
-    ))}
+    {tools.filter((tool) => tool.visible).map((tool) => {
+      const demo = tool.translationKey === "future" ? null : demoContent[tool.translationKey];
+      return (
+        <article class:list={["tool-card", { "tool-card--future": !tool.available }]} data-tool-id={tool.id}>
+          <div class="tool-card__content">
+            <h3 data-i18n={`tools.${tool.translationKey}.name`}>{fallbackContent[tool.translationKey].name}</h3>
+            <p data-i18n={`tools.${tool.translationKey}.description`}>
+              {fallbackContent[tool.translationKey].description}
+            </p>
+            {demo && (
+              <div
+                class="tool-demo"
+                data-i18n-aria-label={`tools.${tool.translationKey}.demoLabel`}
+                aria-label={demo.label}
+              >
+                <span class="tool-demo__input" data-i18n={`tools.${tool.translationKey}.demoInput`}>
+                  {demo.input}
+                </span>
+                <span class="tool-demo__arrow" aria-hidden="true">→</span>
+                <span class="tool-demo__output" data-i18n={`tools.${tool.translationKey}.demoOutput`}>
+                  {demo.output}
+                </span>
+              </div>
+            )}
+          </div>
+          {tool.available && tool.href ? (
+            <a
+              class:list={["button-link", tool.analyticsEvent && `plausible-event-name=${tool.analyticsEvent}`]}
+              href={tool.href}
+              data-tool-href={tool.href}
+              data-i18n={`tools.${tool.translationKey}.action`}
+            >
+              {fallbackContent[tool.translationKey].action}
+            </a>
+          ) : (
+            <button type="button" disabled data-i18n={`tools.${tool.translationKey}.action`}>
+              {fallbackContent[tool.translationKey].action}
+            </button>
+          )}
+        </article>
+      );
+    })}
   </div>
 </section>
