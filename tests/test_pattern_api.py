@@ -217,6 +217,62 @@ class PatternApiHttpTests(unittest.TestCase):
         self.assertEqual("fair", payload["quality"]["level"])
         self.assertFalse(payload["quality"]["requires_confirmation"])
 
+    def test_renderer_markers_are_delivered_in_browser_text_and_txt(self):
+        line_df = pd.DataFrame(
+            [
+                {
+                    "Original": "Long source one",
+                    "Translation": "This translated instruction is deliberately longer than forty-two characters one.",
+                    "Confidence": 0.99,
+                    "min_x": 10.0,
+                    "max_x": 30.0,
+                    "min_y": 10.0,
+                    "max_y": 30.0,
+                },
+                {
+                    "Original": "Long source two",
+                    "Translation": "This second translated instruction is also deliberately longer than forty-two characters.",
+                    "Confidence": 0.99,
+                    "min_x": 10.0,
+                    "max_x": 30.0,
+                    "min_y": 50.0,
+                    "max_y": 70.0,
+                },
+            ]
+        )
+        with mock.patch(
+            "pattern_translator.translation_service.run_primary_ocr",
+            return_value=self._mock_primary_ocr(),
+        ), mock.patch(
+            "pattern_translator.translation_service.ocr_lines_engine.build_ocr_line_translations",
+            return_value=line_df,
+        ):
+            response = self._multipart(
+                files={"image": ("pattern.png", self._png_bytes(200, 100), "image/png")},
+                source_mode=self.source_mode,
+                output_mode=self.output_mode,
+                area_mode="Whole Pattern",
+            )
+
+        self.assertEqual(200, response.status_code)
+        payload = response.json()
+        first = f"[1]\nLong source one\n→ {line_df.loc[0, 'Translation']}"
+        second = f"[2]\nLong source two\n→ {line_df.loc[1, 'Translation']}"
+        self.assertIn(first, payload["readable_translation"])
+        self.assertIn(second, payload["readable_translation"])
+        self.assertEqual(payload["readable_translation"] + "\n", payload["translation_txt"])
+        self.assertEqual(["[1]", "[2]"], line_df["Overlay Marker"].tolist())
+        self.assertEqual(
+            {
+                "request_id", "source_mode", "output_mode", "area_mode", "crop_box",
+                "quality", "raw_ocr_text", "readable_translation", "translation_txt",
+                "overlay_png", "diagnostic_context", "ocr_finished_at",
+                "ocr_duration_seconds", "ocr_time_sec", "translation_time_sec",
+                "ocr_box_count", "timings",
+            },
+            set(payload),
+        )
+
     @mock.patch.dict(
         "os.environ",
         {"PATTERN_BROAD_TRANSLATION_ENABLED": "1", "OPENAI_API_KEY": "test-key"},

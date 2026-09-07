@@ -237,6 +237,111 @@ class OverlayScalingTests(unittest.TestCase):
             delta=0.001,
         )
 
+    @staticmethod
+    def _marker_mapping_rows() -> pd.DataFrame:
+        return pd.DataFrame(
+            [
+                {
+                    "Original": "Long source one",
+                    "Translation": "This translated instruction is deliberately longer than forty-two characters one.",
+                    "min_x": 40.0,
+                    "max_x": 180.0,
+                    "min_y": 40.0,
+                    "max_y": 70.0,
+                },
+                {
+                    "Original": "Short source",
+                    "Translation": "Short result",
+                    "min_x": 40.0,
+                    "max_x": 180.0,
+                    "min_y": 180.0,
+                    "max_y": 210.0,
+                },
+                {
+                    "Original": "Unchanged",
+                    "Translation": "Unchanged",
+                    "min_x": 40.0,
+                    "max_x": 180.0,
+                    "min_y": 280.0,
+                    "max_y": 310.0,
+                },
+                {
+                    "Original": "Empty target",
+                    "Translation": "",
+                    "min_x": 40.0,
+                    "max_x": 180.0,
+                    "min_y": 330.0,
+                    "max_y": 360.0,
+                },
+                {
+                    "Original": "Long source two",
+                    "Translation": "This second translated instruction is also deliberately longer than forty-two characters.",
+                    "min_x": 40.0,
+                    "max_x": 180.0,
+                    "min_y": 400.0,
+                    "max_y": 430.0,
+                },
+            ]
+        )
+
+    def test_renderer_markers_flow_to_readable_translation_and_txt(self):
+        rows = self._marker_mapping_rows()
+        originals_before = rows["Original"].tolist()
+        translations_before = rows["Translation"].tolist()
+
+        image, _legend, legend_df = overlay_engine.make_line_translation_overlay(
+            Image.new("RGB", (1000, 520), "white"),
+            rows,
+            "English — US",
+        )
+
+        self.assertIsNotNone(image)
+        self.assertEqual(["[1]", "", "", "", "[2]"], rows["Overlay Marker"].tolist())
+        self.assertEqual(originals_before, rows["Original"].tolist())
+        self.assertEqual(translations_before, rows["Translation"].tolist())
+        self.assertEqual(
+            [
+                ("[1]", "Long source one", translations_before[0]),
+                ("", "Short source", "Short result"),
+                ("[2]", "Long source two", translations_before[4]),
+            ],
+            list(
+                legend_df[["Marker", "Original", "Translation"]].itertuples(
+                    index=False,
+                    name=None,
+                )
+            ),
+        )
+
+        readable = line_translation_engine.build_readable_line_translation(rows)
+        translation_txt = line_translation_engine.build_overlay_export_text(rows)
+        self.assertIn(f"[1]\nLong source one\n→ {translations_before[0]}", readable)
+        self.assertIn("Short source\n→ Short result", readable)
+        self.assertNotIn("[2]\nShort source", readable)
+        self.assertIn(f"[2]\nLong source two\n→ {translations_before[4]}", readable)
+        self.assertEqual(readable + "\n", translation_txt)
+
+    def test_overlay_marker_metadata_does_not_change_rendered_pixels(self):
+        clean_rows = self._marker_mapping_rows()
+        stale_rows = self._marker_mapping_rows()
+        stale_rows["Overlay Marker"] = ["[99]"] * len(stale_rows)
+
+        clean_image, clean_legend, clean_legend_df = overlay_engine.make_line_translation_overlay(
+            Image.new("RGB", (1000, 520), "white"),
+            clean_rows,
+            "English — US",
+        )
+        stale_image, stale_legend, stale_legend_df = overlay_engine.make_line_translation_overlay(
+            Image.new("RGB", (1000, 520), "white"),
+            stale_rows,
+            "English — US",
+        )
+
+        self.assertEqual(clean_image.tobytes(), stale_image.tobytes())
+        self.assertEqual(clean_legend, stale_legend)
+        pd.testing.assert_frame_equal(clean_legend_df, stale_legend_df)
+        self.assertEqual(clean_rows["Overlay Marker"].tolist(), stale_rows["Overlay Marker"].tolist())
+
 
 class TranslationProfileIsolationTests(unittest.TestCase):
     @classmethod

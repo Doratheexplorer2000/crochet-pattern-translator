@@ -429,6 +429,8 @@ def make_line_translation_overlay(
     if line_df is None or line_df.empty:
         return None, "", pd.DataFrame()
     request_warning = str(line_df.attrs.get("request_warning", "") or "").strip()
+    line_df["Overlay Marker"] = ""
+    overlay_marker_column = line_df.columns.get_loc("Overlay Marker")
 
     img = image.convert("RGBA")
     w, h = img.size
@@ -505,6 +507,7 @@ def make_line_translation_overlay(
         if not placed_full:
             marker = f"[{marker_no}]"
             marker_no += 1
+            line_df.iloc[row_no, overlay_marker_column] = marker
             mbb = draw.textbbox((0, 0), marker, font=marker_font)
             mw = mbb[2] - mbb[0] + 12
             mh = mbb[3] - mbb[1] + 8

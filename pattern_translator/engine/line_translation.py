@@ -1030,12 +1030,16 @@ def build_readable_line_translation(line_df: pd.DataFrame) -> str:
     for _, row in line_df.iterrows():
         original = str(row.get("Original", "")).strip()
         translated = str(row.get("Translation", "")).strip()
+        overlay_marker = str(row.get("Overlay Marker", "")).strip()
         if not original and not translated:
             continue
         if norm_text(original) == norm_text(translated):
-            lines.append(original)
+            rendered = original
         else:
-            lines.append(f"{original}\n→ {translated}")
+            rendered = f"{original}\n→ {translated}"
+        if overlay_marker:
+            rendered = f"{overlay_marker}\n{rendered}"
+        lines.append(rendered)
     return "\n\n".join(lines)
 
 @profile_function("line-by-line translation: build_overlay_export_text", "build_overlay_export_text calls")
