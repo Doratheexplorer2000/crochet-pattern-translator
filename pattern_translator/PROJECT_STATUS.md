@@ -1,6 +1,6 @@
 # Crochet Pattern Translator Project Status
 
-Last updated: 2026-09-06
+Last updated: 2026-09-07
 
 ## Current Version
 
@@ -22,7 +22,7 @@ pattern_translator/app.py
 
 ## Current Production Status
 
-The FastAPI/browser Crochet Pattern Translator is live at `https://pattern.crochetintelligence.com` from GitHub `main`, using the existing Railway service and custom domain. The production application baseline is `f1a9b45cad9e361bcdeb4c7066fe66f1d45ec07d`, whose Railway deployment is human-confirmed. Railway uses this validated Custom Start Command with one Uvicorn worker:
+The FastAPI/browser Crochet Pattern Translator is live at `https://pattern.crochetintelligence.com` from GitHub `main`, using the existing Railway service and custom domain. The production application baseline is `f1a9b45cad9e361bcdeb4c7066fe66f1d45ec07d`. Railway deployment of this revision is human-confirmed. The deployed shadow Luna title classifier remains observational, and unrelated title-primary experiments remain local and uncommitted. Railway uses this validated Custom Start Command with one Uvicorn worker:
 
 ```sh
 sh -c 'python -m uvicorn pattern_translator.api:app --host 0.0.0.0 --port "$PORT" --workers 1'
@@ -32,7 +32,25 @@ The `sh -c` wrapper is required so Railway's `PORT` variable is expanded. Passin
 
 Production smoke UAT passed for the public browser UI, custom domain, upload, image-quality assessment, Whole Pattern and Select Area workflows, OCR, translation, overlay/result rendering, PNG/TXT downloads, Diagnostic Report, physical mobile workflow, and redeploy/startup behavior. Plausible production verification also passed: each approved event (`pattern_image_uploaded`, `pattern_translation_completed`, `pattern_png_downloaded`, `pattern_txt_downloaded`, and `pattern_feedback_clicked`) arrived exactly once in the intended shared `crochetintelligence.com` site, with no duplicate firing observed.
 
+Final 2026-09-07 release smoke testing additionally passed a three-browser concurrency check: three translation requests were triggered within approximately one second and all completed successfully within 20 seconds. The complete Portal → Pattern Translator → Stitch Translator production walkthrough also passed.
+
 Streamlit remains preserved as rollback-only and has not been removed. The Dockerfile default and `railway_start.sh` remain the rollback startup path. The cutover added no HEIC support and required no Redis, database session, queue, cache, persistent volume, or new Railway service. Streamlit retirement and other cleanup remain separate future work.
+
+## Soft Launch Release Status — 2026-09-07
+
+**Status: RELEASED FOR SOFT LAUNCH / PRODUCTION BASELINE FROZEN.**
+
+Final release closeout is complete:
+
+- Portal: final physical-device walkthrough PASS across all four interface languages, Light Mode and Dark Mode; all interactive controls and navigation passed.
+- Portal pre-launch UX regression was restored from the previously Human-UAT-approved visual baseline without changing current analytics, routing, language propagation, or production URLs.
+- Pattern Translator: LAUNCH-001 through LAUNCH-005 all PASS and closed; final production walkthrough PASS.
+- Stitch Translator: functional walkthrough PASS; a narrow presentation-only alignment pass brought the existing Streamlit UI back into the Crochet Intelligence visual family without changing search, language, routing, analytics, tutorial, feedback, or data behavior; production Human UAT PASS.
+- Plausible: paid Starter subscription active on the retained shared `crochetintelligence.com` site; Portal, Pattern Translator, and Stitch Translator continue to use the shared tracker and production events were rechecked successfully.
+- Concurrency smoke test: three independent browser sessions triggered Pattern Translator translation within approximately one second of each other; all three completed successfully within 20 seconds, with no timeout or error observed.
+- Final end-to-end whole-site walkthrough: PASS.
+
+No additional pre-launch product-code work is approved. Production code is frozen for Soft Launch except for a genuine user-facing blocker or production incident. New polish, scaling, Streamlit retirement, translation-quality refinement, and other enhancements move to post-launch evidence-driven work.
 
 ## Broad Translation Production Release — 2026-09-06
 
@@ -46,7 +64,7 @@ Production routes:
 
 Production commit `f1a9b45cad9e361bcdeb4c7066fe66f1d45ec07d` (`Improve Broad translation failure recovery`) preserves the normal one-call Broad success path. Selected promptly returned malformed/schema failures and selected transient provider failures may retry Broad once, sharing the existing 90-second budget. Timeouts do not retry.
 
-The `0fe35553e914446734f45ea39399859be4a3df56` baseline referenced by the 2026-09-01 translation-architecture research closeout was the historical production baseline at the time of that closeout, not the current production revision.
+The `0fe35553e914446734f45ea39399859be4a3df56` baseline referenced in the 2026-09-01 research closeout is historical: it was the production baseline when that research was closed, not the current production revision.
 
 Objective validation remains fail-closed at translation-unit level. Invalid units return their exact source with a localized warning; all-units-invalid is non-fatal and returns unresolved source-preserving results. A final classified Broad failure invokes deterministic-only Legacy emergency fallback from the original OCR rows with no Legacy provider or title-shadow calls. Trusted OCR/source is preserved whenever safe instead of producing a whole-request HTTP 500. Unexpected internal and invariant failures remain fatal.
 
@@ -57,9 +75,133 @@ Cross-language UAT status:
 - Case 1, English US → Traditional Chinese / Broad: PASS.
 - Case 2, English US → Simplified Chinese / Broad: PASS.
 - Case 3, Simplified Chinese → English US / Broad: PASS. Partial warnings correctly protect OCR-fused or otherwise unsafe units without failing the request.
-- Next formal case: Traditional Chinese → English US / Legacy.
+- Case 4, Traditional Chinese → English US / Legacy: PASS.
+- Case 5, Traditional Chinese → English UK / Legacy: PASS WITH IMPERFECTION.
+- Case 6, English US → English UK / Legacy: PASS WITH IMPERFECTION.
+- Case 7, English UK → English US / Legacy: PASS WITH IMPERFECTION.
+- Case 8, English UK → Traditional Chinese / Legacy: PASS WITH IMPERFECTION.
+- Case 9, English UK → Simplified Chinese / Legacy: PASS WITH IMPERFECTION.
+- Case 10, English UK → Japanese / Legacy: PASS WITH IMPERFECTION.
+- Case 11, English US → Japanese / Legacy: PASS WITH IMPERFECTION.
+- Case 12, Simplified Chinese → Japanese / Legacy: PASS WITH IMPERFECTION.
+- Case 13, Traditional Chinese → Japanese / Legacy: PASS WITH IMPERFECTION.
 
-Deferred non-blocking translation-quality issue: Simplified Chinese crochet notation `4F` was preserved as `4F` in Broad output instead of resolving to English US `4 dc`. This is not a release blocker.
+Japanese-source routes were intentionally skipped for first-launch UAT because expected practical usage is low and Japanese crochet patterns are commonly chart/symbol-oriented. The bounded Cross-language translation UAT matrix is complete. It found no translation-engine Soft Launch blocker: no crash, wrong route, major structural corruption, stitch/count/repetition corruption, whole-request failure, or unacceptable performance.
+
+The Codex static/read-only release-gap audit returned GO and found no known pre-launch code change required. Human/Product closeout is now complete: **LAUNCH-001 through LAUNCH-005 all passed Human/Product acceptance. Soft Launch gate: PASS — APPROVED TO LAUNCH.**
+
+Accepted non-blocking translation-quality items, deferred to post-launch evidence-driven work:
+
+- Simplified Chinese crochet notation `F` or `4F` may remain unresolved instead of becoming English US `dc` or `4 dc`.
+- Legacy crochet terminology can collide with ordinary language: `around` may become `一圈` / `1周`, including in phrases such as `wrap it around 2 or 3 fingers`.
+- Legacy Japanese-target routes from English US, English UK, Simplified Chinese, and Traditional Chinese can translate crochet terms while leaving substantial ordinary language untranslated or mixed.
+- Occasional Legacy malformed-response, timeout, or validation fail-closed outcomes may preserve partial source-language residue. Validators must not be weakened merely to improve wording.
+- Traditional Chinese output can occasionally contain a Simplified Chinese character such as `个`.
+
+None of these accepted quality limitations is a translation-engine blocker for the first Soft Launch.
+
+## Translation Architecture Research Closeout — 2026-09-01
+
+This section distinguishes the unchanged production baseline from paused research and the next experimental hypothesis. None of the architectures or disposable experiments below is production behavior.
+
+### Production Baseline
+
+- At the time of this research closeout, production was `0fe35553e914446734f45ea39399859be4a3df56`, the then-deployed shadow-title-classifier code baseline.
+- `PATTERN_LUNA_TITLE_PRIMARY_ENABLED` remains unset/OFF in production.
+- No later translation experiment has been committed, pushed, deployed, or enabled in Railway.
+
+### Completed Primary-Routing Research — Paused
+
+Human adjudication of the real-pattern title-classifier disagreement set found that 35 of 38 duplicate-adjusted disagreements matched Product Owner judgement: 92.1% on the disagreement set only. This is not overall accuracy across the 380-line corpus. Known misses included `注意哦↓`, `鉤針小物.追蹤中`, and `Crochet hdc`.
+
+PRIMARY Architecture A used per-heading title calls. It was rejected because of request fan-out, latency, and localization/fallback concerns.
+
+PRIMARY Architecture B used one page-level classifier and one indexed title-translation batch. Selected headings were excluded from ordinary per-line fallback, with deterministic per-entry fallback. Automated and review validation passed, and Codex judged it technically sound for controlled Human UAT. It was never production-enabled.
+
+Real Human UAT then exposed product-level blockers on Carnation:
+
+- Production total was approximately 68.6 seconds; PRIMARY local total was approximately 73.0 seconds.
+- Production translation was approximately 52.9 seconds; PRIMARY local translation was approximately 57.5 seconds.
+- Production left `Carnation`, `MATERIALS`, `RECEPTACLE`, `PETALS`, and `FLOWER` untranslated.
+- PRIMARY improved `RECEPTACLE`, `PETALS`, and `FLOWER`, but still left `Carnation` and `MATERIALS` untranslated.
+- Ordinary instructions remained substantially mixed English/Chinese.
+
+Architecture B was therefore paused despite structural and test success. Correct routing was necessary engineering evidence, but it was not sufficient product acceptance.
+
+### Root-Cause Findings
+
+- The current architecture performs many serial provider calls. Carnation evidence showed roughly 13 ordinary translation calls in the relevant path, with larger counts under experimental title routing.
+- Provider waiting is the dominant latency contributor.
+- Every visual OCR line also passes deterministic translation machinery, including duplicated deterministic work around the LLM path.
+- Deterministic fallback can itself be partially translated or mixed-language output.
+- Existing validation permits source-language residue in some cases and cannot guarantee natural, complete translation.
+- Live browser OCR can differ from stored fixture OCR, so fixture routing success does not guarantee identical live behavior.
+- Missing runtime observability prevented exact attribution of the live title-classifier/batch failure.
+
+These are research conclusions, not a new implementation plan.
+
+### Disposable Broad-Batch Feasibility Experiment
+
+The isolated research evidence remains under `experiments/protected_batch_translation_feasibility/`. It used the stored 28-line Carnation Whole Pattern OCR fixture and made three paid calls:
+
+| Scope / representation | Input tokens | Output tokens | Time |
+|---|---:|---:|---:|
+| Carnation, opaque protection | 680 | 665 | 8.6823 s |
+| Carnation, typed-semantic protection | 803 | 809 | 8.3893 s |
+| Danger set, typed-semantic protection | 859 | 264 | 4.8139 s |
+
+Both Carnation variants returned all source content, passed the prototype structural validation, showed no detected protected-semantic mutation, and translated `Carnation` → `康乃馨`, `MATERIALS` → `材料`, `RECEPTACLE` → `花托`, `PETALS` → `花瓣`, and `FLOWER` → `花朵`.
+
+The negative result was equally important: whole-operation or excessive semantic protection damaged natural grammar. For example:
+
+```text
+Source: Begin with 4 ch and work 11 dc in the first chain. Join with 1 st
+Typed:  從 4針鎖針 開始並進行 在第一個鎖針內鉤11針長針。以1針連接。
+```
+
+Broad batch translation is empirically promising and dramatically faster than the current translation stage, but the tested semantic-protection strategy is not accepted. This disposable prototype is not product implementation.
+
+### Next Prototype Hypothesis — Experimental, Not Approved
+
+The next direction to investigate is:
+
+```text
+OCR visual segments
+→ CSV-derived Crochet Glossary / Domain Context
+→ broad contextual LLM Translator
+→ narrow deterministic hard checks
+→ independent cross-provider crochet-aware Challenger
+→ targeted Translator correction when required
+→ Challenger re-check
+→ finalize or mark affected content Unverified / Needs Review
+```
+
+This is not an approved product architecture. Its current principles are:
+
+- Evolve `master_stitches.csv` conceptually toward authoritative crochet-domain knowledge, not broad phrase-by-phrase natural-language translation.
+- For the first prototype, send all authoritative source/target-pair concepts rather than introduce another term detector. Ordinary language remains the LLM's responsibility.
+- Retain `pattern_instruction` concepts only when they encode domain-critical semantics; ordinary words must not automatically become enforced glossary translations.
+- Do not equate one OCR visual line with one semantic translation unit. Preserve stable `source_segment_ids` and bounding boxes locally, and allow one translated unit to claim multiple adjacent segment IDs when visual wrapping splits an instruction.
+- Images and bounding boxes stay local and are not sent to the LLM.
+- Restrict deterministic hard checks to objective facts: schema, segment coverage, missing/duplicate/unknown IDs, numeric facts, measurements, explicit round/row identities and ranges, explicit repeat multipliers, and mechanically high-confidence terminology/convention checks.
+- Leave grammar, word order, punctuation, visual line boundaries, ambiguous repeat scope, ambiguous OCR semantics, and natural translation quality to model review.
+- Give the Challenger the same crochet context and authoritative glossary. Prefer a different comparable provider/model from the Translator where practical, while recognizing that cross-provider review reduces correlated risk but does not prove correctness.
+- The Challenger writes audit findings, not production translation.
+- Permit at most one semantic correction round followed by one Challenger re-check. If verification still fails, preserve successful content and mark only affected content `Unverified / Needs Review`.
+- A narrow hard-check failure blocks finalization even if the Challenger says PASS.
+
+Japanese glossary completeness is a later prerequisite, not the current critical path. Reviewed coverage was approximately 32 of 59 active non-`pattern_instruction` concepts and 6 of 49 `pattern_instruction` rows with Japanese targets. This does not block the next English US → Traditional Chinese prototype; do not start Japanese glossary work as part of that experiment.
+
+### Immediate Next Task
+
+**Experiment 1 — Glossary-only broad Carnation translation** is the next critical-path experiment. Its purpose is to falsify or support the hypothesis before integrating a Challenger provider.
+
+Use only the stored Carnation OCR, English US → Traditional Chinese, a compact full authoritative source/target crochet glossary, no whole-operation placeholders, semantic-unit output with `source_segment_ids`, a deliberately split `Begin with 4 ch...` instruction across two source segments, one real Luna broad translation call, local narrow invariant checks, and full Product Owner-visible output.
+
+Decision gate:
+
+- If Luna cannot produce a natural, crochet-correct Carnation translation from glossary and context alone, stop and reconsider before adding another provider.
+- If it succeeds, the following experiment is a blind Challenger benchmark using fixed correct and deliberately mutated translations, measuring critical-error detection rather than writing quality.
 
 RC42 completed the first Engine Extraction by moving the CSV terminology / lookup engine into `pattern_translator/engine/terminology.py`. RC43 extracted pure line-translation logic into `pattern_translator/engine/line_translation.py`. RC44 extracted Diagnostic Report construction and formatting into `pattern_translator/engine/diagnostic_report.py`. RC45 completed Boundary Cleanup. RC46 extracted overlay rendering into `pattern_translator/engine/overlay.py`. RC47 extracted Pattern Document responsibilities into `pattern_translator/engine/pattern_document.py`. RC48 extracted OCR line assembly into `pattern_translator/engine/ocr_lines.py`. RC49 extracted deterministic OCR cleanup into `pattern_translator/engine/ocr_cleanup.py`, completing Engine Migration and Domain Layer extraction. Regression and Human UAT passed with no user-visible behavior changes, and the completed engine layer is included in the current production release.
 
@@ -154,7 +296,7 @@ The approved direction is staged removal of Streamlit from Pattern Translator on
 3. Migrate the browser UI, uploader, cropper, results, and downloads to the API. **Complete:** Phase 3A, approved local commit `6c8ab97b0731daa6cd61a4f919aa71cabc856d3b`.
 4. Restore Diagnostic Report parity. **Complete:** Phase 3B1.
 5. Restore image-quality assessment, gating, and force-run parity. **Complete:** Phase 3B2.
-6. Cut the existing Pattern Translator Railway service over to FastAPI/Uvicorn without adding another service. **Complete:** production baseline `778703b981fd2ef97c447eedca96021e553f3d3c`.
+6. Cut the existing Pattern Translator Railway service over to FastAPI/Uvicorn without adding another service. **Complete:** the cutover was validated before the current production baseline `f1a9b45cad9e361bcdeb4c7066fe66f1d45ec07d`.
 7. Complete Production Human UAT. **Complete:** production smoke UAT and five-event Plausible verification passed. Streamlit retirement remains separate and has not started.
 
 Any Streamlit retirement, dependency cleanup, or later migration work remains separate and requires fresh scope and explicit approval.
@@ -172,42 +314,47 @@ The Portal Skeleton is functionally complete and frozen. It is an independent As
 - The Portal is the primary platform entry point at `https://crochetintelligence.com`; Pattern Translator is at `https://pattern.crochetintelligence.com`; Stitch Translator is at `https://stitch.crochetintelligence.com`.
 - RC54 integrated shared Plausible analytics across the Portal and both tools. Production Human UAT passed.
 - The Portal owns interface-language selection using `en`, `zh-Hant`, `zh-Hans`, and `ja`; both tools consume the selected language and retain browser-language/English fallback for direct entry.
-- General Privacy & Terms are centralized in the Portal. Images are not sent to OpenAI; eligible extracted text and compact semantic context may be sent without identity or analytics identifiers.
+- General Privacy & Terms are centralized in the Portal. Uploaded images are not sent to an AI model provider; for eligible translation assistance, only extracted pattern text and compact semantic context required for translation may be sent to the relevant AI model service, without user identity or analytics identifiers.
 - Pattern source/result language controls remain independent. Pattern's duplicate general Privacy UI was removed, while Stitch's tool-specific Google Forms feedback privacy note remains.
 - Both tools return to the Portal in the same tab with interface-language preservation. Pattern uses the Crochet Intelligence eyebrow and English title `Crochet Pattern Translator`; Stitch Tutorial Search preserves the submitted stitch term across interface languages.
 - All three services run in the Railway project `Crochet Intelligence`. Portal Centralization `5e975741a9a53c1835120f0cdb24a60f5af706b1` and custom-domain migration `22fded0fb39a389b87d767faa494d7ad48d3d799` passed production functional/navigation UAT and Plausible regression validation without analytics changes. RC54 Analytics remains closed with Site Domain `crochetintelligence.com`.
 - Portal visual refinement and the Pattern Translator FastAPI production cutover are complete. Streamlit retirement remains separate future cleanup.
+- The Portal's previously approved pre-launch visual baseline was restored to current production before Soft Launch, including differentiated tool micro-demos, provider-neutral Privacy & Terms copy, and the disclosure chevron; final four-language Light/Dark Human UAT passed.
+- Stitch Translator remains Streamlit-based, but a final narrow visual-alignment pass matched its title hierarchy, back-link treatment, spacing, search surface, cards, and Light/Dark presentation more closely to the Crochet Intelligence family; functionality was unchanged and production Human UAT passed.
 
 ## Known Issues
 
 ### Next Priority
 
-1. **FastAPI production is the validated baseline.** No later migration phase is active. Streamlit retirement or rollback-path removal requires fresh scope and explicit approval.
+1. **Soft Launch is live.** Preserve the validated production baseline and gather real-user evidence. Do not add speculative polish or pre-emptive scaling work. Fix only genuine user-facing blockers or production incidents; Streamlit retirement, scaling, and further translation/UI refinement remain separately approved post-launch scope.
 
 **Paused performance evidence:** the deterministic anomaly measured approximately `41.06s` total / `36.00s` translation with `0.89s` Paddle inference versus `6.79s` total / `5.70s` translation with `0.88s` Paddle inference after changing target. The controlled cache fix materially improved local deterministic timing and preserved output, but production interaction symptoms persisted after its revert. Resume the audit only after migration stability; dictionary size is not proven as the cause.
 
-### Before Soft Launch
+### Soft Launch Closeout — 2026-09-07
 
-2. **Deterministic translation / dictionary simplification.** After the performance audit, review whether ordinary semantic entries such as Body and Head, historical rules added for weaker earlier LLM behavior, redundant regex/parser work, redundant semantic-context processing, and low-value dictionary entries remain necessary with the current Luna route. Protect translation quality; do not remove entries merely to reduce row count.
-3. **OCR progress/status UI.** A completed Translation Result can coexist with a visible `OCR Running...` status because of pre-existing same-run Streamlit rendering behavior. This was investigated during Phase 1 UAT and is not a Phase 1 extraction regression; defer any UI change to a separately scoped task.
-4. **Warning / popup / status-message UX audit.** Review the full page and reduce warnings, popups, success/status notices, OCR notices, settings messages, diagnostic/download notices, AI disclaimers, and repeated AI references unless they materially affect the user's next action. Present the product primarily as a crochet Pattern Translator.
-5. **Image Quality traffic-light calibration.** Reassess red/yellow/green thresholds, Good/acceptable/poor classification, warning severity, crop recommendations, and when users should simply continue, using actual OCR outcomes rather than theoretical strictness.
-6. **Overlay numbered remark mapping.** When long overlay text is replaced by `[1]`, `[2]`, or `[3]`, show the same marker beside the corresponding Line-to-line Translation entry so the PNG marker has an immediate reference.
-7. **Line-to-line Translation must be read-only.** Keep output readable and preferably selectable/copyable, but not editable. The UI must not imply that manual edits update overlays, downloads, result state, or diagnostics.
-8. **Language placeholder localization.** Preserve explicit no-selection behavior and localize the placeholder as `Choose an option`, `請選擇`, `请选择`, and `選択してください` for English, Traditional Chinese, Simplified Chinese, and Japanese. Do not restore automatic interface-language selection.
-9. **Production Streamlit chrome/top-bar verification.** Before Soft Launch, verify whether unwanted production chrome, top bar, menu, or development controls remain visible and minimize them using the smallest safe supported approach.
+All five launch-acceptance items are closed by Human/Product acceptance:
 
-### Enhancements / Reproduce Before Fixing
+- **LAUNCH-001 — Warning / popup / status-message UX: PASS.** Live FastAPI UX is understandable and non-obstructive.
+- **LAUNCH-002 — Good / Fair / Poor image-quality UX: PASS / classifier freeze.** The dimension-dominated false-Poor behavior was corrected; Human UAT accepted current Good/Fair/Poor behavior. Reopen only with new production evidence.
+- **LAUNCH-003 — Overlay numbered-marker mapping: PASS.** Renderer-assigned `[n]` markers now map consistently across PNG overlay, Line-to-line Translation, and downloaded TXT; Human UAT passed.
+- **LAUNCH-004 — Line-to-line Translation read-only/selectable UX: PASS / freeze.** Human UAT confirmed selectable/copyable and non-editable behavior.
+- **LAUNCH-005 — Language-selection placeholders: PASS.** Product Owner confirmed localized EN/TC/SC/JP no-selection behavior.
 
-10. **Diagnostic Report UX.** The current safe prepare/generate then download flow is functional. Retain the desired one-action Download Diagnostic Report UX only if it can be achieved without returning report generation to the translation critical path.
-11. **Initial upload-preview delay.** Physical-iPhone UAT occasionally shows several seconds before Pattern Preview appears. Reproduce and measure before changing uploader architecture.
-12. **Select Area cropper first-render issue.** Physical-iPhone UAT previously showed server-side cropper execution without a stable visible cropper until another full rerender. Reproduce after the canonical-state fix before modifying or replacing the cropper.
+**Soft Launch gate: PASS — APPROVED TO LAUNCH.** No additional pre-launch product-code work is required from these items.
 
-### Post-Launch / Scale
+### Resolved or Not Applicable for Soft Launch
 
-13. **Genuine Safari/new-AppSession recovery.** Process/session-local recovery cannot guarantee state across a genuinely new Streamlit AppSession, Safari page-process destruction or reload, container/process restart, or handoff expiry. Do not solve pre-launch without evidence of material user impact.
-14. **OCR concurrency/scaling.** The isolated serialized PaddleOCR worker is appropriate for current traffic and has passed reliability testing. At materially higher concurrency, consider a small fixed worker pool or separate OCR service only when traffic justifies it.
-15. **Analytics / Feedback workflow review.** Retain deferred Pattern Translator analytics-schema review, investigation of system/non-user analytics activity, Feedback Form workflow/copy review, and later reuse of appropriate analytics/feedback design for Stitch Translator.
+- **Diagnostic Report download:** resolved in the current FastAPI/browser UI.
+- **Select Area cropper first render:** resolved in the current FastAPI/browser workflow.
+- **Completed result with `OCR Running...` and production Streamlit chrome:** not applicable to FastAPI production; both describe the rollback-only Streamlit UI.
+- **Safari/new-Streamlit-AppSession recovery:** not applicable to FastAPI production. Generic browser-refresh persistence is post-launch only if reproduced.
+
+### Post-Launch / Watch Only
+
+- **Deterministic translation / dictionary simplification:** speculative optimization and cleanup; revisit only with evidence and protect translation quality.
+- **Initial physical-iPhone upload-preview delay:** stale/watch-only; reopen only with a current FastAPI reproduction.
+- **OCR concurrency/scaling:** the isolated serialized PaddleOCR worker remains appropriate for current traffic. Final pre-launch smoke testing triggered three independent browser translations within approximately one second; all three completed successfully within 20 seconds with no timeout/error. Consider scaling only when real traffic evidence justifies it.
+- **Analytics / Feedback workflow review:** retain the deferred schema, system/non-user activity, workflow/copy, and cross-product reuse review.
 
 Other non-blocking polish already recorded:
 
@@ -219,7 +366,7 @@ Other non-blocking polish already recorded:
 
 ### FastAPI production cutover (complete; Production Human UAT PASS)
 
-- FastAPI/browser is live on the existing Railway service at `https://pattern.crochetintelligence.com`; production application baseline `778703b981fd2ef97c447eedca96021e553f3d3c` includes the corrected Plausible initialization.
+- FastAPI/browser is live on the existing Railway service at `https://pattern.crochetintelligence.com`; the current production application baseline is `f1a9b45cad9e361bcdeb4c7066fe66f1d45ec07d`.
 - Validated Railway Custom Start Command: `sh -c 'python -m uvicorn pattern_translator.api:app --host 0.0.0.0 --port "$PORT" --workers 1'`. The shell wrapper is required for `PORT` expansion; direct `"${PORT}"` use failed because Uvicorn received the literal value. One worker is the validated initial production configuration.
 - Production smoke UAT passed across the browser, custom domain, image upload/quality, Whole Pattern, Select Area/crop, OCR/translation, results/overlay, PNG/TXT downloads, Diagnostic Report, physical mobile workflow, and redeploy/startup behavior.
 - Plausible production verification passed for all five approved events, each observed exactly once with no duplicates, in the intended shared `crochetintelligence.com` site.
@@ -503,9 +650,9 @@ Current platform sequence:
 3. **Complete:** Migrate the Pattern browser UI and components in Phase 3A (approved local commit `6c8ab97b0731daa6cd61a4f919aa71cabc856d3b`).
 4. **Complete:** Restore Diagnostic Report parity in Phase 3B1; automated validation and Desktop Chrome, physical iPhone Safari, and physical Android Chrome Human UAT passed.
 5. **Complete:** Restore image-quality assessment, gating, and force-run parity in Phase 3B2; automated validation and Desktop Chrome, physical iPhone Safari, and physical Android Chrome Human UAT passed.
-6. **Not started:** Cut the existing Railway service to FastAPI/Uvicorn only after explicit approval and parity evidence. Streamlit production has not yet been replaced.
-7. Resume translation-performance work and remaining product/UI items after migration stability. Translation-performance / terminology-cache optimization remains paused.
-8. Run final product-wide production UAT and proceed to Soft Launch while preserving the completed RC54 analytics and custom-domain baselines.
+6. **Complete:** Cut the existing Railway service to FastAPI/Uvicorn; production smoke UAT passed. Streamlit remains rollback-only.
+7. **Next research task:** Run Experiment 1, glossary-only broad Carnation translation, under the decision gate documented above. Do not integrate a Challenger unless that experiment succeeds.
+8. Keep later Streamlit retirement, remaining product/UI work, and any release action separately scoped and explicitly approved.
 
 Additional deferred work:
 
