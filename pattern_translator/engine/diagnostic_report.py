@@ -940,8 +940,23 @@ def _format_overlay_renderer_diagnostics(diagnostics: Optional[Dict[str, object]
     diagnostics = diagnostics or {}
     if not diagnostics:
         return "Source-replacement renderer not enabled for this result."
+    resolver = diagnostics.get("font_resolver", {})
+    resolver = resolver if isinstance(resolver, dict) else {}
+    size_summary = diagnostics.get("final_font_size_summary", {})
+    size_summary = size_summary if isinstance(size_summary, dict) else {}
     lines = [
         f"Renderer: {_debug_cell(diagnostics.get('renderer', ''))}",
+        f"Target language: {_debug_cell(resolver.get('target_language', ''))}",
+        f"Font family: {_debug_cell(resolver.get('font_family', ''))}",
+        f"Font path: {_debug_cell(resolver.get('font_path', ''))}",
+        f"Font face index: {_debug_cell(resolver.get('font_face_index', ''))}",
+        f"Font weight: {_debug_cell(resolver.get('font_weight', ''))}",
+        "Absolute minimum font size: "
+        f"{_debug_cell(diagnostics.get('absolute_minimum_font_size', 0))}",
+        "Final font sizes (min/median/max): "
+        f"{_debug_cell(size_summary.get('minimum', 0))}/"
+        f"{_debug_cell(size_summary.get('median', 0))}/"
+        f"{_debug_cell(size_summary.get('maximum', 0))}",
         f"Original dimensions: {_debug_cell(diagnostics.get('original_dimensions', ''))}",
         f"Final dimensions: {_debug_cell(diagnostics.get('final_dimensions', ''))}",
         f"Footer entries: {_debug_cell(diagnostics.get('footer_entry_count', 0))}",
@@ -967,8 +982,11 @@ def _format_overlay_renderer_diagnostics(diagnostics: Optional[Dict[str, object]
                 "{unit} | segments={segments} | regions={regions} | members={members} | "
                 "content={content} | trust={trust} | protected_spans={protected_count} "
                 "{protected_values} | "
-                "protected_status={protected_status} | state={state} | font={baseline}->{final} | "
-                "minimum_font={minimum} | "
+                "protected_status={protected_status} | state={state} | "
+                "source_height={source_height} | calibrated_start={calibrated_start} | "
+                "calibrated_glyph_height={calibrated_glyph_height} | final_font={final} | "
+                "absolute_minimum_font={minimum} | font={family} | font_path={path} | "
+                "font_face={face} | font_weight={weight} | target_language={language} | "
                 "lines={wrapped} | expansion={expand_x},{expand_y} | collision={collision} | "
                 "corridor={available_width}x{available_height} | required={required_width}x{required_height} | "
                 "allowed_lines={allowed_lines} | actual_lines={actual_lines} | blocker={blocker} | "
@@ -989,9 +1007,24 @@ def _format_overlay_renderer_diagnostics(diagnostics: Optional[Dict[str, object]
                         unit.get("protected_identity_status", "not_applicable")
                     ),
                     state=_debug_cell(unit.get("overlay_state", "")),
-                    baseline=_debug_cell(unit.get("baseline_font_size", 0)),
+                    source_height=_debug_cell(
+                        unit.get("representative_source_text_height", 0)
+                    ),
+                    calibrated_start=_debug_cell(
+                        unit.get("calibrated_start_font_size", 0)
+                    ),
+                    calibrated_glyph_height=_debug_cell(
+                        unit.get("calibrated_glyph_height", 0)
+                    ),
                     final=_debug_cell(unit.get("final_font_size", 0)),
-                    minimum=_debug_cell(unit.get("minimum_font_size", 0)),
+                    minimum=_debug_cell(
+                        unit.get("absolute_minimum_font_size", 0)
+                    ),
+                    family=_debug_cell(unit.get("font_family", "")),
+                    path=_debug_cell(unit.get("font_path", "")),
+                    face=_debug_cell(unit.get("font_face_index", "")),
+                    weight=_debug_cell(unit.get("font_weight", "")),
+                    language=_debug_cell(unit.get("target_language", "")),
                     wrapped=_debug_cell(unit.get("wrapped_line_count", 0)),
                     expand_x=_debug_cell(unit.get("expansion_x", 0)),
                     expand_y=_debug_cell(unit.get("expansion_y", 0)),

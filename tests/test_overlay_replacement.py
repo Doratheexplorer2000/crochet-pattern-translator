@@ -141,8 +141,137 @@ class ContentClassificationTests(unittest.TestCase):
         )
 
 
+class OverlayFontResolverTests(unittest.TestCase):
+    def setUp(self):
+        overlay._resolve_overlay_font.cache_clear()
+
+    def tearDown(self):
+        overlay._resolve_overlay_font.cache_clear()
+
+    @staticmethod
+    def _fake_font(family, weight):
+        font = mock.Mock()
+        font.getname.return_value = (family, weight)
+        return font
+
+    def test_linux_noto_ttc_faces_are_language_aware(self):
+        cases = (
+            ("Traditional Chinese", 3, "Noto Sans CJK TC"),
+            ("Simplified Chinese", 2, "Noto Sans CJK SC"),
+            ("Japanese", 0, "Noto Sans CJK JP"),
+            ("English", 0, "Noto Sans CJK JP"),
+        )
+        noto = "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"
+        for language, expected_index, expected_family in cases:
+            with self.subTest(language=language):
+                font = self._fake_font(expected_family, "Regular")
+                with mock.patch.object(
+                    overlay.ImageFont,
+                    "truetype",
+                    return_value=font,
+                ) as truetype:
+                    resolution = overlay._resolve_overlay_font(24, language)
+                truetype.assert_called_once_with(
+                    noto,
+                    size=24,
+                    index=expected_index,
+                )
+                self.assertEqual(expected_index, resolution.face_index)
+                self.assertEqual(expected_family, resolution.family)
+                self.assertEqual("Regular", resolution.weight)
+
+    def test_macos_fallback_mapping(self):
+        cases = (
+            ("Traditional Chinese", "STHeiti Medium.ttc", 0, "Heiti TC", "Medium"),
+            ("Simplified Chinese", "Hiragino Sans GB.ttc", 0, "Hiragino Sans GB", "W3"),
+            ("Japanese", "ヒラギノ角ゴシック W3.ttc", 0, "Hiragino Sans", "W3"),
+            ("English", "Arial.ttf", 0, "Arial", "Regular"),
+        )
+        for language, filename, expected_index, family, weight in cases:
+            with self.subTest(language=language):
+                def load(path, *, size, index):
+                    if path.endswith(filename):
+                        return self._fake_font(family, weight)
+                    raise OSError(path)
+
+                with mock.patch.object(
+                    overlay.ImageFont,
+                    "truetype",
+                    side_effect=load,
+                ):
+                    resolution = overlay._resolve_overlay_font(24, language)
+                self.assertTrue(resolution.path.endswith(filename))
+                self.assertEqual(expected_index, resolution.face_index)
+                self.assertEqual(family, resolution.family)
+                self.assertEqual(weight, resolution.weight)
+
+    def test_traditional_chinese_candidate_does_not_use_japanese_noto_face(self):
+        noto_candidates = [
+            candidate
+            for candidate in overlay._overlay_font_candidates("Traditional Chinese")
+            if candidate[0].endswith("NotoSansCJK-Regular.ttc")
+        ]
+        self.assertEqual(1, len(noto_candidates))
+        self.assertEqual(3, noto_candidates[0][1])
+
+    def test_six_pixels_renders_for_each_local_scalable_mapping(self):
+        samples = {
+            "Traditional Chinese": "繁體中文",
+            "Simplified Chinese": "简体中文",
+            "Japanese": "日本語",
+            "English": "English",
+        }
+        draw = ImageDraw.Draw(Image.new("RGB", (100, 30), "white"))
+        for language, text in samples.items():
+            with self.subTest(language=language):
+                resolution = overlay._resolve_overlay_font(6, language)
+                bbox = draw.textbbox((0, 0), text, font=resolution.font)
+                self.assertGreater(bbox[2] - bbox[0], 0)
+                self.assertGreater(bbox[3] - bbox[1], 0)
+
+    def test_source_height_calibrates_actual_glyph_metrics(self):
+        draw = ImageDraw.Draw(Image.new("RGB", (400, 120), "white"))
+        size_30, resolution_30, height_30 = overlay._source_calibrated_font_size(
+            draw,
+            "繁體中文翻譯",
+            30,
+            "Traditional Chinese",
+        )
+        size_50, _resolution_50, height_50 = overlay._source_calibrated_font_size(
+            draw,
+            "繁體中文翻譯",
+            50,
+            "Traditional Chinese",
+        )
+        self.assertLessEqual(height_30, 31)
+        self.assertNotEqual(36, size_30)
+        self.assertGreater(size_50, size_30)
+        self.assertLessEqual(height_50, 51)
+        self.assertEqual("Traditional Chinese", resolution_30.target_language)
+
+    def test_member_height_median_ignores_multiline_union(self):
+        regions = [
+            {
+                "min_y": 10,
+                "max_y": 110,
+                "member_boxes": (
+                    {"min_y": 10, "max_y": 20},
+                    {"min_y": 90, "max_y": 102},
+                ),
+            }
+        ]
+        self.assertEqual(11, overlay._representative_source_text_height(regions))
+
+    def test_progressive_candidates_include_every_integer_through_six(self):
+        self.assertEqual(
+            tuple(range(14, 5, -1)),
+            overlay._replacement_font_candidates(14, 6),
+        )
+
+
 class SourceReplacementRendererTests(unittest.TestCase):
     def setUp(self):
+        overlay._resolve_overlay_font.cache_clear()
         self.flag = mock.patch.dict(
             os.environ,
             {overlay.SOURCE_REPLACEMENT_FLAG_ENV: "1"},
@@ -152,6 +281,7 @@ class SourceReplacementRendererTests(unittest.TestCase):
 
     def tearDown(self):
         self.flag.stop()
+        overlay._resolve_overlay_font.cache_clear()
 
     @staticmethod
     def _row(original, translated, *, x1=20, x2=300, y1=20, y2=60, **extra):
@@ -244,9 +374,9 @@ class SourceReplacementRendererTests(unittest.TestCase):
         self.assertIsNotNone(image)
         self.assertEqual("expanded_replacement", rows.loc[0, "Overlay State"])
         self.assertEqual(33, rows.loc[0, "Overlay Font Size"])
-        self.assertEqual(30, rows.loc[0, "Overlay Minimum Font Size"])
+        self.assertEqual(6, rows.loc[0, "Overlay Minimum Font Size"])
 
-    def test_fit_below_relative_minimum_remains_overflow(self):
+    def test_fit_below_old_relative_minimum_uses_safe_smaller_size(self):
         rows = pd.DataFrame(
             [
                 self._row(
@@ -275,9 +405,10 @@ class SourceReplacementRendererTests(unittest.TestCase):
         )
 
         self.assertIsNotNone(image)
-        self.assertEqual("overflow", rows.loc[0, "Overlay State"])
-        self.assertEqual(30, rows.loc[0, "Overlay Minimum Font Size"])
-        self.assertEqual("[1]", rows.loc[0, "Overlay Marker"])
+        self.assertEqual("expanded_replacement", rows.loc[0, "Overlay State"])
+        self.assertEqual(6, rows.loc[0, "Overlay Minimum Font Size"])
+        self.assertLess(rows.loc[0, "Overlay Font Size"], 30)
+        self.assertEqual("", rows.loc[0, "Overlay Marker"])
 
     def test_vertical_padding_reduces_for_tall_font_metrics_only(self):
         penguin_cases = {
@@ -329,57 +460,55 @@ class SourceReplacementRendererTests(unittest.TestCase):
             ]
         )
 
-        with mock.patch.object(
-            overlay, "_replacement_font_size", return_value=(30, 30)
-        ), mock.patch.object(overlay, "_line_height", return_value=33):
-            image, _legend, _legend_df = overlay.make_line_translation_overlay(
-                Image.new("RGB", (1080, 220), "white"),
-                rows,
-                "Traditional Chinese",
-            )
+        image, _legend, _legend_df = overlay.make_line_translation_overlay(
+            Image.new("RGB", (1080, 220), "white"),
+            rows,
+            "Traditional Chinese",
+        )
 
         decision = rows.attrs["overlay_renderer_diagnostics"]["units"][1]
         self.assertIsNotNone(image)
         self.assertEqual("expanded_replacement", rows.loc[1, "Overlay State"])
-        self.assertEqual(30, rows.loc[1, "Overlay Font Size"])
-        self.assertEqual(30, rows.loc[1, "Overlay Minimum Font Size"])
-        self.assertEqual(1, decision["vertical_padding"])
-        self.assertEqual(35, decision["required_rendered_height"])
+        self.assertLessEqual(
+            rows.loc[1, "Overlay Font Size"],
+            rows.loc[1, "Overlay Calibrated Start Font Size"],
+        )
+        self.assertEqual(6, rows.loc[1, "Overlay Minimum Font Size"])
+        self.assertGreaterEqual(decision["vertical_padding"], 1)
+        self.assertLessEqual(
+            decision["required_rendered_height"],
+            decision["available_corridor_height"],
+        )
         self.assertEqual("", rows.loc[1, "Overlay Marker"])
 
-    def test_text_taller_than_corridor_still_uses_real_overflow(self):
+    def test_text_requiring_less_than_six_pixels_uses_real_overflow(self):
         rows = pd.DataFrame(
             [
-                self._row("@above", "@above", x1=100, x2=500, y1=60, y2=99),
                 self._row(
                     "R1: 6 sc in mr (6)",
-                    "R1：環狀起針中織 6 短針（6）",
-                    x1=102.6,
-                    x2=299.2,
-                    y1=100,
-                    y2=130,
+                    "R1：這是無法在六像素完整容納的翻譯",
+                    x1=20,
+                    x2=26,
+                    y1=40,
+                    y2=50,
                 ),
-                self._row("@below", "@below", x1=100, x2=500, y1=135, y2=175),
+                self._row("@neighbor", "@neighbor", x1=35, x2=500, y1=35, y2=60),
             ]
         )
 
-        with mock.patch.object(
-            overlay, "_replacement_font_size", return_value=(30, 30)
-        ), mock.patch.object(overlay, "_line_height", return_value=34):
-            image, legend, legend_df = overlay.make_line_translation_overlay(
-                Image.new("RGB", (1080, 220), "white"),
-                rows,
-                "Traditional Chinese",
-            )
+        image, legend, legend_df = overlay.make_line_translation_overlay(
+            Image.new("RGB", (600, 120), "white"),
+            rows,
+            "Traditional Chinese",
+        )
 
         decision = rows.attrs["overlay_renderer_diagnostics"]["units"][1]
-        self.assertGreater(image.height, 220)
-        self.assertEqual("overflow", rows.loc[1, "Overlay State"])
-        self.assertEqual("single_line_corridor_fit", rows.loc[1, "Overflow Reason"])
-        self.assertIsNone(decision["vertical_padding"])
-        self.assertEqual("[1]", rows.loc[1, "Overlay Marker"])
+        self.assertGreater(image.height, 120)
+        self.assertEqual("overflow", rows.loc[0, "Overlay State"])
+        self.assertEqual(6, decision["final_font_size"])
+        self.assertEqual("[1]", rows.loc[0, "Overlay Marker"])
         self.assertEqual("[1]", legend_df.loc[0, "Marker"])
-        self.assertIn("R1：環狀起針中織 6 短針（6）", legend)
+        self.assertIn("R1：這是無法在六像素完整容納的翻譯", legend)
 
     def test_tall_font_compound_row_reduces_padding_without_overflow(self):
         regions = (
@@ -427,10 +556,6 @@ class SourceReplacementRendererTests(unittest.TestCase):
         ).rename(columns={"Source_Regions": "Source Regions"})
 
         with mock.patch.object(
-            overlay, "_replacement_font_size", return_value=(30, 30)
-        ), mock.patch.object(
-            overlay, "_line_height", return_value=33
-        ), mock.patch.object(
             overlay,
             "_wrap_text_unlimited",
             return_value=["R6 translated line one", "and translated line two"],
@@ -444,9 +569,11 @@ class SourceReplacementRendererTests(unittest.TestCase):
         decision = rows.attrs["overlay_renderer_diagnostics"]["units"][0]
         self.assertIsNotNone(image)
         self.assertEqual("expanded_replacement", rows.loc[0, "Overlay State"])
-        self.assertEqual(30, rows.loc[0, "Overlay Font Size"])
-        self.assertEqual(2, decision["vertical_padding"])
-        self.assertEqual(72, decision["required_rendered_height"])
+        self.assertGreaterEqual(decision["vertical_padding"], 1)
+        self.assertLessEqual(
+            decision["required_rendered_height"],
+            decision["available_corridor_height"],
+        )
         self.assertEqual(73.4, decision["available_corridor_height"])
         self.assertEqual("", rows.loc[0, "Overlay Marker"])
 
@@ -482,7 +609,11 @@ class SourceReplacementRendererTests(unittest.TestCase):
         )
 
         self.assertEqual("replacement", rows.loc[0, "Overlay State"])
-        self.assertEqual(36, rows.loc[0, "Overlay Font Size"])
+        self.assertEqual(
+            rows.loc[0, "Overlay Calibrated Start Font Size"],
+            rows.loc[0, "Overlay Font Size"],
+        )
+        self.assertEqual(34, rows.loc[0, "Overlay Source Text Height"])
         self.assertEqual(
             protected_before,
             image.crop((520, 70, 721, 126)).tobytes(),
@@ -583,7 +714,11 @@ class SourceReplacementRendererTests(unittest.TestCase):
                     rows.attrs["overlay_renderer_diagnostics"]["units"][position],
                 )
                 self.assertEqual("", rows.loc[position, "Overlay Marker"])
-                self.assertGreaterEqual(rows.loc[position, "Overlay Font Size"], 30)
+                self.assertGreaterEqual(rows.loc[position, "Overlay Font Size"], 6)
+                self.assertLessEqual(
+                    rows.loc[position, "Overlay Font Size"],
+                    rows.loc[position, "Overlay Calibrated Start Font Size"],
+                )
         self.assertEqual(
             "expanded_replacement",
             rows.loc[8, "Overlay State"],
@@ -622,6 +757,13 @@ class SourceReplacementRendererTests(unittest.TestCase):
             image.height,
         )
         self.assertEqual(translation.strip(), render_footer.call_args.args[1][0]["text"])
+        footer_font = render_footer.call_args.args[3]
+        marker_font = render_footer.call_args.args[4]
+        expected_family = rows.attrs["overlay_renderer_diagnostics"][
+            "font_resolver"
+        ]["font_family"]
+        self.assertEqual(expected_family, footer_font.getname()[0])
+        self.assertEqual(expected_family, marker_font.getname()[0])
 
     def test_pure_handle_is_unchanged_and_does_not_create_footer(self):
         source = Image.new("RGB", (600, 240), (30, 40, 50))
@@ -814,7 +956,10 @@ class SourceReplacementRendererTests(unittest.TestCase):
             protected_ocr_rows=filtered_branding,
         )
 
-        self.assertEqual("overflow", rows.loc[0, "Overlay State"])
+        self.assertIn(
+            rows.loc[0, "Overlay State"],
+            {"replacement", "expanded_replacement", "overflow"},
+        )
         self.assertEqual(
             protected_before,
             image.crop((185, 15, 401, 66)).tobytes(),
@@ -931,25 +1076,23 @@ class SourceReplacementRendererTests(unittest.TestCase):
         )
         protected_before = source.crop((33, 578, 177, 623)).tobytes()
 
-        with mock.patch.object(
-            overlay,
-            "_replacement_font_size",
-            return_value=(36, 33),
-        ):
-            image, _legend, legend_df = overlay.make_line_translation_overlay(
-                source, rows, "English — US"
-            )
+        image, _legend, legend_df = overlay.make_line_translation_overlay(
+            source, rows, "English — US"
+        )
 
         decision = rows.attrs["overlay_renderer_diagnostics"]["units"][0]
         self.assertEqual("expanded_replacement", rows.loc[0, "Overlay State"])
         self.assertEqual("", rows.loc[0, "Overlay Marker"])
-        self.assertEqual(36, rows.loc[0, "Overlay Font Size"])
-        self.assertEqual(4, rows.loc[0, "Overlay Wrapped Lines"])
-        self.assertEqual(1046.4, decision["available_corridor_width"])
-        self.assertEqual(279.5, decision["available_corridor_height"])
-        self.assertEqual(7, decision["allowed_line_count"])
-        self.assertEqual(4, decision["actual_wrapped_line_count"])
-        self.assertEqual((33.6, 578.4, 175.2, 621.6), decision["blocking_protected_region"])
+        self.assertGreater(
+            rows.loc[0, "Overlay Calibrated Start Font Size"],
+            36,
+        )
+        self.assertLess(
+            rows.loc[0, "Overlay Font Size"],
+            rows.loc[0, "Overlay Calibrated Start Font Size"],
+        )
+        self.assertGreaterEqual(rows.loc[0, "Overlay Wrapped Lines"], 3)
+        self.assertEqual("accepted", decision["collision_decision"])
         self.assertEqual(0, rows.attrs["overlay_renderer_diagnostics"]["footer_height"])
         self.assertEqual("", legend_df.loc[0, "Marker"])
         self.assertEqual((1080, 700), image.size)
@@ -991,8 +1134,8 @@ class SourceReplacementRendererTests(unittest.TestCase):
 
         with mock.patch.object(
             overlay,
-            "_replacement_font_size",
-            return_value=(36, 33),
+            "_wrap_text_unlimited",
+            return_value=["complete translated text"] * 100,
         ), mock.patch.object(
             overlay,
             "_render_translation_footer",
@@ -1014,6 +1157,60 @@ class SourceReplacementRendererTests(unittest.TestCase):
             image.crop((20, 112, 301, 153)).tobytes(),
         )
 
+    def test_kerry_rounds_title_mouth_and_social_text_remain_complete(self):
+        fixture = (
+            ("快和我去救爷爷", "Hurry and come with me to save Grandpa.", 230.4, 508.8, 182.4, 230.4),
+            ("R1:6X", "R1: 6 sc", 33.6, 175.2, 578.4, 621.6),
+            ("R2:6V", "R2: 6 inc", 28.8, 175.2, 640.8, 691.2),
+            ("R3:(X，V)*6", "R3: (sc, inc) * 6", 31.2, 321.6, 708.0, 765.6),
+            ("R4:18X", "R4: 18 sc", 33.6, 199.2, 789.6, 832.8),
+            ("R5:(X，V,X)*6", "R5: (sc, inc, sc) * 6", 31.2, 384.0, 849.6, 904.8),
+            ("R6~R7:24X", "R6–R7: 24 sc", 33.6, 285.6, 928.8, 969.6),
+            ("R8：(3X,V)*2,(X，V)*4,(3X,V)*2", "R8: (3 sc, inc) * 2, (sc, inc) * 4, (3 sc, inc) * 2", 33.6, 825.6, 993.6, 1041.6),
+            ("R9：10X,(X，V，X)*4,10X", "R9: 10 sc, (sc, inc, sc) * 4, 10 sc", 31.2, 600.0, 1063.2, 1113.6),
+            ("R10:10X,(3X,V)*4,10X", "R10: 10 sc, (3 sc, inc) * 4, 10 sc", 31.2, 583.2, 1132.8, 1183.2),
+            ("R11：10X，(2X，V,2X)*4,10X", "R11: 10 sc, (2 sc, inc, 2 sc) * 4, 10 sc", 33.6, 664.8, 1204.8, 1250.4),
+            ("R12~R13: 44X", "R12–R13: 44 sc", 33.6, 331.2, 1272.0, 1320.0),
+            ("R14：16X，A,8X，A,16X", "R14: 16 sc, dec, 8 sc, dec, 16 sc", 36.0, 542.4, 1348.8, 1392.0),
+            ("R15~R16:42X", "R15–R16: 42 sc", 28.8, 333.6, 1411.2, 1464.0),
+            ("R17:(5X,A)*6", "R17: (5 sc, dec) * 6", 33.6, 372.0, 1483.2, 1531.2),
+            ("R18:(2X,A,2X)*6", "R18: (2 sc, dec, 2 sc) * 6", 33.6, 458.4, 1552.8, 1600.8),
+            ("R19：(3X,A)*6", "R19: (3 sc, dec) * 6", 33.6, 369.6, 1622.4, 1672.8),
+            ("R20:(X，A,X)*6", "R20: (sc, dec, sc) * 6", 33.6, 408.0, 1694.4, 1742.4),
+            ("R21:(X，A)*6", "R21: (sc, dec) * 6", 33.6, 343.2, 1761.6, 1809.6),
+            ("R22:6A", "R22: 6 dec", 33.6, 199.2, 1838.4, 1881.6),
+            ("嘴巴：环起3X", "Mouth: magic ring 3 sc", 33.6, 288.0, 1972.8, 2020.8),
+            ("說點什麼", "Say something.", 60.0, 271.2, 2169.6, 2229.6),
+        )
+        rows = pd.DataFrame(
+            [
+                self._row(
+                    original,
+                    translated,
+                    x1=x1,
+                    x2=x2,
+                    y1=y1,
+                    y2=y2,
+                )
+                for original, translated, x1, x2, y1, y2 in fixture
+            ]
+        )
+
+        image, legend, _legend_df = overlay.make_line_translation_overlay(
+            Image.new("RGB", (1080, 2400), (24, 25, 28)),
+            rows,
+            "English — US",
+        )
+
+        self.assertIsNotNone(image)
+        self.assertNotIn("warning_untrusted", set(rows["Overlay State"]))
+        self.assertNotIn("preserved_unsupported", set(rows["Overlay State"]))
+        for translated in ("R1: 6 sc", "R22: 6 dec", "Mouth: magic ring 3 sc", "Say something."):
+            self.assertIn(translated, legend)
+        diagnostics = rows.attrs["overlay_renderer_diagnostics"]
+        self.assertGreater(diagnostics["final_font_size_summary"]["maximum"], 30)
+        self.assertGreaterEqual(diagnostics["final_font_size_summary"]["minimum"], 6)
+
     def test_complete_wrapper_reports_overflow_without_truncating(self):
         image = Image.new("RGB", (300, 100), "white")
         draw = ImageDraw.Draw(image)
@@ -1030,14 +1227,9 @@ class SourceReplacementRendererTests(unittest.TestCase):
             "".join(" ".join(unlimited).split()),
         )
 
-    def test_mobile_baseline_and_minimum_follow_image_relative_floor(self):
-        rows = pd.DataFrame([self._row("R1: 6X", "R1: 6 sc", y2=68)])
-        baseline, minimum = overlay._replacement_font_size(1080, rows)
-        self.assertGreaterEqual(baseline, 36)
-        self.assertEqual(30, minimum)
-        self.assertEqual(18, overlay._replacement_font_size(540, rows)[1])
-        self.assertEqual(20, overlay._replacement_font_size(720, rows)[1])
-        self.assertEqual(40, overlay._replacement_font_size(1440, rows)[1])
+    def test_absolute_minimum_is_not_image_width_driven(self):
+        self.assertEqual(6, overlay._ABSOLUTE_MIN_FONT_PX)
+        self.assertEqual((8, 7, 6), overlay._replacement_font_candidates(8, 6))
 
     def test_whole_pattern_coordinates_are_used_without_offset(self):
         source = Image.new("RGB", (640, 300), (231, 232, 233))
@@ -1086,7 +1278,10 @@ class SourceReplacementRendererTests(unittest.TestCase):
         self.assertIn("allowed_lines=", report)
         self.assertIn("actual_lines=", report)
         self.assertIn("blocker=", report)
-        self.assertIn("minimum_font=", report)
+        self.assertIn("absolute_minimum_font=", report)
+        self.assertIn("source_height=", report)
+        self.assertIn("calibrated_start=", report)
+        self.assertIn("Font face index:", report)
 
     def test_diagnostics_distinguish_translation_identity_mixed_and_numeric(self):
         rows = pd.DataFrame(

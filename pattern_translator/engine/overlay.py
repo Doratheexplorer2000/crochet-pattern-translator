@@ -10,7 +10,10 @@ import io
 import math
 import os
 import re
+import statistics
 import time
+from dataclasses import dataclass
+from functools import lru_cache
 from typing import Callable, Dict, List, Optional, Tuple
 
 import pandas as pd
@@ -35,6 +38,20 @@ _PLATE_TEXT = (15, 15, 15)
 _TEAL = (15, 118, 110)
 _WARNING = (183, 121, 31)
 _MIN_VERTICAL_PLATE_PADDING = 1
+_ABSOLUTE_MIN_FONT_PX = 6
+_SOURCE_GLYPH_HEIGHT_TOLERANCE_PX = 1.0
+
+
+@dataclass(frozen=True)
+class OverlayFontResolution:
+    """A loaded overlay font plus stable provenance for diagnostics."""
+
+    font: object
+    family: str
+    path: str
+    face_index: Optional[int]
+    weight: str
+    target_language: str
 
 
 def is_source_replacement_overlay_enabled(environ: Optional[Dict[str, str]] = None) -> bool:
@@ -89,20 +106,68 @@ def profile_function(time_name: str, count_name: str):
     return decorator
 
 
-def _load_overlay_font(size: int):
-    font_paths = [
-        "/System/Library/Fonts/PingFang.ttc",
-        "/System/Library/Fonts/STHeiti Light.ttc",
-        "/Library/Fonts/Arial Unicode.ttf",
-        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-    ]
-    for fp in font_paths:
+def _overlay_font_candidates(output_mode: str) -> Tuple[Tuple[str, int, str, str], ...]:
+    noto_path = "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"
+    language_candidates = {
+        "Traditional Chinese": (
+            (noto_path, 3, "Noto Sans CJK TC", "Regular"),
+            ("/System/Library/Fonts/STHeiti Medium.ttc", 0, "Heiti TC", "Medium"),
+        ),
+        "Simplified Chinese": (
+            (noto_path, 2, "Noto Sans CJK SC", "Regular"),
+            ("/System/Library/Fonts/Hiragino Sans GB.ttc", 0, "Hiragino Sans GB", "W3"),
+            ("/System/Library/Fonts/STHeiti Medium.ttc", 1, "Heiti SC", "Medium"),
+        ),
+        "Japanese": (
+            (noto_path, 0, "Noto Sans CJK JP", "Regular"),
+            ("/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc", 0, "Hiragino Sans", "W3"),
+        ),
+        "English": (
+            (noto_path, 0, "Noto Sans CJK JP", "Regular"),
+            ("/System/Library/Fonts/Supplemental/Arial.ttf", 0, "Arial", "Regular"),
+        ),
+    }
+    common_fallbacks = (
+        ("/Library/Fonts/Arial Unicode.ttf", 0, "Arial Unicode MS", "Regular"),
+        ("/System/Library/Fonts/Supplemental/Arial Unicode.ttf", 0, "Arial Unicode MS", "Regular"),
+        ("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 0, "DejaVu Sans", "Book"),
+    )
+    return language_candidates.get(output_mode, language_candidates["English"]) + common_fallbacks
+
+
+@lru_cache(maxsize=128)
+def _resolve_overlay_font(size: int, output_mode: str) -> OverlayFontResolution:
+    requested_size = max(_ABSOLUTE_MIN_FONT_PX, int(size))
+    for path, face_index, expected_family, expected_weight in _overlay_font_candidates(output_mode):
         try:
-            return ImageFont.truetype(fp, size=size)
+            font = ImageFont.truetype(path, size=requested_size, index=face_index)
+            try:
+                actual_family, actual_weight = font.getname()
+            except Exception:
+                actual_family, actual_weight = expected_family, expected_weight
+            return OverlayFontResolution(
+                font=font,
+                family=str(actual_family or expected_family),
+                path=path,
+                face_index=face_index,
+                weight=str(actual_weight or expected_weight),
+                target_language=output_mode,
+            )
         except Exception:
             continue
-    return ImageFont.load_default()
+    return OverlayFontResolution(
+        font=ImageFont.load_default(),
+        family="Pillow default",
+        path="Pillow default",
+        face_index=None,
+        weight="default",
+        target_language=output_mode,
+    )
+
+
+def _load_overlay_font(size: int, output_mode: str = "English"):
+    """Compatibility wrapper for legacy rendering paths."""
+    return _resolve_overlay_font(size, output_mode).font
 
 
 def line_overlay_font_size(
@@ -255,7 +320,7 @@ def make_translation_overlay(
     overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
     font_size = max(14, min(28, int(w / 45)))
-    font = _load_overlay_font(font_size)
+    font = _load_overlay_font(font_size, output_mode)
     output_col = line_translation_engine.get_output_column_name(output_mode)
 
     used_slots = []
@@ -451,8 +516,8 @@ def _make_legacy_line_translation_overlay(
     overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
     font_size = line_overlay_font_size(w, line_df, scale_to_source_text)
-    font = _load_overlay_font(font_size)
-    marker_font = _load_overlay_font(max(font_size, 20))
+    font = _load_overlay_font(font_size, output_mode)
+    marker_font = _load_overlay_font(max(font_size, 20), output_mode)
 
     source_slots: List[Tuple[float, float, float, float]] = []
     for _, source_row in line_df.iterrows():
@@ -573,31 +638,8 @@ def _make_legacy_line_translation_overlay(
     return Image.alpha_composite(img, overlay).convert("RGB"), legend_text, legend_df
 
 
-def _replacement_font_size(image_width: int, line_df: pd.DataFrame) -> Tuple[int, int]:
-    heights = []
-    for _, row in line_df.iterrows():
-        try:
-            height = float(row.get("max_y", 0)) - float(row.get("min_y", 0))
-        except (TypeError, ValueError):
-            continue
-        if height > 0:
-            heights.append(height)
-    median_height = 20.0
-    if heights:
-        heights.sort()
-        middle = len(heights) // 2
-        median_height = (
-            heights[middle]
-            if len(heights) % 2
-            else (heights[middle - 1] + heights[middle]) / 2.0
-        )
-    baseline = max(18, int(round(image_width / 30.0)), int(round(median_height * 0.62)))
-    minimum = max(18, int(math.ceil(image_width / 36.0)))
-    return baseline, min(baseline, minimum)
-
-
 def _replacement_font_candidates(baseline: int, minimum: int) -> Tuple[int, ...]:
-    """Return every readable integer font size, largest first."""
+    """Return every integer font size through the absolute technical floor."""
     floor = min(int(baseline), int(minimum))
     return tuple(range(int(baseline), floor - 1, -1))
 
@@ -686,9 +728,28 @@ def _wrap_text_unlimited(
     return lines
 
 
-def _line_height(draw: ImageDraw.ImageDraw, font: object) -> int:
-    bbox = draw.textbbox((0, 0), "Ag中", font=font)
+def _text_height(draw: ImageDraw.ImageDraw, font: object, text: str) -> int:
+    measured_text = re.sub(r"\s+", " ", str(text or "").strip()) or "Ag中"
+    bbox = draw.textbbox((0, 0), measured_text, font=font)
     return max(1, int(bbox[3] - bbox[1]))
+
+
+def _line_height(draw: ImageDraw.ImageDraw, font: object) -> int:
+    return _text_height(draw, font, "Ag中")
+
+
+def _text_line_heights(
+    draw: ImageDraw.ImageDraw,
+    font: object,
+    lines: List[str],
+) -> List[int]:
+    return [_text_height(draw, font, line) for line in lines]
+
+
+def _text_block_height(line_heights: List[int], line_gap: int) -> int:
+    if not line_heights:
+        return 0
+    return sum(line_heights) + max(0, len(line_heights) - 1) * line_gap
 
 
 def _bounded_vertical_padding(
@@ -778,6 +839,63 @@ def _source_regions_from_row(
             float(region["min_x"]),
         ),
     )
+
+
+def _representative_source_text_height(regions: List[Dict[str, object]]) -> float:
+    """Use individual OCR member heights, never a multi-line union height."""
+    heights: List[float] = []
+    for region in regions:
+        member_heights: List[float] = []
+        raw_members = region.get("member_boxes", ()) or ()
+        if isinstance(raw_members, (list, tuple)):
+            for member in raw_members:
+                if not isinstance(member, dict):
+                    continue
+                try:
+                    height = float(member.get("max_y", 0)) - float(
+                        member.get("min_y", 0)
+                    )
+                except (TypeError, ValueError):
+                    continue
+                if height > 0:
+                    member_heights.append(height)
+        if member_heights:
+            heights.extend(member_heights)
+            continue
+        try:
+            region_height = float(region["max_y"]) - float(region["min_y"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if region_height > 0:
+            heights.append(region_height)
+    return float(statistics.median(heights)) if heights else 20.0
+
+
+def _source_calibrated_font_size(
+    draw: ImageDraw.ImageDraw,
+    text: str,
+    source_height: float,
+    output_mode: str,
+) -> Tuple[int, OverlayFontResolution, int]:
+    """Find the largest nominal size whose actual glyphs match source height."""
+    limit = max(1.0, float(source_height)) + _SOURCE_GLYPH_HEIGHT_TOLERANCE_PX
+    low = _ABSOLUTE_MIN_FONT_PX
+    high = max(low, int(math.ceil(max(1.0, float(source_height)) * 2.0)))
+    best = low
+    best_resolution = _resolve_overlay_font(best, output_mode)
+    best_height = _text_height(draw, best_resolution.font, text)
+    while low <= high:
+        candidate = (low + high) // 2
+        resolution = _resolve_overlay_font(candidate, output_mode)
+        measured_height = _text_height(draw, resolution.font, text)
+        if measured_height <= limit:
+            best = candidate
+            best_resolution = resolution
+            best_height = measured_height
+            low = candidate + 1
+        else:
+            high = candidate - 1
+    return best, best_resolution, best_height
 
 
 def _rect_for_region(region: Dict[str, object]) -> Tuple[float, float, float, float]:
@@ -990,7 +1108,7 @@ def _draw_text_lines(
     rect: Tuple[float, float, float, float],
     lines: List[str],
     font: object,
-    line_height: int,
+    line_heights: List[int],
     horizontal_padding: int,
     *,
     vertical_padding: Optional[int] = None,
@@ -1003,9 +1121,10 @@ def _draw_text_lines(
         max(2, horizontal_padding // 2) if line_gap is None else line_gap
     )
     y = rect[1] + vertical_padding
-    for line in lines:
+    for line, line_height in zip(lines, line_heights):
+        bbox = draw.textbbox((0, 0), line, font=font)
         draw.text(
-            (rect[0] + horizontal_padding, y),
+            (rect[0] + horizontal_padding, y - bbox[1]),
             line,
             fill=_PLATE_TEXT,
             font=font,
@@ -1050,7 +1169,8 @@ def _render_translation_footer(
     width, height = image.size
     sizing = Image.new("RGB", (width, 1), _PLATE_FILL)
     sizing_draw = ImageDraw.Draw(sizing)
-    line_height = _line_height(sizing_draw, font)
+    heading = _localized_footer_heading(output_mode)
+    heading_height = _text_height(sizing_draw, font, heading)
     marker_width = max(
         _text_width(sizing_draw, marker_font, entry["marker"])
         for entry in entries
@@ -1058,11 +1178,15 @@ def _render_translation_footer(
     outer_padding = max(16, min(40, int(round(width * 0.03))))
     text_width = max(40.0, width - outer_padding * 2 - marker_width - padding)
     wrapped_entries = []
-    content_height = outer_padding + line_height + padding
+    content_height = outer_padding + heading_height + padding
     for entry in entries:
         lines = _wrap_text_unlimited(entry["text"], sizing_draw, font, text_width)
-        entry_height = max(line_height, len(lines) * (line_height + max(2, padding // 2)))
-        wrapped_entries.append((entry, lines, entry_height))
+        line_heights = _text_line_heights(sizing_draw, font, lines)
+        entry_height = max(
+            _text_height(sizing_draw, marker_font, entry["marker"]),
+            _text_block_height(line_heights, max(2, padding // 2)),
+        )
+        wrapped_entries.append((entry, lines, line_heights, entry_height))
         content_height += entry_height + padding * 2
     footer_height = int(math.ceil(content_height + outer_padding))
 
@@ -1073,18 +1197,31 @@ def _render_translation_footer(
     draw.rectangle((0, height, width, height + separator_width), fill=_TEAL)
     y = height + outer_padding
     draw.text(
-        (outer_padding, y),
-        _localized_footer_heading(output_mode),
+        (
+            outer_padding,
+            y - sizing_draw.textbbox((0, 0), heading, font=font)[1],
+        ),
+        heading,
         fill=_PLATE_TEXT,
         font=font,
     )
-    y += line_height + padding
-    for entry, lines, entry_height in wrapped_entries:
-        draw.text((outer_padding, y), entry["marker"], fill=_TEAL, font=marker_font)
+    y += heading_height + padding
+    for entry, lines, line_heights, entry_height in wrapped_entries:
+        marker_bbox = draw.textbbox((0, 0), entry["marker"], font=marker_font)
+        draw.text(
+            (outer_padding, y - marker_bbox[1]),
+            entry["marker"],
+            fill=_TEAL,
+            font=marker_font,
+        )
         text_y = y
-        for line in lines:
+        for line, line_height in zip(lines, line_heights):
+            bbox = draw.textbbox((0, 0), line, font=font)
             draw.text(
-                (outer_padding + marker_width + padding, text_y),
+                (
+                    outer_padding + marker_width + padding,
+                    text_y - bbox[1],
+                ),
                 line,
                 fill=_PLATE_TEXT,
                 font=font,
@@ -1125,6 +1262,12 @@ def _make_source_replacement_overlay(
         "Overlay Required Height": 0.0,
         "Overlay Allowed Lines": 0,
         "Overlay Blocking Region": "",
+        "Overlay Source Text Height": 0.0,
+        "Overlay Calibrated Start Font Size": 0,
+        "Overlay Font Family": "",
+        "Overlay Font Path": "",
+        "Overlay Font Face Index": "",
+        "Overlay Font Weight": "",
     }
     for column, default in defaults.items():
         line_df[column] = default
@@ -1132,9 +1275,11 @@ def _make_source_replacement_overlay(
     canvas = image.convert("RGB")
     width, height = canvas.size
     draw = ImageDraw.Draw(canvas)
-    baseline_size, minimum_size = _replacement_font_size(width, line_df)
-    line_df["Overlay Minimum Font Size"] = minimum_size
-    marker_font = _load_overlay_font(minimum_size)
+    line_df["Overlay Minimum Font Size"] = _ABSOLUTE_MIN_FONT_PX
+    image_font_resolution = _resolve_overlay_font(
+        _ABSOLUTE_MIN_FONT_PX,
+        output_mode,
+    )
     padding = max(4, min(10, int(round(width * 0.004))))
     radius = max(4, padding + 1)
 
@@ -1184,6 +1329,8 @@ def _make_source_replacement_overlay(
     max_expansion_y = 0.0
     marker_number = 1
     processed = 0
+    source_start_sizes: List[int] = []
+    final_font_sizes: List[int] = []
 
     for position in ordered_positions:
         row = line_df.iloc[position]
@@ -1193,6 +1340,44 @@ def _make_source_replacement_overlay(
         trust = str(row.get("Translation Trust", "source_preserved"))
         regions = source_regions[position]
         original_rects = [_rect_for_region(region) for region in regions]
+        representative_source_height = _representative_source_text_height(regions)
+        source_start_size, source_font_resolution, calibrated_glyph_height = (
+            _source_calibrated_font_size(
+                draw,
+                translated or original,
+                representative_source_height,
+                output_mode,
+            )
+        )
+        marker_font = source_font_resolution.font
+        line_df.iloc[
+            position,
+            line_df.columns.get_loc("Overlay Source Text Height"),
+        ] = round(representative_source_height, 2)
+        line_df.iloc[
+            position,
+            line_df.columns.get_loc("Overlay Calibrated Start Font Size"),
+        ] = source_start_size
+        line_df.iloc[
+            position,
+            line_df.columns.get_loc("Overlay Font Family"),
+        ] = source_font_resolution.family
+        line_df.iloc[
+            position,
+            line_df.columns.get_loc("Overlay Font Path"),
+        ] = source_font_resolution.path
+        line_df.iloc[
+            position,
+            line_df.columns.get_loc("Overlay Font Face Index"),
+        ] = (
+            ""
+            if source_font_resolution.face_index is None
+            else source_font_resolution.face_index
+        )
+        line_df.iloc[
+            position,
+            line_df.columns.get_loc("Overlay Font Weight"),
+        ] = source_font_resolution.weight
         protected = [
             rect for owner, rect in all_source_rects if owner != position
         ] + externally_protected_rects
@@ -1221,8 +1406,20 @@ def _make_source_replacement_overlay(
                 row.get("Protected Identity Status", "not_applicable")
             ),
             "overlay_state": "preserved",
-            "baseline_font_size": baseline_size,
-            "minimum_font_size": minimum_size,
+            "baseline_font_size": source_start_size,
+            "representative_source_text_height": round(
+                representative_source_height,
+                2,
+            ),
+            "calibrated_start_font_size": source_start_size,
+            "calibrated_glyph_height": calibrated_glyph_height,
+            "absolute_minimum_font_size": _ABSOLUTE_MIN_FONT_PX,
+            "minimum_font_size": _ABSOLUTE_MIN_FONT_PX,
+            "font_family": source_font_resolution.family,
+            "font_path": source_font_resolution.path,
+            "font_face_index": source_font_resolution.face_index,
+            "font_weight": source_font_resolution.weight,
+            "target_language": source_font_resolution.target_language,
             "final_font_size": 0,
             "wrapped_line_count": 0,
             "expansion_x": 0.0,
@@ -1243,6 +1440,7 @@ def _make_source_replacement_overlay(
             counts["preserved_excluded"] += 1
             unit_diagnostics.append(diagnostic)
             continue
+        source_start_sizes.append(source_start_size)
         if processed >= max_labels:
             trust = "trusted"
             translated = translated or original
@@ -1283,7 +1481,10 @@ def _make_source_replacement_overlay(
                 continue
             _draw_plate(draw, badge, radius, outline=_WARNING)
             draw.text(
-                (badge[0] + padding, badge[1] + padding),
+                (
+                    badge[0] + padding,
+                    badge[1] + padding - marker_bbox[1],
+                ),
                 marker,
                 fill=_WARNING,
                 font=marker_font,
@@ -1295,12 +1496,13 @@ def _make_source_replacement_overlay(
             line_df.iloc[position, line_df.columns.get_loc("Overlay State")] = "warning_untrusted"
             line_df.iloc[position, line_df.columns.get_loc("Overflow Reason")] = "translation_untrusted"
             line_df.iloc[position, line_df.columns.get_loc("Footer Entry Type")] = "warning"
-            line_df.iloc[position, line_df.columns.get_loc("Overlay Font Size")] = baseline_size
+            line_df.iloc[position, line_df.columns.get_loc("Overlay Font Size")] = source_start_size
             counts["warning_untrusted"] += 1
+            final_font_sizes.append(source_start_size)
             diagnostic.update(
                 {
                     "overlay_state": "warning_untrusted",
-                    "final_font_size": baseline_size,
+                    "final_font_size": source_start_size,
                     "collision_decision": "accepted",
                     "overflow_reason": "translation_untrusted",
                     "marker": marker,
@@ -1327,14 +1529,14 @@ def _make_source_replacement_overlay(
         if horizontal_geometry and not overflow_reason:
             candidate_modes = []
             for font_size in _replacement_font_candidates(
-                baseline_size, minimum_size
+                source_start_size, _ABSOLUTE_MIN_FONT_PX
             ):
                 candidate_modes.extend(
                     ((font_size, False), (font_size, True))
                 )
             for font_size, allow_expansion in candidate_modes:
-                font = _load_overlay_font(font_size)
-                line_height = _line_height(draw, font)
+                font_resolution = _resolve_overlay_font(font_size, output_mode)
+                font = font_resolution.font
                 short_single_source_row = (
                     len(regions) == 1
                     and "\n" not in original
@@ -1393,6 +1595,7 @@ def _make_source_replacement_overlay(
                 lines, complete = _wrap_text_to_widths(translated, draw, font, widths[:max_lines])
                 if not complete or not lines:
                     continue
+                line_heights = _text_line_heights(draw, font, lines)
 
                 plate_rects = list(expanded_rects)
                 fit_metrics = {}
@@ -1419,10 +1622,10 @@ def _make_source_replacement_overlay(
                         )
                         vertical_padding = _bounded_vertical_padding(
                             available_height,
-                            line_height,
+                            line_heights[0],
                             text_padding,
                         )
-                        required_height = line_height + (
+                        required_height = line_heights[0] + (
                             vertical_padding
                             if vertical_padding is not None
                             else _MIN_VERTICAL_PLATE_PADDING
@@ -1475,8 +1678,10 @@ def _make_source_replacement_overlay(
                         plate_rects[0] = plate
                     else:
                         required_height = (
-                            len(lines) * line_height
-                            + max(0, len(lines) - 1) * max(2, padding // 2)
+                            _text_block_height(
+                                line_heights,
+                                max(2, padding // 2),
+                            )
                             + padding * 2
                         )
                         current = plate_rects[0]
@@ -1486,7 +1691,7 @@ def _make_source_replacement_overlay(
                         if (
                             needed_bottom
                             - (original_rects[0][3] + padding)
-                            > baseline_size
+                            > source_start_size
                         ):
                             continue
                         plate_rects[0] = (
@@ -1497,8 +1702,14 @@ def _make_source_replacement_overlay(
                         )
                 else:
                     for rect_index, current in enumerate(list(plate_rects)):
-                        needed_bottom = max(current[3], current[1] + line_height + padding * 2)
-                        if needed_bottom - (original_rects[rect_index][3] + padding) > baseline_size:
+                        corresponding_height = line_heights[
+                            min(rect_index, len(line_heights) - 1)
+                        ]
+                        needed_bottom = max(
+                            current[3],
+                            current[1] + corresponding_height + padding * 2,
+                        )
+                        if needed_bottom - (original_rects[rect_index][3] + padding) > source_start_size:
                             plate_rects = []
                             break
                         plate_rects[rect_index] = (
@@ -1512,9 +1723,14 @@ def _make_source_replacement_overlay(
                             last[0],
                             last[3],
                             last[2],
-                            min(float(height), last[3] + line_height + padding * 2),
+                            min(
+                                float(height),
+                                last[3]
+                                + line_heights[-1]
+                                + padding * 2,
+                            ),
                         )
-                        if extra[3] - last[3] > baseline_size + padding * 2:
+                        if extra[3] - last[3] > source_start_size + padding * 2:
                             continue
                         plate_rects.append(extra)
 
@@ -1524,8 +1740,8 @@ def _make_source_replacement_overlay(
                     continue
                 selected_layout = (
                     font_size,
-                    font,
-                    line_height,
+                    font_resolution,
+                    line_heights,
                     lines,
                     plate_rects,
                     "per_region",
@@ -1535,10 +1751,10 @@ def _make_source_replacement_overlay(
 
             if selected_layout is None and len(regions) > 1:
                 for font_size in _replacement_font_candidates(
-                    baseline_size, minimum_size
+                    source_start_size, _ABSOLUTE_MIN_FONT_PX
                 ):
-                    font = _load_overlay_font(font_size)
-                    line_height = _line_height(draw, font)
+                    font_resolution = _resolve_overlay_font(font_size, output_mode)
+                    font = font_resolution.font
                     corridor, blocking_region = _compound_source_corridor(
                         original_rects,
                         width,
@@ -1564,10 +1780,8 @@ def _make_source_replacement_overlay(
                         inner_width,
                     )
                     line_gap = max(2, padding // 2)
-                    text_height = (
-                        len(wrapped) * line_height
-                        + max(0, len(wrapped) - 1) * line_gap
-                    )
+                    line_heights = _text_line_heights(draw, font, wrapped)
+                    text_height = _text_block_height(line_heights, line_gap)
                     vertical_padding = _bounded_vertical_padding(
                         corridor_height,
                         text_height,
@@ -1580,7 +1794,7 @@ def _make_source_replacement_overlay(
                     )
                     allowed_lines = _corridor_line_capacity(
                         corridor_height,
-                        line_height,
+                        max(line_heights, default=1),
                         capacity_padding,
                         line_gap,
                     )
@@ -1632,8 +1846,8 @@ def _make_source_replacement_overlay(
                         continue
                     selected_layout = (
                         font_size,
-                        font,
-                        line_height,
+                        font_resolution,
+                        line_heights,
                         wrapped,
                         [plate],
                         "compound",
@@ -1644,13 +1858,14 @@ def _make_source_replacement_overlay(
         if selected_layout is not None:
             (
                 font_size,
-                font,
-                line_height,
+                font_resolution,
+                line_heights,
                 lines,
                 plate_rects,
                 layout_kind,
                 fit_metrics,
             ) = selected_layout
+            font = font_resolution.font
             for rect in plate_rects:
                 _draw_plate(draw, rect, radius)
             if len(regions) == 1 or layout_kind == "compound":
@@ -1659,7 +1874,7 @@ def _make_source_replacement_overlay(
                     plate_rects[0],
                     lines,
                     font,
-                    line_height,
+                    line_heights,
                     int(fit_metrics.get("text_padding", padding)),
                     vertical_padding=int(
                         fit_metrics.get("vertical_padding", padding)
@@ -1675,7 +1890,7 @@ def _make_source_replacement_overlay(
                         plate_rects[min(line_index, len(plate_rects) - 1)],
                         [line],
                         font,
-                        line_height,
+                        [line_heights[min(line_index, len(line_heights) - 1)]],
                         padding,
                     )
             used_slots.extend(plate_rects)
@@ -1700,6 +1915,7 @@ def _make_source_replacement_overlay(
             expanded = expansion_x > padding + 0.1 or expansion_y > padding + 0.1
             state = "expanded_replacement" if expanded else "replacement"
             counts[state] += 1
+            final_font_sizes.append(font_size)
             max_expansion_x = max(max_expansion_x, expansion_x)
             max_expansion_y = max(max_expansion_y, expansion_y)
             line_df.iloc[position, line_df.columns.get_loc("Overlay State")] = state
@@ -1723,6 +1939,10 @@ def _make_source_replacement_overlay(
                     "expansion_x": round(expansion_x, 1),
                     "expansion_y": round(expansion_y, 1),
                     "collision_decision": "accepted",
+                    "font_family": font_resolution.family,
+                    "font_path": font_resolution.path,
+                    "font_face_index": font_resolution.face_index,
+                    "font_weight": font_resolution.weight,
                     **fit_metrics,
                 }
             )
@@ -1772,18 +1992,23 @@ def _make_source_replacement_overlay(
         marker_bbox = draw.textbbox((0, 0), marker, font=marker_font)
         first_rect = overflow_rects[0]
         marker_x = first_rect[0] + padding
-        marker_y = first_rect[1] + max(
+        marker_ink_y = first_rect[1] + max(
             padding,
             ((first_rect[3] - first_rect[1]) - (marker_bbox[3] - marker_bbox[1])) / 2.0,
         )
-        draw.text((marker_x, marker_y), marker, fill=_TEAL, font=marker_font)
+        draw.text(
+            (marker_x, marker_ink_y - marker_bbox[1]),
+            marker,
+            fill=_TEAL,
+            font=marker_font,
+        )
         used_slots.extend(overflow_rects)
         footer_entries.append({"marker": marker, "text": translated, "type": "overflow"})
         line_df.iloc[position, line_df.columns.get_loc("Overlay Marker")] = marker
         line_df.iloc[position, line_df.columns.get_loc("Overlay State")] = "overflow"
         line_df.iloc[position, line_df.columns.get_loc("Overflow Reason")] = fit_reason
         line_df.iloc[position, line_df.columns.get_loc("Footer Entry Type")] = "overflow"
-        line_df.iloc[position, line_df.columns.get_loc("Overlay Font Size")] = baseline_size
+        line_df.iloc[position, line_df.columns.get_loc("Overlay Font Size")] = _ABSOLUTE_MIN_FONT_PX
         line_df.iloc[position, line_df.columns.get_loc("Overlay Wrapped Lines")] = 1
         line_df.iloc[position, line_df.columns.get_loc("Overlay Collision")] = "accepted"
         line_df.iloc[position, line_df.columns.get_loc("Overlay Available Corridor Width")] = diagnostic["available_corridor_width"]
@@ -1793,10 +2018,11 @@ def _make_source_replacement_overlay(
         line_df.iloc[position, line_df.columns.get_loc("Overlay Allowed Lines")] = diagnostic["allowed_line_count"]
         line_df.iloc[position, line_df.columns.get_loc("Overlay Blocking Region")] = str(diagnostic["blocking_protected_region"])
         counts["overflow"] += 1
+        final_font_sizes.append(_ABSOLUTE_MIN_FONT_PX)
         diagnostic.update(
             {
                 "overlay_state": "overflow",
-                "final_font_size": baseline_size,
+                "final_font_size": _ABSOLUTE_MIN_FONT_PX,
                 "wrapped_line_count": 1,
                 "collision_decision": "accepted",
                 "overflow_reason": fit_reason,
@@ -1815,6 +2041,22 @@ def _make_source_replacement_overlay(
         unit_diagnostics.append(diagnostic)
 
     drawn_count = counts["replacement"] + counts["expanded_replacement"] + counts["overflow"] + counts["warning_untrusted"]
+    resolver_summary = {
+        "target_language": image_font_resolution.target_language,
+        "font_family": image_font_resolution.family,
+        "font_path": image_font_resolution.path,
+        "font_face_index": image_font_resolution.face_index,
+        "font_weight": image_font_resolution.weight,
+    }
+    final_size_summary = {
+        "minimum": min(final_font_sizes) if final_font_sizes else 0,
+        "maximum": max(final_font_sizes) if final_font_sizes else 0,
+        "median": (
+            float(statistics.median(final_font_sizes))
+            if final_font_sizes
+            else 0.0
+        ),
+    }
     if drawn_count == 0:
         line_df.attrs["overlay_renderer_diagnostics"] = {
             "renderer": "source_replacement",
@@ -1826,17 +2068,27 @@ def _make_source_replacement_overlay(
             "max_expansion_x": 0.0,
             "max_expansion_y": 0.0,
             "protected_region_collision_rejections": collision_rejections,
+            "font_resolver": resolver_summary,
+            "absolute_minimum_font_size": _ABSOLUTE_MIN_FONT_PX,
+            "final_font_size_summary": final_size_summary,
             "overlay_generation_time": round(time.perf_counter() - started, 4),
             "units": unit_diagnostics,
         }
         return None, request_warning, pd.DataFrame()
 
+    footer_size = max(
+        _ABSOLUTE_MIN_FONT_PX,
+        int(round(statistics.median(source_start_sizes)))
+        if source_start_sizes
+        else _ABSOLUTE_MIN_FONT_PX,
+    )
+    footer_resolution = _resolve_overlay_font(footer_size, output_mode)
     final_image, footer_height = _render_translation_footer(
         canvas,
         footer_entries,
         output_mode,
-        _load_overlay_font(baseline_size),
-        marker_font,
+        footer_resolution.font,
+        footer_resolution.font,
         padding,
     )
     diagnostics = {
@@ -1849,6 +2101,10 @@ def _make_source_replacement_overlay(
         "max_expansion_x": round(max_expansion_x, 1),
         "max_expansion_y": round(max_expansion_y, 1),
         "protected_region_collision_rejections": collision_rejections,
+        "font_resolver": resolver_summary,
+        "footer_font_size": footer_size,
+        "absolute_minimum_font_size": _ABSOLUTE_MIN_FONT_PX,
+        "final_font_size_summary": final_size_summary,
         "overlay_generation_time": round(time.perf_counter() - started, 4),
         "units": unit_diagnostics,
     }
