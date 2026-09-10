@@ -172,9 +172,15 @@ def term_from_row(row: Mapping[str, object], output_mode: str, prefer_abbrev: bo
     if output_mode == "Simplified Chinese":
         return to_simplified(str(row.get("Chinese_term", "") or row.get("US_term", "")).strip())
     if output_mode in ["English — US", "English US terms"]:
-        return str((row.get("US_abb", "") if prefer_abbrev else row.get("US_term", "")) or row.get("US_term", "")).strip()
+        abbreviation = row.get("US_abb", "") if prefer_abbrev else ""
+        if abbreviation:
+            return (split_aliases(abbreviation) or [str(abbreviation).strip()])[0]
+        return str(row.get("US_term", "")).strip()
     if output_mode in ["English — UK", "English UK terms"]:
-        return str((row.get("UK_abb", "") if prefer_abbrev else row.get("UK_term", "")) or row.get("UK_term", "") or row.get("US_term", "")).strip()
+        abbreviation = row.get("UK_abb", "") if prefer_abbrev else ""
+        if abbreviation:
+            return (split_aliases(abbreviation) or [str(abbreviation).strip()])[0]
+        return str(row.get("UK_term", "") or row.get("US_term", "")).strip()
     if output_mode == "Japanese":
         return str(row.get("Japanese", "") or row.get("US_term", "")).strip()
     return str(row.get("Chinese_term", "") or row.get("US_term", "")).strip()

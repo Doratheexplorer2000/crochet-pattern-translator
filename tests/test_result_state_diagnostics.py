@@ -173,19 +173,18 @@ class ResultStateDiagnosticsTests(unittest.TestCase):
         self.assertIn('diagnostic_action="png"', self.app_source)
         self.assertIn('diagnostic_action="txt"', self.app_source)
 
-    def test_diagnostic_receipt_and_handler_entry_are_distinct(self):
-        diagnostic_position = self.app_source.index(
-            'key="prepare_debug_report_download"'
-        )
+    def test_diagnostic_preparation_precedes_single_native_download(self):
+        diagnostic_position = self.app_source.index('key="download_debug_report_txt"')
         nearby_source = self.app_source[
-            diagnostic_position - 500:diagnostic_position + 900
+            diagnostic_position - 2400:diagnostic_position + 300
         ]
 
-        self.assertIn("on_click=note_diagnostic_action_received", nearby_source)
-        self.assertIn('"post_result_action_received"', nearby_source)
         self.assertIn('"post_result_action_handler_enter"', nearby_source)
         self.assertIn('action="diagnostic"', nearby_source)
-        self.assertIn('"diagnostic_report_begin"', self.app_source)
+        self.assertIn('"diagnostic_report_begin"', nearby_source)
+        self.assertIn('on_click="ignore"', nearby_source)
+        self.assertNotIn('key="prepare_debug_report_download"', self.app_source)
+        self.assertNotIn("note_diagnostic_action_received", self.app_source)
 
     def test_all_result_clear_reasons_are_instrumented(self):
         for reason in (

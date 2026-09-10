@@ -124,7 +124,8 @@ def merge_ocr_boxes_into_visual_lines(
 
     if "min_y" not in rows.columns or "max_y" not in rows.columns:
         rows = rows.sort_values(["y", "global_x" if "global_x" in rows.columns else "x"]).reset_index(drop=True)
-        return rows
+        records = [_merge_ocr_cluster([row]) for _, row in rows.iterrows()]
+        return _assign_visual_line_metadata(pd.DataFrame(records))
 
     rows["_cy"] = (rows["min_y"].fillna(rows.get("y", 0)) + rows["max_y"].fillna(rows.get("y", 0))) / 2
     rows["_h"] = (rows["max_y"].fillna(rows.get("y", 0) + 20) - rows["min_y"].fillna(rows.get("y", 0))).abs()
@@ -178,7 +179,38 @@ def merge_ocr_boxes_into_visual_lines(
     out = pd.DataFrame(merged_records)
     if out.empty:
         return rows.drop(columns=[c for c in ["_cy", "_h"] if c in rows.columns], errors="ignore")
-    return out.sort_values(["min_y", "min_x"]).reset_index(drop=True)
+    return _assign_visual_line_metadata(
+        out.sort_values(["min_y", "min_x"]).reset_index(drop=True)
+    )
+
+
+def _member_boxes_from_row(row: object) -> list:
+    existing = row.get("Member Boxes", ())
+    if isinstance(existing, (list, tuple)) and existing:
+        return [dict(member) for member in existing if isinstance(member, dict)]
+    min_x = float(row.get("min_x", row.get("x", 0)) or 0)
+    max_x = float(row.get("max_x", row.get("x", min_x) + 80) or (min_x + 80))
+    min_y = float(row.get("min_y", row.get("y", 0)) or 0)
+    max_y = float(row.get("max_y", row.get("y", min_y) + 20) or (min_y + 20))
+    return [
+        {
+            "text": str(row.get("text", "")).strip(),
+            "confidence": round(float(row.get("confidence", 0) or 0), 3),
+            "min_x": min_x,
+            "max_x": max_x,
+            "min_y": min_y,
+            "max_y": max_y,
+        }
+    ]
+
+
+def _assign_visual_line_metadata(rows: pd.DataFrame) -> pd.DataFrame:
+    if rows is None or rows.empty:
+        return pd.DataFrame()
+    out = rows.copy().reset_index(drop=True)
+    out["Visual Line ID"] = [f"visual-{index:04d}" for index in range(len(out))]
+    out["Reading Order"] = list(range(len(out)))
+    return out
 
 
 def _merge_ocr_cluster(cluster: list) -> Dict[str, object]:
@@ -192,6 +224,10 @@ def _merge_ocr_cluster(cluster: list) -> Dict[str, object]:
     max_x = max(float(row.get("max_x", row.get("x", 0) + 80) or 80) for row in cluster)
     min_y = min(float(row.get("min_y", row.get("y", 0)) or 0) for row in cluster)
     max_y = max(float(row.get("max_y", row.get("y", 0) + 20) or 20) for row in cluster)
+    member_boxes = []
+    for row in cluster:
+        member_boxes.extend(_member_boxes_from_row(row))
+    member_boxes.sort(key=lambda item: (item["min_y"], item["min_x"]))
     return {
         "text": text,
         "confidence": sum(confs) / len(confs) if confs else 0,
@@ -203,7 +239,33 @@ def _merge_ocr_cluster(cluster: list) -> Dict[str, object]:
         "min_y": min_y,
         "max_y": max_y,
         "source": "visual line merge",
+        "Member Boxes": tuple(member_boxes),
     }
+
+
+def _source_regions_for_visual_row(row: object, source_segment_id: str = "") -> tuple:
+    min_x = float(row.get("min_x", row.get("x", 0)) or 0)
+    max_x = float(row.get("max_x", row.get("x", min_x) + 80) or (min_x + 80))
+    min_y = float(row.get("min_y", row.get("y", 0)) or 0)
+    max_y = float(row.get("max_y", row.get("y", min_y) + 20) or (min_y + 20))
+    return (
+        {
+            "source_segment_id": source_segment_id,
+            "visual_line_id": str(row.get("Visual Line ID", "")),
+            "reading_order": int(row.get("Reading Order", 0) or 0),
+            "text": str(row.get("text", "")).strip(),
+            "confidence": round(float(row.get("confidence", 0) or 0), 3),
+            "member_boxes": tuple(_member_boxes_from_row(row)),
+            "min_x": min_x,
+            "max_x": max_x,
+            "min_y": min_y,
+            "max_y": max_y,
+        },
+    )
+
+
+def _annotate_overlay_metadata(line_df: pd.DataFrame) -> pd.DataFrame:
+    return pattern_document.annotate_overlay_content(line_df)
 
 
 def _parenthesis_balance(text: str) -> int:
@@ -367,11 +429,15 @@ def _source_preserving_line_df(rows: pd.DataFrame) -> pd.DataFrame:
                 "max_x": max_x,
                 "min_y": min_y,
                 "max_y": max_y,
+                "Visual Line ID": str(row.get("Visual Line ID", "")),
+                "Reading Order": int(row.get("Reading Order", 0) or 0),
+                "Member Boxes": tuple(_member_boxes_from_row(row)),
+                "Source Regions": _source_regions_for_visual_row(row),
             }
         )
     if not out:
         raise broad_translation.BroadTranslationError()
-    return pd.DataFrame(out)
+    return _annotate_overlay_metadata(pd.DataFrame(out))
 
 
 @profile_function("line-by-line translation: build_ocr_line_translations", "build_ocr_line_translations calls")
@@ -411,15 +477,19 @@ def build_ocr_line_translations(
     _profile_count("merged OCR lines", len(rows))
 
     if broad_route:
+        semantic_rows = rows.copy()
+        semantic_rows["semantic_text"] = semantic_rows["text"].map(
+            line_translation.clean_single_ocr_line
+        )
         try:
-            return broad_translation.translate_merged_ocr_lines_broad(
-                rows,
+            return _annotate_overlay_metadata(broad_translation.translate_merged_ocr_lines_broad(
+                semantic_rows,
                 source_mode=source_mode,
                 output_mode=output_mode,
                 diagnostic_logger=diagnostic_logger,
                 profile_count=_profile_count,
                 profile_add_time=_profile_add_time,
-            )
+            ))
         except broad_translation.BroadRecoverableError as error:
             if diagnostic_logger is not None:
                 diagnostic_logger(
@@ -457,7 +527,7 @@ def build_ocr_line_translations(
                     retry_attempted=error.retry_attempted,
                     deterministic_legacy_fallback_ran=True,
                 )
-            return result
+            return _annotate_overlay_metadata(result)
 
     deterministic_start = time.perf_counter()
     if diagnostic_logger is not None:
@@ -625,6 +695,10 @@ def build_ocr_line_translations(
             "max_x": float(row.get("max_x", row.get("x", 0) + 80)),
             "min_y": float(row.get("min_y", row.get("y", 0))),
             "max_y": float(row.get("max_y", row.get("y", 0) + 20)),
+            "Visual Line ID": str(row.get("Visual Line ID", "")),
+            "Reading Order": int(row.get("Reading Order", position) or position),
+            "Member Boxes": tuple(_member_boxes_from_row(row)),
+            "Source Regions": _source_regions_for_visual_row(row),
         })
     if diagnostic_logger is not None:
         diagnostic_logger(
@@ -643,4 +717,4 @@ def build_ocr_line_translations(
             visual_line_count=len(result),
             outcome="success",
         )
-    return result
+    return _annotate_overlay_metadata(result)

@@ -183,9 +183,17 @@ def assess_image_quality(
             component_metrics = _main_text_height_metrics([])
     except Exception:
         gray = np.dot(pixels[..., :3], [0.299, 0.587, 0.114])
-        gradient_y, gradient_x = np.gradient(gray.astype(float))
-        sharpness = float((gradient_x ** 2 + gradient_y ** 2).mean())
+        if min(gray.shape) >= 2:
+            gradient_y, gradient_x = np.gradient(gray.astype(float))
+            sharpness = float((gradient_x ** 2 + gradient_y ** 2).mean())
+        else:
+            sharpness = 0.0
         contrast = float(gray.std())
+
+    if not math.isfinite(sharpness):
+        sharpness = 0.0
+    if not math.isfinite(contrast):
+        contrast = 0.0
 
     errors, warnings, classification_reason = _classify_image_quality(
         sharpness,
@@ -216,6 +224,24 @@ def get_quality_status(
     if warnings:
         return "fair", "🟡 Fair", "OCR may contain some errors."
     return "good", "🟢 Good", "Image quality looks suitable for OCR."
+
+
+def apply_select_area_empty_gate(
+    errors: List[str],
+    warnings: List[str],
+    metrics: Dict[str, object],
+    area_mode: str,
+) -> Tuple[List[str], List[str], Dict[str, object]]:
+    """Block an evidence-free selected crop without changing Whole Pattern policy."""
+    if (
+        area_mode == "Select Area"
+        and float(metrics.get("contrast_score") or 0) < 2
+        and float(metrics.get("sharpness_score") or 0) < 2
+    ):
+        updated_metrics = dict(metrics)
+        updated_metrics["classification_reason"] = "blank_or_near_empty"
+        return ["The selected image area appears blank or nearly empty."], [], updated_metrics
+    return errors, warnings, metrics
 
 
 def load_database_dataframe() -> pd.DataFrame:
@@ -1405,11 +1431,23 @@ def translate_image(request: TranslateImageRequest) -> TranslateImageResult:
 
         overlay_start = time.perf_counter()
         log_downstream_timing("overlay_begin")
+        overlay_kwargs = {
+            "scale_to_source_text": area_mode == "Select Area",
+        }
+        if overlay_engine.is_source_replacement_overlay_enabled():
+            # Filtered branding, watermark, and chrome rows remain visible in the
+            # source image and must still be protected from plate expansion.
+            overlay_kwargs["protected_ocr_rows"] = removed_noise_df
         overlay_image, overlay_legend, overlay_legend_df = overlay_engine.make_line_translation_overlay(
             working_image,
             line_df,
             output_mode,
-            scale_to_source_text=area_mode == "Select Area",
+            **overlay_kwargs,
+        )
+        overlay_renderer_diagnostics = dict(
+            line_df.attrs.get("overlay_renderer_diagnostics", {})
+            if line_df is not None
+            else {}
         )
         overlay_seconds = time.perf_counter() - overlay_start
         log_downstream_timing(
@@ -1483,6 +1521,9 @@ def translate_image(request: TranslateImageRequest) -> TranslateImageResult:
         "overlay_png": overlay_png,
         "overlay_legend": overlay_legend,
         "overlay_legend_df": overlay_legend_df,
+        "overlay_renderer": str(
+            overlay_renderer_diagnostics.get("renderer", "legacy") or "legacy"
+        ),
         "raw_ocr_text": raw_ocr_text,
         "clean_text": clean_text,
         "line_df": line_df,
@@ -1520,6 +1561,7 @@ def translate_image(request: TranslateImageRequest) -> TranslateImageResult:
             "ocr_call_trace": list(ocr_call_trace),
             "downscale_diagnostics": downscale_diagnostics,
             "ocr_resize_test": ocr_resize_test,
+            "overlay_renderer_diagnostics": overlay_renderer_diagnostics,
             "interface_language": request.interface_language,
             "platform": delivery_diagnostic_platform,
         },

@@ -1,6 +1,16 @@
 # Crochet Pattern Translator Project Status
 
-Last updated: 2026-09-07
+Last updated: 2026-09-10
+
+## Pending Soft Launch Correction Release — 2026-09-10
+
+The current local release candidate implements the approved Soft Launch corrections and is ready for release review. Automated validation passed `560 / 560`, the latest `git diff --check` passed, and Kerry and Penguin Human UAT passed. This release candidate has not been pushed or deployed. Production remains on `f1a9b45cad9e361bcdeb4c7066fe66f1d45ec07d`; production smoke UAT and a Railway/Linux performance benchmark are still required after deployment.
+
+The correction set covers the official feedback-form URL; `K3` skip, `BOB` Bobble, attached row-punctuation, and Simplified Chinese X/V/A translation; Broad validator false-rejection fixes and rejection reason diagnostics; broad translation of trusted readable text with exact preservation of protected identity spans; Select Area quality gating; localized single OCR-running state; one-click Diagnostic Report; improved numbered-marker guidance; and one-shot post-success scrolling to Translation Result.
+
+The source-replacement overlay is implemented behind `PATTERN_SOURCE_REPLACEMENT_OVERLAY_ENABLED`. The code default is **OFF**, local Kerry and Penguin UAT passed, and any production activation requires an explicit later environment/config action. In this mode, trusted text replaces its source in anchored plates using safe expansion and bounded font reduction. Genuine overflow uses a source marker and appended footer; the original canvas is retained; floating legacy labels are not used; `@handles` and other protected identity spans remain exact; surrounding natural language, including `all rights reserved`, may translate; and unresolved or untrusted content stays source-preserved.
+
+Local macOS ARM performance is not representative of Railway: PaddleOCR latency was highly variable, a native Paddle/Accelerate crash occurred, and a controlled cold-worker call exceeded 120 seconds inside `predict()`. No safe application-level optimization is justified by that evidence. Railway/Linux measurement is the next performance validation step after deployment.
 
 ## Current Version
 

@@ -901,6 +901,127 @@ def _format_ai_fallback_diagnostics(
     return "\n".join(lines)
 
 
+def _format_broad_validation_diagnostics(line_df: Optional[pd.DataFrame]) -> str:
+    if (
+        line_df is None
+        or line_df.empty
+        or "Validation Status" not in line_df.columns
+    ):
+        return "No Broad validation metadata captured."
+    statuses = line_df["Validation Status"].fillna("").astype(str)
+    rejected = line_df[statuses.eq("unresolved")]
+    reason_counts: Dict[str, int] = {}
+    rejected_units: List[str] = []
+    for index, row in rejected.iterrows():
+        reason = str(row.get("Validation Failure Reason", "") or "unclassified")
+        reason_counts[reason] = reason_counts.get(reason, 0) + 1
+        unit_id = str(row.get("Semantic Unit ID", "") or f"row-{index}")
+        rejected_units.append(f"{unit_id}={reason}")
+    return "\n".join(
+        [
+            f"Broad units accepted: {int(statuses.eq('validated').sum())}",
+            f"Broad units rejected: {len(rejected)}",
+            "Validator rejection reason counts: "
+            + (
+                ", ".join(
+                    f"{reason}={count}" for reason, count in sorted(reason_counts.items())
+                )
+                if reason_counts
+                else "None"
+            ),
+            "Rejected semantic units: "
+            + (", ".join(rejected_units) if rejected_units else "None"),
+            "Raw provider output retained: No",
+        ]
+    )
+
+
+def _format_overlay_renderer_diagnostics(diagnostics: Optional[Dict[str, object]]) -> str:
+    diagnostics = diagnostics or {}
+    if not diagnostics:
+        return "Source-replacement renderer not enabled for this result."
+    lines = [
+        f"Renderer: {_debug_cell(diagnostics.get('renderer', ''))}",
+        f"Original dimensions: {_debug_cell(diagnostics.get('original_dimensions', ''))}",
+        f"Final dimensions: {_debug_cell(diagnostics.get('final_dimensions', ''))}",
+        f"Footer entries: {_debug_cell(diagnostics.get('footer_entry_count', 0))}",
+        f"Footer height: {_debug_cell(diagnostics.get('footer_height', 0))}",
+        f"Replacement count: {_debug_cell(diagnostics.get('replacement', 0))}",
+        f"Expanded replacement count: {_debug_cell(diagnostics.get('expanded_replacement', 0))}",
+        f"Overflow count: {_debug_cell(diagnostics.get('overflow', 0))}",
+        f"Warning/untrusted count: {_debug_cell(diagnostics.get('warning_untrusted', 0))}",
+        f"Preserved/excluded count: {_debug_cell(diagnostics.get('preserved_excluded', 0))}",
+        f"Maximum horizontal expansion: {_debug_cell(diagnostics.get('max_expansion_x', 0))}",
+        f"Maximum vertical expansion: {_debug_cell(diagnostics.get('max_expansion_y', 0))}",
+        "Protected-region collision rejections: "
+        f"{_debug_cell(diagnostics.get('protected_region_collision_rejections', 0))}",
+        f"Renderer time: {_debug_cell(diagnostics.get('overlay_generation_time', 0))} sec",
+    ]
+    units = diagnostics.get("units", [])
+    if isinstance(units, list) and units:
+        lines.extend(["", "Per-unit decisions:"])
+        for index, unit in enumerate(units):
+            if not isinstance(unit, dict):
+                continue
+            lines.append(
+                "{unit} | segments={segments} | regions={regions} | members={members} | "
+                "content={content} | trust={trust} | protected_spans={protected_count} "
+                "{protected_values} | "
+                "protected_status={protected_status} | state={state} | font={baseline}->{final} | "
+                "minimum_font={minimum} | "
+                "lines={wrapped} | expansion={expand_x},{expand_y} | collision={collision} | "
+                "corridor={available_width}x{available_height} | required={required_width}x{required_height} | "
+                "allowed_lines={allowed_lines} | actual_lines={actual_lines} | blocker={blocker} | "
+                "overflow={overflow} | marker={marker}".format(
+                    unit=_debug_cell(unit.get("semantic_unit_id", "")) or f"row-{index}",
+                    segments=_debug_cell(unit.get("source_segment_ids", "")),
+                    regions=_debug_cell(unit.get("source_region_count", 0)),
+                    members=_debug_cell(unit.get("member_box_count", 0)),
+                    content=_debug_cell(unit.get("content_category", "")),
+                    trust=_debug_cell(unit.get("trust_status", "")),
+                    protected_count=_debug_cell(
+                        unit.get("protected_identity_span_count", 0)
+                    ),
+                    protected_values=_debug_cell(
+                        unit.get("protected_identity_spans", "")
+                    ),
+                    protected_status=_debug_cell(
+                        unit.get("protected_identity_status", "not_applicable")
+                    ),
+                    state=_debug_cell(unit.get("overlay_state", "")),
+                    baseline=_debug_cell(unit.get("baseline_font_size", 0)),
+                    final=_debug_cell(unit.get("final_font_size", 0)),
+                    minimum=_debug_cell(unit.get("minimum_font_size", 0)),
+                    wrapped=_debug_cell(unit.get("wrapped_line_count", 0)),
+                    expand_x=_debug_cell(unit.get("expansion_x", 0)),
+                    expand_y=_debug_cell(unit.get("expansion_y", 0)),
+                    collision=_debug_cell(unit.get("collision_decision", "")),
+                    available_width=_debug_cell(
+                        unit.get("available_corridor_width", 0)
+                    ),
+                    available_height=_debug_cell(
+                        unit.get("available_corridor_height", 0)
+                    ),
+                    required_width=_debug_cell(
+                        unit.get("required_rendered_width", 0)
+                    ),
+                    required_height=_debug_cell(
+                        unit.get("required_rendered_height", 0)
+                    ),
+                    allowed_lines=_debug_cell(unit.get("allowed_line_count", 0)),
+                    actual_lines=_debug_cell(
+                        unit.get("actual_wrapped_line_count", 0)
+                    ),
+                    blocker=_debug_cell(
+                        unit.get("blocking_protected_region", "")
+                    ),
+                    overflow=_debug_cell(unit.get("overflow_reason", "")),
+                    marker=_debug_cell(unit.get("marker", "")),
+                )
+            )
+    return "\n".join(lines)
+
+
 def _format_session_diagnostics(diagnostics: Optional[Dict[str, object]]) -> str:
     diagnostics = diagnostics or {}
     lines = [
@@ -967,6 +1088,7 @@ def build_debug_report_text(
     rc11e_normalization_diagnostics: Optional[Dict[str, object]] = None,
     rc11f_cache_diagnostics: Optional[Dict[str, object]] = None,
     rc11g_lookup_index_diagnostics: Optional[Dict[str, object]] = None,
+    overlay_renderer_diagnostics: Optional[Dict[str, object]] = None,
 ) -> str:
     """Developer-facing diagnostic export for beta testing."""
     quality_metrics = quality_metrics or {}
@@ -1057,6 +1179,9 @@ def build_debug_report_text(
         "=== Translation Statistics ===",
         _format_rc11c_translation_diagnostics(rc11c_translation_diagnostics),
         "",
+        "=== Broad Validation Diagnostics ===",
+        _format_broad_validation_diagnostics(line_df),
+        "",
         "=== Translation Cost Summary ===",
         _format_rc11c_translation_cost_summary(rc11c_translation_diagnostics),
         "",
@@ -1074,6 +1199,9 @@ def build_debug_report_text(
         "",
         "=== Overlay Legend ===",
         legend_text.strip() or "Not captured",
+        "",
+        "=== Overlay Renderer Diagnostics ===",
+        _format_overlay_renderer_diagnostics(overlay_renderer_diagnostics),
         "",
         "=== Performance ===",
         "",

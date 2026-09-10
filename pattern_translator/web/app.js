@@ -608,6 +608,9 @@ function showResult(body) {
   $("txt-download").href = state.txtUrl;
   $("txt-download").download = "crochet_translation.txt";
   $("translation-text").textContent = body.readable_translation || body.translation_txt || "";
+  $("overlay-guide-body").textContent = body.overlay_renderer === "source_replacement"
+    ? text.overlayGuideBodyReplacement
+    : text.overlayGuideBody;
   state.diagnosticContext = body.diagnostic_context && typeof body.diagnostic_context === "object"
     ? body.diagnostic_context
     : null;

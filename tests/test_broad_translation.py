@@ -91,6 +91,140 @@ class BroadValidationRegressionTests(unittest.TestCase):
     def test_blank_translation_rejected(self):
         self._assert_rejects("Materials", "", en_us_source=True)
 
+    def test_penguin_r6_accepts_semantically_equivalent_surface_variants(self):
+        source = (
+            "R6: 11sc, *CC to white* BOB, *CC to dark gray* 3sc, "
+            "*CC to white*\nBOB, *CC to dark gray* 8sc (24)"
+        )
+        variants = (
+            (
+                "R6：11 短針，*換成白色* 棗形針，*換成深灰色* 3 短針，"
+                "*換成白色* 棗形針，*換成深灰色* 8 短針（24）"
+            ),
+            (
+                "第6圈：11 個短針；換配色至白色—棗形針；換配色至深灰色—"
+                "3 個短針；換配色至白色—棗形針；換配色至深灰色—8 個短針（共24針）"
+            ),
+            (
+                "R6（第6圈）：11 個短針，換成白色，棗形針，換成深灰色，"
+                "3 個短針，換成白色，棗形針，換成深灰色，8 個短針（共24針）"
+            ),
+        )
+        for translation in variants:
+            with self.subTest(translation=translation):
+                self._assert_accepts(source, translation, en_us_source=True)
+
+    def test_penguin_r6_material_semantic_changes_remain_rejected(self):
+        source = (
+            "R6: 11sc, *CC to white* BOB, *CC to dark gray* 3sc, "
+            "*CC to white*\nBOB, *CC to dark gray* 8sc (24)"
+        )
+        invalid_variants = {
+            "missing_bobble": (
+                "R6：11 短針，換成白色，換成深灰色，3 短針，換成白色，"
+                "棗形針，換成深灰色，8 短針（24）"
+            ),
+            "wrong_11_count": (
+                "R6：12 短針，換成白色，棗形針，換成深灰色，3 短針，"
+                "換成白色，棗形針，換成深灰色，8 短針（24）"
+            ),
+            "wrong_3_count": (
+                "R6：11 短針，換成白色，棗形針，換成深灰色，4 短針，"
+                "換成白色，棗形針，換成深灰色，8 短針（24）"
+            ),
+            "wrong_8_count": (
+                "R6：11 短針，換成白色，棗形針，換成深灰色，3 短針，"
+                "換成白色，棗形針，換成深灰色，9 短針（24）"
+            ),
+            "missing_total": (
+                "R6：11 短針，換成白色，棗形針，換成深灰色，3 短針，"
+                "換成白色，棗形針，換成深灰色，8 短針"
+            ),
+            "invented_count": (
+                "R6：11 短針，換成白色，棗形針，換成深灰色，3 短針，"
+                "換成白色，棗形針，換成深灰色，8 短針，另加 2 短針（24）"
+            ),
+            "dropped_colour_changes": (
+                "R6：11 短針，白色棗形針，3 短針，白色棗形針，8 短針（24）"
+            ),
+            "changed_stitch_identity": (
+                "R6：11 長針，換成白色，棗形針，換成深灰色，3 長針，"
+                "換成白色，棗形針，換成深灰色，8 長針（24）"
+            ),
+        }
+        for case, translation in invalid_variants.items():
+            with self.subTest(case=case):
+                self._assert_rejects(source, translation, en_us_source=True)
+
+    def test_identity_duplicate_allowance_is_equivalence_scoped(self):
+        source = "R6: 11sc (11)"
+        invalid_variants = (
+            "R6 R6：11 短針（11）",
+            "R6（第6行）：11 短針（11）",
+            "R6（第6圈）：11 短針（11），另加6短針",
+            "R6（第7圈）：11 短針（11）",
+        )
+        for translation in invalid_variants:
+            with self.subTest(translation=translation):
+                self._assert_rejects(source, translation, en_us_source=True)
+
+    def test_penguin_r6_full_broad_path_accepts_merged_valid_unit(self):
+        rows = pd.DataFrame(
+            [
+                _ocr_row(
+                    "R6: 11sc, *CC to white* BOB, *CC to dark gray* 3sc, "
+                    "*CC to white*",
+                    min_y=10,
+                    max_y=20,
+                ),
+                _ocr_row(
+                    "BOB, *CC to dark gray* 8sc (24)",
+                    min_y=21,
+                    max_y=30,
+                ),
+            ]
+        )
+        translated = (
+            "R6（第6圈）：11 個短針，換成白色，棗形針，換成深灰色，"
+            "3 個短針，換成白色，棗形針，換成深灰色，8 個短針（共24針）"
+        )
+
+        def fake_luna(prompt, api_key):
+            self.assertEqual("test-key", api_key)
+            payload = json.loads(prompt.split("INPUT: ", 1)[1])
+            concept_ids = {
+                entry["concept_id"]
+                for entry in payload["authoritative_crochet_glossary"]
+            }
+            self.assertIn("st_003_single_crochet", concept_ids)
+            self.assertIn("st_040_puff_stitch", concept_ids)
+            segment_ids = [
+                segment["source_segment_id"] for segment in payload["source_segments"]
+            ]
+            response = _keyed_response_from_units(
+                [{"source_segment_ids": segment_ids, "translation": translated}]
+            )
+            return {
+                "output": [
+                    {
+                        "content": [
+                            {"type": "output_text", "text": json.dumps(response)}
+                        ]
+                    }
+                ]
+            }, 0.01
+
+        result = broad_translation.translate_merged_ocr_lines_broad(
+            rows,
+            source_mode="English — US",
+            output_mode="Traditional Chinese",
+            environ={"OPENAI_API_KEY": "test-key"},
+            luna_caller=fake_luna,
+        )
+        self.assertEqual(1, len(result))
+        self.assertEqual("validated", result.loc[0, "Validation Status"])
+        self.assertEqual(translated, result.loc[0, "Translation"])
+
     def test_round_total_conflation_rejected(self):
         self._assert_rejects("Rnd 2: 6 sc (12)", "第12圈：6短針", en_us_source=True)
 
@@ -418,6 +552,29 @@ class BroadValidationRegressionTests(unittest.TestCase):
             units,
             segments,
             _route_config("English — US", "Simplified Chinese"),
+        )
+
+    def test_cardinal_crochet_count_may_use_matching_arabic_digit(self):
+        self._assert_accepts(
+            "*Optional: sew on the nose between the middle of the eyes, one row "
+            "down (or do it at the end)",
+            "*可選：將鼻子縫在雙眼中間，向下 1 行（或最後再縫）",
+            en_us_source=True,
+        )
+
+    def test_cardinal_count_allowance_does_not_hide_unrelated_extra_digit(self):
+        self._assert_rejects(
+            "*Optional: sew on the nose between the middle of the eyes, one row "
+            "down (or do it at the end)",
+            "*可選：將鼻子縫在雙眼中間，向下 1 行，另加 99 針",
+            en_us_source=True,
+        )
+
+    def test_cardinal_word_without_crochet_count_context_cannot_add_digit(self):
+        self._assert_rejects(
+            "Sew one nose between the eyes",
+            "在雙眼中間縫上鼻子，再加 1 針",
+            en_us_source=True,
         )
 
     def test_trio_may_translate_to_one_arabic_three(self):
@@ -950,6 +1107,60 @@ class BroadValidationDiagnosticsTests(unittest.TestCase):
         self.assertEqual("unit_substituted_to_inch", failure["measurement_failure"])
         self.assertEqual("", str(exc))
 
+    def test_penguin_r6_logs_safe_stitch_and_colour_rejection_codes(self):
+        source = (
+            "R6: 11sc, *CC to white* BOB, *CC to dark gray* 3sc, "
+            "*CC to white* BOB, *CC to dark gray* 8sc (24)"
+        )
+        cases = (
+            (
+                "R6：11 短針，換成白色，換成深灰色，3 短針，換成白色，"
+                "棗形針，換成深灰色，8 短針（24）",
+                "stitch_terminology",
+            ),
+            (
+                "R6：11 短針，白色棗形針，深灰色3短針，白色棗形針，"
+                "深灰色8短針（24）",
+                "color_change_count",
+            ),
+        )
+        for translation, expected_rule in cases:
+            with self.subTest(expected_rule=expected_rule):
+                events, _ = self._reject_with_logger(source, translation)
+                failure = next(
+                    event
+                    for event in events
+                    if event.get("phase") == "objective_validation_failed"
+                )
+                self.assertEqual(expected_rule, failure["failed_rule"])
+                self.assertNotIn("prompt", failure)
+                self.assertNotIn("response", failure)
+
+    def test_download_diagnostic_summarizes_reasons_without_provider_output(self):
+        line_df = pd.DataFrame(
+            [
+                {
+                    "Validation Status": "validated",
+                    "Validation Failure Reason": "",
+                    "Semantic Unit ID": "unit-0000",
+                },
+                {
+                    "Validation Status": "unresolved",
+                    "Validation Failure Reason": "stitch_terminology",
+                    "Semantic Unit ID": "unit-0001",
+                },
+            ]
+        )
+        rendered = diagnostic_report._format_broad_validation_diagnostics(line_df)
+        self.assertIn("Broad units accepted: 1", rendered)
+        self.assertIn("Broad units rejected: 1", rendered)
+        self.assertIn("stitch_terminology=1", rendered)
+        self.assertIn("unit-0001=stitch_terminology", rendered)
+        self.assertIn("Raw provider output retained: No", rendered)
+        report = diagnostic_report.build_debug_report_text(line_df)
+        self.assertIn("=== Broad Validation Diagnostics ===", report)
+        self.assertIn("unit-0001=stitch_terminology", report)
+
     def test_translate_path_logs_validation_failure_before_request_end(self):
         rows = pd.DataFrame([_ocr_row("R1: 6SC [6] 2.Put eyes")])
         events: list[dict] = []
@@ -1062,6 +1273,16 @@ class BroadRequestScopedGlossaryTests(unittest.TestCase):
             self.route_terms, segments, self.config
         )
 
+    def test_attached_count_abbreviations_select_required_stitch_concepts(self):
+        selected = self._select(
+            "R6: 11sc, *CC to white* BOB, *CC to dark gray* 3sc, "
+            "*CC to white* BOB, *CC to dark gray* 8sc (24)"
+        )
+        selected_ids = {entry["concept_id"] for entry in selected}
+        self.assertIn("st_003_single_crochet", selected_ids)
+        self.assertIn("st_040_puff_stitch", selected_ids)
+        self.assertIn("st_059_contrasting_color", selected_ids)
+
     def test_peas_source_selects_direct_and_compound_concepts(self):
         texts = [
             "NOTES",
@@ -1102,14 +1323,14 @@ class BroadRequestScopedGlossaryTests(unittest.TestCase):
         self.assertEqual(expected_ids, selected_ids)
         self.assertEqual(83, len(self.route_terms))
         self.assertEqual(12, len(selected))
-        self.assertEqual(21842, broad_translation._glossary_char_count(self.route_terms))
+        self.assertEqual(21850, broad_translation._glossary_char_count(self.route_terms))
         self.assertEqual(3147, broad_translation._glossary_char_count(selected))
         segments = [
             {"source_segment_id": f"segment-{index:04d}", "text": text}
             for index, text in enumerate(texts)
         ]
         self.assertEqual(
-            25947,
+            25955,
             len(broad_translation.build_prompt(segments, self.route_terms, self.config)),
         )
         self.assertEqual(
@@ -2825,6 +3046,102 @@ class BroadRetryAndEmergencyFallbackTests(unittest.TestCase):
                 )
 
 
+class CompactChineseStitchValidationTests(unittest.TestCase):
+    def setUp(self):
+        self.config = _route_config("Simplified Chinese", "English — US")
+        self.route_terms = broad_translation.build_glossary(
+            self.config.source_mode,
+            self.config.output_mode,
+        )
+
+    def _segments(self, source: str) -> list[dict[str, str]]:
+        return [{"source_segment_id": "segment-0000", "text": source}]
+
+    def _validate(self, source: str, target: str) -> None:
+        segments = self._segments(source)
+        broad_translation.validate_semantic_units(
+            _valid_units(segments, [target]),
+            segments,
+            self.config,
+        )
+
+    def _failure_reason(self, source: str, target: str) -> str:
+        segments = self._segments(source)
+        events = []
+        with self.assertRaises(broad_translation.BroadTranslationError):
+            broad_translation.validate_semantic_units(
+                _valid_units(segments, [target]),
+                segments,
+                self.config,
+                diagnostic_logger=lambda phase, **fields: events.append(
+                    {"phase": phase, **fields}
+                ),
+            )
+        failure = next(
+            event for event in events if event["phase"] == "objective_validation_failed"
+        )
+        return failure["failed_rule"]
+
+    def test_kerry_compact_x_v_a_rows_are_valid_semantic_equivalents(self):
+        cases = (
+            ("R2:6V", "R2: 6 inc"),
+            ("R3:(X,V)*6", "R3: (sc, inc) * 6"),
+            ("R5:(X,V,X)*6", "R5: (sc, inc, sc) * 6"),
+            ("R8:(3X,V)*2,(X,V)*4,(3X,V)*2", "R8: (3 sc, inc) * 2, (sc, inc) * 4, (3 sc, inc) * 2"),
+            ("R9:10X,(X,V,X)*4,10X", "R9: 10 sc, (sc, inc, sc) * 4, 10 sc"),
+            ("R10:10X,(3X,V)*4,10X", "R10: 10 sc, (3 sc, inc) * 4, 10 sc"),
+            ("R11:10X,(2X,V,2X)*4,10X", "R11: 10 sc, (2 sc, inc, 2 sc) * 4, 10 sc"),
+            ("R14:16X,A,8X,A,16X", "R14: 16 sc, dec, 8 sc, dec, 16 sc"),
+            ("R17:(5X,A)*6", "R17: (5 sc, dec) * 6"),
+            ("R18:(2X,A,2X)*6", "R18: (2 sc, dec, 2 sc) * 6"),
+            ("R19:(3X,A)*6", "R19: (3 sc, dec) * 6"),
+            ("R20:(X,A,X)*6", "R20: (sc, dec, sc) * 6"),
+            ("R21:(X,A)*6", "R21: (sc, dec) * 6"),
+            ("R22:6A", "R22: 6 dec"),
+        )
+        for source, target in cases:
+            with self.subTest(source=source):
+                self._validate(source, target)
+
+    def test_compact_glossary_selects_atomic_not_duplicate_compound_concepts(self):
+        cases = (
+            ("R2:6V", {"st_009_increase"}, {"st_010_single_crochet_increase"}),
+            ("R17:(5X,A)*6", {"st_003_single_crochet", "st_015_decrease"}, {"st_016_single_crochet_decrease"}),
+            ("R22:6A", {"st_015_decrease"}, {"st_016_single_crochet_decrease"}),
+        )
+        for source, required_ids, forbidden_ids in cases:
+            with self.subTest(source=source):
+                selected = broad_translation.select_request_glossary(
+                    self.route_terms,
+                    self._segments(source),
+                    self.config,
+                )
+                selected_ids = {entry["concept_id"] for entry in selected}
+                self.assertTrue(required_ids.issubset(selected_ids))
+                self.assertTrue(forbidden_ids.isdisjoint(selected_ids))
+
+    def test_invalid_substitutions_omissions_and_extra_stitches_remain_rejected(self):
+        cases = (
+            ("R1:6X", "R1: 6 dc"),
+            ("R2:6V", "R2: 6 dec"),
+            ("R22:6A", "R22: 6 inc"),
+            ("R3:(X,V)*6", "R3: (sc) * 6"),
+            ("R2:6V", "R2: 6 inc, dec"),
+        )
+        for source, target in cases:
+            with self.subTest(source=source, target=target):
+                self.assertEqual("stitch_terminology", self._failure_reason(source, target))
+
+    def test_count_and_repeat_changes_still_fail_before_stitch_acceptance(self):
+        cases = (
+            ("R2:6V", "R2: 5 inc"),
+            ("R3:(X,V)*6", "R3: (sc, inc) * 5"),
+        )
+        for source, target in cases:
+            with self.subTest(source=source, target=target):
+                self.assertEqual("arabic_digit_multiset", self._failure_reason(source, target))
+
+
 class BroadServiceIntegrationTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -2917,6 +3234,180 @@ class BroadServiceIntegrationTests(unittest.TestCase):
         primary = result.primary_result
         self.assertEqual(primary["line_df"].loc[0, "Translation"], "第 1 圈：6 短針")
         self.assertIn("overlay_png", primary)
+
+    @mock.patch("pattern_translator.translation_service.run_primary_ocr")
+    @mock.patch.dict(
+        os.environ,
+        {"PATTERN_BROAD_TRANSLATION_ENABLED": "1", "OPENAI_API_KEY": "test-key"},
+        clear=False,
+    )
+    def test_attached_row_separator_uses_clean_semantics_and_raw_geometry(
+        self, mock_run_primary_ocr
+    ):
+        ocr_rows = pd.DataFrame(
+            [
+                _ocr_row("2.6 inc (12)", min_y=10, max_y=30),
+                _ocr_row("5.24 sc (24)", min_y=40, max_y=60),
+            ]
+        )
+        mock_run_primary_ocr.return_value = {
+            "selected_name": "PaddleOCR",
+            "selected_text": "2.6 inc (12)\n5.24 sc (24)",
+            "selected_rows": ocr_rows,
+            "paddle_inference_seconds": 0.1,
+        }
+        expected_translations = ["R2: 加針6次 (12)", "R5: 短針24針 (24)"]
+
+        def fake_luna(prompt, api_key):
+            del api_key
+            self.assertIn('"text":"R2: 6 inc (12)"', prompt)
+            self.assertIn('"text":"R5: 24 sc (24)"', prompt)
+            self.assertNotIn('"text":"2.6 inc (12)"', prompt)
+            self.assertNotIn('"text":"5.24 sc (24)"', prompt)
+            semantic_rows = ocr_rows.copy()
+            semantic_rows["semantic_text"] = semantic_rows["text"].map(
+                line_translation.clean_single_ocr_line
+            )
+            segments, _ = broad_translation.build_source_segments(semantic_rows)
+            response = _keyed_response_from_units(
+                _valid_units(segments, expected_translations)
+            )
+            return {
+                "output": [
+                    {
+                        "content": [
+                            {"type": "output_text", "text": json.dumps(response)}
+                        ]
+                    }
+                ]
+            }, 0.01
+
+        with mock.patch.object(
+            broad_translation, "call_luna_once", side_effect=fake_luna
+        ):
+            result = translate_image(
+                self._request(
+                    "English — US",
+                    "Traditional Chinese",
+                    self.index_en,
+                    self.df_en,
+                )
+            )
+
+        primary = result.primary_result
+        self.assertEqual("R2: 6inc (12)\nR5: 24sc (24)", primary["clean_text"])
+        self.assertEqual(
+            ["2.6 inc (12)", "5.24 sc (24)"],
+            primary["line_df"]["Original"].tolist(),
+        )
+        self.assertEqual(
+            expected_translations,
+            primary["line_df"]["Translation"].tolist(),
+        )
+        self.assertEqual([10.0, 40.0], primary["line_df"]["min_y"].tolist())
+        for translation in expected_translations:
+            self.assertIn(translation, primary["readable_translation"])
+            self.assertIn(translation, primary["translation_txt"])
+
+    @mock.patch("pattern_translator.translation_service.run_primary_ocr")
+    @mock.patch.dict(
+        os.environ,
+        {"PATTERN_BROAD_TRANSLATION_ENABLED": "1", "OPENAI_API_KEY": "test-key"},
+        clear=False,
+    )
+    def test_multiline_prose_accepts_optional_row_offset_and_preserves_notation(
+        self, mock_run_primary_ocr
+    ):
+        ocr_rows = pd.DataFrame(
+            [
+                _ocr_row(
+                    "Insert the safety eyes into the middle of the white BOBs (I like to",
+                    min_y=10,
+                    max_y=20,
+                ),
+                _ocr_row(
+                    "glue them on so that they aren't indented into the plushie)",
+                    min_y=21,
+                    max_y=30,
+                ),
+                _ocr_row(
+                    "*Optional: sew on the nose between the middle of the eyes, one row",
+                    min_y=35,
+                    max_y=45,
+                ),
+                _ocr_row("down (or do it at the end)", min_y=46, max_y=55),
+                _ocr_row("R6: 11 sc (24)", min_y=60, max_y=75),
+            ]
+        )
+        mock_run_primary_ocr.return_value = {
+            "selected_name": "PaddleOCR",
+            "selected_text": "\n".join(ocr_rows["text"].tolist()),
+            "selected_rows": ocr_rows,
+            "paddle_inference_seconds": 0.1,
+        }
+
+        def fake_luna(prompt, api_key):
+            del api_key
+            self.assertIn("*Optional: sew on the nose", prompt)
+            self.assertIn("Insert the safety eyes", prompt)
+            semantic_rows = ocr_rows.copy()
+            semantic_rows["semantic_text"] = semantic_rows["text"].map(
+                line_translation.clean_single_ocr_line
+            )
+            segments, _ = broad_translation.build_source_segments(semantic_rows)
+            response = _keyed_response_from_units(
+                [
+                    {
+                        "source_segment_ids": [
+                            segments[0]["source_segment_id"],
+                            segments[1]["source_segment_id"],
+                        ],
+                        "translation": "將安全眼安裝在白色棗形針的中間（黏上後不會凹進玩偶裡）",
+                    },
+                    {
+                        "source_segment_ids": [
+                            segments[2]["source_segment_id"],
+                            segments[3]["source_segment_id"],
+                        ],
+                        "translation": "*可選：將鼻子縫在雙眼中間，向下 1 行（或最後再縫）",
+                    },
+                    {
+                        "source_segment_ids": [segments[4]["source_segment_id"]],
+                        "translation": "R6：11 短針（24）",
+                    },
+                ]
+            )
+            return {
+                "output": [
+                    {
+                        "content": [
+                            {"type": "output_text", "text": json.dumps(response)}
+                        ]
+                    }
+                ]
+            }, 0.01
+
+        with mock.patch.object(
+            broad_translation, "call_luna_once", side_effect=fake_luna
+        ):
+            result = translate_image(
+                self._request(
+                    "English — US",
+                    "Traditional Chinese",
+                    self.index_en,
+                    self.df_en,
+                )
+            )
+
+        line_df = result.primary_result["line_df"]
+        self.assertEqual(3, len(line_df))
+        self.assertEqual(
+            ["validated", "validated", "validated"],
+            line_df["Validation Status"].tolist(),
+        )
+        self.assertIn("向下 1 行", line_df.loc[1, "Translation"])
+        self.assertEqual("R6：11 短針（24）", line_df.loc[2, "Translation"])
+        self.assertIn("one row\ndown", line_df.loc[1, "Original"])
 
     @mock.patch("pattern_translator.translation_service.run_primary_ocr")
     @mock.patch.dict(

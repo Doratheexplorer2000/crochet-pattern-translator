@@ -28,6 +28,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 from PIL import Image
 from crochet_intelligence.analytics import (
     WORKSHEET_PATTERN_TRANSLATION,
@@ -70,6 +71,7 @@ from pattern_translator.translation_service import (
     CSV_TERM_CACHE_STATS,
     NORMALIZED_LOOKUP_INDEX_STATS,
     TranslateImageRequest,
+    apply_select_area_empty_gate,
     assess_image_quality,
     get_quality_status,
     log_app_ocr_timing,
@@ -84,7 +86,8 @@ KNOWLEDGE_BASE_DIR = REPO_ROOT / "knowledge_base"
 SOURCE_CSV = KNOWLEDGE_BASE_DIR / "data" / "master_stitches.csv"
 FALLBACK_CSV = KNOWLEDGE_BASE_DIR / "releases" / "database" / "stitches_1_8e.csv"
 DEBUG_MODE = os.getenv("CROCHET_DEBUG", "").strip().lower() in {"1", "true", "yes", "on"}
-FEEDBACK_FORM_URL = "https://docs.google.com/forms/d/e/1FAIpQLScoDrN0xsyOg800O8Pw7aXAa5GREQIU-RmxlmXIlBOE7y_Q_w/viewform"
+FEEDBACK_FORM_URL = "https://forms.gle/bS26r8iqmmiEAsN1A"
+RESULT_ANCHOR_ID = "pattern-translation-result"
 DEFAULT_PORTAL_URL = "https://crochetintelligence.com"
 PORTAL_URL = os.getenv("CROCHET_INTELLIGENCE_PORTAL_URL", DEFAULT_PORTAL_URL).strip() or DEFAULT_PORTAL_URL
 SELECT_AREA_PREVIEW_WIDTH = 360
@@ -199,6 +202,19 @@ p, label, li { line-height: 24px; }
     padding: 12px 16px;
     background: rgba(46, 125, 91, 0.08);
 }
+.overlay-guide {
+    margin: 8px 0 16px;
+    padding: 14px 16px;
+    border: 1px solid var(--ci-primary);
+    border-radius: var(--ci-radius-md);
+    background: var(--ci-primary-soft);
+    color: var(--ci-text-primary);
+}
+.overlay-guide-title {
+    margin: 0 0 6px;
+    font-weight: 700;
+}
+.overlay-guide-body { margin: 0; }
 div[data-testid="stExpander"] { margin-bottom: 8px; }
 div[data-testid="stExpander"] details {
     border: 1px solid var(--ci-border);
@@ -705,11 +721,14 @@ INTERFACE_LANGUAGES = {
         "quality_block_warning": "OCR is likely to be unreliable with this image. A clearer crop is strongly recommended. You can still force a test run below for checking.",
         "force_ocr": "Run OCR anyway",
         "run_ocr": "Run OCR overlay translation",
+        "running_ocr_button": "OCR running…",
         "running_ocr": "Running OCR and building overlay translation.",
         "ocr_failed": "OCR failed. This may be an OCR installation/model issue or an unsupported image format.",
         "settings_changed_rerun": "Settings changed. Please run OCR overlay translation again.",
         "overlay_translation": "Overlay translation",
-        "overlay_caption": "Smart overlay: short translations are shown directly; long/colliding translations use numbered markers.",
+        "overlay_guide_title": "ⓘ How to read the translated image",
+        "overlay_guide_body": "Short translations appear directly on the image. When you see numbered markers such as [1] [2] [3], view the complete matching content in Line-by-line Translation below.",
+        "overlay_guide_body_replacement": "Translations replace the source text in the image. Numbered markers such as [1] [2] [3] have complete matching translations in the appended image footer and in Line-by-line Translation below.",
         "download_overlay": "Download Overlay Image PNG",
         "no_crochet_pattern_title": "No crochet pattern was detected.",
         "no_crochet_pattern_body": "The text in this image was recognised successfully, but no crochet terms were found. Please upload a crochet pattern instead of a general photo or document.",
@@ -832,11 +851,14 @@ INTERFACE_LANGUAGES = {
         "quality_block_warning": "這張圖片的辨識結果可能不可靠。建議先使用更清晰的裁剪範圍；你仍可強制測試。",
         "force_ocr": "仍然開始文字辨識",
         "run_ocr": "開始圖片翻譯",
+        "running_ocr_button": "正在辨識文字…",
         "running_ocr": "正在辨識圖片文字並產生翻譯……",
         "ocr_failed": "文字辨識失敗。可能是文字辨識模型問題，或圖片格式不支援。",
         "settings_changed_rerun": "設定已變更，請重新開始圖片翻譯。",
         "overlay_translation": "圖片翻譯結果",
-        "overlay_caption": "短翻譯會直接顯示在圖片上；較長或重疊的翻譯會用編號標記。",
+        "overlay_guide_title": "ⓘ 如何閱讀翻譯圖片",
+        "overlay_guide_body": "短翻譯會直接顯示在圖片上。看到 [1] [2] [3] 等編號時，請在圖片下方的「逐行翻譯」查看完整內容。",
+        "overlay_guide_body_replacement": "翻譯會直接取代圖片中的原文。看到 [1] [2] [3] 等編號時，可在翻譯圖片新增的頁尾及下方「逐行翻譯」查看完整內容。",
         "download_overlay": "下載翻譯圖片 PNG",
         "no_crochet_pattern_title": "未找到可翻譯的鈎織術語。",
         "no_crochet_pattern_body": "圖片中的文字已成功辨識，但沒有找到可翻譯的鈎織圖樣內容。請確認你上傳的是鈎織圖樣，而不是一般圖片或其他文件。",
@@ -959,11 +981,14 @@ INTERFACE_LANGUAGES = {
         "quality_block_warning": "这张图片的识别结果可能不可靠。建议先使用更清晰的裁剪范围；你仍可强制测试。",
         "force_ocr": "仍然开始文字识别",
         "run_ocr": "开始图片翻译",
+        "running_ocr_button": "正在识别文字…",
         "running_ocr": "正在识别图片文字并生成翻译……",
         "ocr_failed": "文字识别失败。可能是文字识别模型问题，或图片格式不支持。",
         "settings_changed_rerun": "设置已更改，请重新开始图片翻译。",
         "overlay_translation": "图片翻译结果",
-        "overlay_caption": "短翻译会直接显示在图片上；较长或重叠的翻译会用编号标记。",
+        "overlay_guide_title": "ⓘ 如何阅读翻译图片",
+        "overlay_guide_body": "短翻译会直接显示在图片上。看到 [1] [2] [3] 等编号时，请在图片下方的“逐行翻译”查看完整内容。",
+        "overlay_guide_body_replacement": "翻译会直接替换图片中的原文。看到 [1] [2] [3] 等编号时，可在翻译图片新增的页脚及下方“逐行翻译”查看完整内容。",
         "download_overlay": "下载翻译图片 PNG",
         "no_crochet_pattern_title": "未找到可翻译的钩织术语。",
         "no_crochet_pattern_body": "图片中的文字已成功识别，但没有找到可翻译的钩织图样内容。请确认你上传的是钩织图样，而不是一般图片或其他文件。",
@@ -1086,11 +1111,14 @@ INTERFACE_LANGUAGES = {
         "quality_block_warning": "この画像ではOCRが不安定になる可能性があります。より鮮明な切り抜きをおすすめしますが、テストとして強制実行できます。",
         "force_ocr": "それでもOCRを実行",
         "run_ocr": "画像翻訳を開始",
+        "running_ocr_button": "OCR 実行中…",
         "running_ocr": "画像の文字を認識して翻訳を作成しています……",
         "ocr_failed": "文字認識に失敗しました。OCRのインストール／モデルの問題、または未対応の画像形式の可能性があります。",
         "settings_changed_rerun": "設定が変更されました。もう一度画像翻訳を開始してください。",
         "overlay_translation": "画像上の翻訳",
-        "overlay_caption": "短い翻訳は画像上に直接表示されます。長い翻訳や重なる翻訳は番号で表示されます。",
+        "overlay_guide_title": "ⓘ 翻訳画像の見方",
+        "overlay_guide_body": "短い翻訳は画像上に直接表示されます。[1] [2] [3] などの番号がある場合は、画像の下にある「行ごとの翻訳」で対応する全文を確認してください。",
+        "overlay_guide_body_replacement": "翻訳は画像内の原文を直接置き換えます。[1] [2] [3] などの番号に対応する全文は、翻訳画像に追加されたフッターと下の「行ごとの翻訳」で確認できます。",
         "download_overlay": "翻訳画像PNGをダウンロード",
         "no_crochet_pattern_title": "翻訳できるかぎ針編み用語が見つかりませんでした。",
         "no_crochet_pattern_body": "画像内の文字は認識されましたが、翻訳可能なかぎ針編みパターンの内容は見つかりませんでした。一般的な写真やその他の文書ではなく、かぎ針編みパターンをアップロードしていることをご確認ください。",
@@ -1311,6 +1339,9 @@ def init_rc3_state():
     st.session_state.setdefault("duplicate_ocr_run_ignored_count", 0)
     st.session_state.setdefault("debug_report_ready", False)
     st.session_state.setdefault("last_successful_download_key", None)
+    st.session_state.setdefault(
+        result_delivery_engine.RESULT_AUTOSCROLL_PENDING_KEY, None
+    )
     st.session_state.setdefault("pending_plausible_v2_event", None)
     st.session_state.setdefault("rc10b_diagnostic_events", [])
     st.session_state.setdefault("rc10b_image_signature_history", [])
@@ -1342,6 +1373,7 @@ def request_ocr_run():
         )
         return
     diagnostic_request_id = uuid.uuid4().hex
+    result_delivery_engine.clear_result_autoscroll(st.session_state)
     action_started = time.perf_counter()
     st.session_state["ocr_timing_request_id"] = diagnostic_request_id
     st.session_state["ocr_timing_action_started"] = action_started
@@ -1530,6 +1562,9 @@ def claim_and_commit_completed_result(
         st.session_state["last_successful_download_key"] = None
         st.session_state["completed_result_analytics_pending"] = delivery.get(
             "analytics"
+        )
+        result_delivery_engine.arm_result_autoscroll(
+            st.session_state, request_id
         )
         # Keep the lifecycle running until every other result mutation succeeds.
         st.session_state["ocr_request_lifecycle"] = (
@@ -1867,6 +1902,7 @@ def reset_uploaded_image_derived_state(
     st.session_state["rc10b_last_cropper_box"] = None
     st.session_state["debug_report_ready"] = False
     st.session_state["last_successful_download_key"] = None
+    result_delivery_engine.clear_result_autoscroll(st.session_state)
     st.session_state["rc3_image_signature"] = image_signature
     st.session_state["rc3_uploaded_image_name"] = (
         str(image_name or "") if image_signature is not None else ""
@@ -2248,6 +2284,9 @@ if image_file is not None:
     ocr_resize_test = "1000 px"
 
     quality_errors, quality_warnings, quality_metrics = assess_image_quality(working_image)
+    quality_errors, quality_warnings, quality_metrics = apply_select_area_empty_gate(
+        quality_errors, quality_warnings, quality_metrics, area_mode
+    )
     quality_level, quality_label, quality_message = get_quality_status(quality_errors, quality_warnings)
     localized_quality = {
         "good": (t("quality_good"), t("quality_good_msg")),
@@ -2358,23 +2397,25 @@ if image_file is not None:
     full_df = load_database()
     df, index = prepare_translation_dataframe(full_df, source_mode)
 
-    ocr_running = bool(st.session_state.get("ocr_running"))
-    ocr_busy = bool(st.session_state.get("pending_ocr_run")) or ocr_running
-    run_button_label = "⏳ OCR Running..." if ocr_busy else t("run_ocr")
     ocr_status_placeholder = st.empty()
     translation_languages_missing = source_mode is None or output_mode is None
-    st.button(
-        run_button_label,
-        key="run_ocr_overlay_translation_button",
-        type="primary",
-        disabled=(
-            ocr_busy
-            or translation_languages_missing
-            or select_area_needs_confirmation
-            or (bool(quality_errors) and not force_run)
-        ),
-        on_click=request_ocr_run,
-    )
+
+    def render_ocr_action() -> None:
+        ocr_busy = bool(st.session_state.get("pending_ocr_run")) or bool(
+            st.session_state.get("ocr_running")
+        )
+        st.button(
+            t("running_ocr_button") if ocr_busy else t("run_ocr"),
+            key="run_ocr_overlay_translation_button",
+            type="primary",
+            disabled=(
+                ocr_busy
+                or translation_languages_missing
+                or select_area_needs_confirmation
+                or (bool(quality_errors) and not force_run)
+            ),
+            on_click=request_ocr_run,
+        )
 
     if st.session_state.get("pending_ocr_run"):
         diagnostic_request_id = str(
@@ -2387,9 +2428,7 @@ if image_file is not None:
             if isinstance(action_started, (int, float))
             else None
         )
-        ocr_status_placeholder.info("🔵 OCR started...")
         with st.spinner(t("running_ocr")):
-            ocr_status_placeholder.warning("🟡 OCR running...")
             lifecycle, request_claimed = ocr_request_lifecycle_engine.claim_request(
                 st.session_state.get("ocr_request_lifecycle"),
                 diagnostic_request_id,
@@ -2568,6 +2607,8 @@ if image_file is not None:
                 )
                 st.session_state["ocr_timing_request_id"] = None
                 st.session_state["ocr_timing_action_started"] = None
+                ocr_status_placeholder.empty()
+                render_ocr_action()
                 st.error(t("ocr_failed"))
                 log_result_state_event(
                     "result_render_skipped",
@@ -2586,7 +2627,14 @@ if image_file is not None:
                 )
                 st.stop()
 
+    ocr_status_placeholder.empty()
+    render_ocr_action()
+
     result = st.session_state.get("rc3_ocr_result")
+    result_autoscroll_request_id = result_delivery_engine.consume_result_autoscroll(
+        st.session_state,
+        result_present=bool(result),
+    )
     if result:
         log_result_state_event(
             "result_render_enter",
@@ -2617,11 +2665,40 @@ if image_file is not None:
         runtime_profile = result.get("runtime_profile", {})
         translation_profile = result.get("translation_profile", {})
 
+        st.markdown(
+            f'<div id="{RESULT_ANCHOR_ID}"></div>',
+            unsafe_allow_html=True,
+        )
         st.subheader(t("overlay_translation"))
+        if result_autoscroll_request_id:
+            components.html(
+                f"""
+                <script>
+                const target = window.parent.document.getElementById("{RESULT_ANCHOR_ID}");
+                if (target) {{
+                    window.requestAnimationFrame(() => {{
+                        target.scrollIntoView({{behavior: "smooth", block: "start"}});
+                    }});
+                }}
+                </script>
+                """,
+                height=0,
+            )
         if overlay_image is not None:
+            overlay_guide_body_key = (
+                "overlay_guide_body_replacement"
+                if overlay_engine.is_source_replacement_overlay_enabled()
+                else "overlay_guide_body"
+            )
+            st.markdown(
+                "<div class='overlay-guide'>"
+                f"<div class='overlay-guide-title'>{html.escape(t('overlay_guide_title'))}</div>"
+                f"<div class='overlay-guide-body'>{html.escape(t(overlay_guide_body_key))}</div>"
+                "</div>",
+                unsafe_allow_html=True,
+            )
             st.image(
                 overlay_image,
-                caption=t("overlay_caption"),
                 use_container_width=True,
             )
             download_button_rc3(
@@ -2658,23 +2735,7 @@ if image_file is not None:
         st.markdown(f"<div class='report-action'>{html.escape(t('report_download_action'))}</div>", unsafe_allow_html=True)
         st.markdown(f"<div class='report-helper'>{html.escape(t('report_download_helper'))}</div>", unsafe_allow_html=True)
         debug_report_txt = str(result.get("debug_report_txt", "") or "")
-
-        def note_diagnostic_action_received() -> None:
-            log_result_state_event(
-                "post_result_action_received",
-                action="diagnostic",
-                callback_receipt=True,
-            )
-
-        diagnostic_download_slot = st.empty()
-        diagnostic_requested = False
         if not debug_report_txt:
-            diagnostic_requested = diagnostic_download_slot.button(
-                t("download_debug_report"),
-                key="prepare_debug_report_download",
-                on_click=note_diagnostic_action_received,
-            )
-        if diagnostic_requested:
             log_result_state_event(
                 "post_result_action_handler_enter",
                 action="diagnostic",
@@ -2715,13 +2776,11 @@ if image_file is not None:
                 request_lifecycle="completed",
             )
             if generated:
-                st.session_state["debug_report_ready"] = True
-                st.success(t("debug_report_generated"))
                 debug_report_txt = str(result.get("debug_report_txt", "") or "")
             else:
                 st.warning(t("debug_report_failed"))
         if debug_report_txt:
-            diagnostic_download_slot.download_button(
+            st.download_button(
                 t("download_debug_report"),
                 data=debug_report_txt,
                 file_name=result_delivery_engine.diagnostic_report_filename(

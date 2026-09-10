@@ -6,6 +6,7 @@ from unittest import mock
 
 import pandas as pd
 
+from pattern_translator.engine import broad_translation
 from pattern_translator.engine import line_translation
 from pattern_translator.engine import llm_fallback
 from pattern_translator.engine import ocr_lines
@@ -35,6 +36,74 @@ class HumanUatDeterministicFollowupTests(unittest.TestCase):
             ),
             "UnknownDesigner 花樣",
         )
+
+    def test_simplified_chinese_uppercase_skip_with_count(self):
+        self.assertEqual(
+            line_translation.translate_ocr_line(
+                "K3", self.chinese_index, self.df, "English — US"
+            ),
+            "3 sk",
+        )
+
+    def test_simplified_chinese_lowercase_skip_with_count(self):
+        self.assertEqual(
+            line_translation.translate_ocr_line(
+                "k3", self.chinese_index, self.df, "English — US"
+            ),
+            "3 sk",
+        )
+
+    def test_simplified_chinese_skip_count_in_reported_round(self):
+        source = "R2、1ch,3x，3ch,K3，7x，3ch,k3,4x,sl (20)"
+        self.assertEqual(
+            line_translation.translate_ocr_line(
+                source, self.chinese_index, self.df, "English — US"
+            ),
+            "R2, 1 ch, 3 sc, 3 ch, 3 sk, 7 sc, 3 ch, 3 sk, 4 sc, sl st (20)",
+        )
+
+    def test_simplified_chinese_skip_count_uses_non_us_dictionary_term(self):
+        self.assertEqual(
+            line_translation.translate_ocr_line(
+                "K3", self.chinese_index, self.df, "Traditional Chinese"
+            ),
+            "跳過3針",
+        )
+
+    def test_skip_count_fix_does_not_change_other_compact_tokens_or_prose(self):
+        self.assertEqual(
+            line_translation.translate_ocr_line(
+                "24x", self.chinese_index, self.df, "English — US"
+            ),
+            "24 sc",
+        )
+        self.assertEqual(
+            line_translation.translate_ocr_line(
+                "vitamin K3", self.chinese_index, self.df, "English — US"
+            ),
+            "vitamin K3",
+        )
+
+    def test_broad_route_scopes_skip_dictionary_entry_for_both_cases(self):
+        config = broad_translation._route_config(
+            "Simplified Chinese", "English — US"
+        )
+        route_terms = broad_translation.build_glossary(
+            config.source_mode, config.output_mode
+        )
+        for token in ("K3", "k3"):
+            with self.subTest(token=token):
+                selected = broad_translation.select_request_glossary(
+                    route_terms,
+                    [{"source_segment_id": "segment-0000", "text": token}],
+                    config,
+                )
+                skip = next(
+                    term
+                    for term in selected
+                    if term["concept_id"] == "st_037_skip"
+                )
+                self.assertIn("sk", skip["english_us_abbreviations"])
 
 
 class HumanUatLlmDiagnosisTests(unittest.TestCase):

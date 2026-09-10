@@ -14,6 +14,18 @@ pattern_translator.api:app
 
 Preserved Streamlit rollback entry point: `pattern_translator/app.py`.
 
+## Pending Soft Launch Correction Set — Local Only (2026-09-10)
+
+The current local release candidate contains the completed Soft Launch correction set. The full automated suite passed (`560 / 560`), `git diff --check` passed, and Kerry and Penguin Human UAT passed. This release candidate has not been pushed or deployed. The production site still runs the baseline identified above and does not yet contain the complete correction set; production smoke UAT and Railway/Linux performance validation remain pending.
+
+User-facing translation corrections include compact `K3` skip handling, the `BOB` Bobble alias, attached row-punctuation normalization such as `5.24 sc`, and Simplified Chinese compact notation (`X` -> `sc`, `V` -> `inc`, `A` -> `dec`). Broad validation now avoids the confirmed false rejections for number-word/count equivalence, bilingual row or round identity, compact X/V/A notation, Bobble multiplicity, and colour changes, and records rejection reason codes for diagnostics. Trusted readable text is translated broadly while protected identity spans such as `@handles` remain exact.
+
+The browser UX now has one localized OCR-running state, one-click Diagnostic Report download, one-shot scrolling to Translation Result after a new successful request, a clearer numbered-marker explanation, the official feedback-form URL, and the new source-replacement PNG presentation.
+
+The source-replacement renderer is gated by `PATTERN_SOURCE_REPLACEMENT_OVERLAY_ENABLED`, which defaults to **OFF**. Local UAT passed; production activation requires a later explicit deployment/config decision. When enabled, trusted translations replace source text in anchored plates with safe expansion and bounded font reduction. Content that cannot fit uses a source marker plus a newly appended footer; the original canvas is preserved and the new mode does not add floating legacy labels. Protected identity spans remain exact, surrounding natural language (including phrases such as `all rights reserved`) may translate, and unresolved or untrusted content preserves its source text.
+
+Local macOS ARM PaddleOCR timing is highly variable. A native Paddle/Accelerate crash was observed, and a controlled cold-worker call exceeded the 120-second limit inside `predict()`. This is not production performance evidence, and no safe application-level optimization has been justified. Benchmark the deployed Railway/Linux runtime after release before making an OCR performance change.
+
 ## Soft Launch Status — 2026-09-07
 
 **Crochet Intelligence is released for Soft Launch.**

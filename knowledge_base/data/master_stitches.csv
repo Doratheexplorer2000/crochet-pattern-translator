@@ -53,7 +53,7 @@ alternate,,alt,,alternate,,alt,,隔一針,交替,,交互に,,st_048_alternate,pa
 approximately,,approx,,approximately,,approx,,大約,,,約,,st_049_approximately,pattern_instruction,,,active,,
 begin,beginning,beg,,begin,beginning,beg,,開始,,,編み始め,,st_050_begin,pattern_instruction,,,active,,
 between,,bet,,between,,bet,,之間,,,～の間,,st_051_between,pattern_instruction,,,active,,
-bobble,,bo,,bobble,,bo,,棗形針,,,玉編み,,st_052_bobble,textured_stitch,eq_zh_bobble_puff,,active,Intentional equivalent/search-friendly duplicate; do not treat as error.,yes
+bobble,,bo|BOB,,bobble,,bo|BOB,,棗形針,,,玉編み,,st_052_bobble,textured_stitch,eq_zh_bobble_puff,,active,Intentional equivalent/search-friendly duplicate; do not treat as error.,yes
 back post,,BP,,back post,,BP,,內鈎,後繞,B,裏引き上げ編み,,st_053_back_post,post_stitch,,,active,,yes
 back post double crochet,,BPdc,,back post treble crochet,,BPtr,,內鈎長針,,BF,長編みの裏引き上げ編み,,st_054_back_post_double_crochet,post_stitch,,back_post_double_crochet.svg,active,,yes
 back post double treble crochet,,BPdtr,,back post triple treble crochet,,BPtrtr,BPttr,內鈎長長長針,,,,,st_055_back_post_double_treble_crochet,post_stitch,,back_post_double_treble_crochet.svg,active,,yes

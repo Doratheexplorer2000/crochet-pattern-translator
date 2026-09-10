@@ -21,6 +21,77 @@ from pattern_translator.engine import result_delivery
 
 
 class ResultDeliveryTests(unittest.TestCase):
+    def test_new_successful_result_requests_exactly_one_scroll(self):
+        state = {"rc3_ocr_result": {"readable_translation": "translated"}}
+        result_delivery.arm_result_autoscroll(state, "request-1")
+
+        first = result_delivery.consume_result_autoscroll(
+            state, result_present=True
+        )
+        second = result_delivery.consume_result_autoscroll(
+            state, result_present=True
+        )
+
+        self.assertEqual("request-1", first)
+        self.assertIsNone(second)
+
+    def test_download_and_control_reruns_do_not_rearm_scroll(self):
+        result = {"readable_translation": "translated", "overlay_png": b"png"}
+        state = {"rc3_ocr_result": result}
+        result_delivery.arm_result_autoscroll(state, "request-1")
+        self.assertEqual(
+            "request-1",
+            result_delivery.consume_result_autoscroll(
+                state, result_present=True
+            ),
+        )
+
+        for download_key in (
+            "download_overlay_png",
+            "download_overlay_translation_txt",
+            "download_debug_report_txt",
+        ):
+            state["last_successful_download_key"] = download_key
+            self.assertIsNone(
+                result_delivery.consume_result_autoscroll(
+                    state, result_present=True
+                )
+            )
+        self.assertIs(result, state["rc3_ocr_result"])
+
+    def test_missing_or_failed_result_does_not_scroll_and_clears_stale_token(self):
+        state = {}
+        self.assertIsNone(
+            result_delivery.consume_result_autoscroll(
+                state, result_present=False
+            )
+        )
+
+        result_delivery.arm_result_autoscroll(state, "failed-request")
+        self.assertIsNone(
+            result_delivery.consume_result_autoscroll(
+                state, result_present=False
+            )
+        )
+        self.assertIsNone(
+            state[result_delivery.RESULT_AUTOSCROLL_PENDING_KEY]
+        )
+
+    def test_scroll_state_does_not_modify_result_content(self):
+        result = {
+            "readable_translation": "translated",
+            "translation_txt": "unchanged",
+            "overlay_png": b"png",
+        }
+        original = dict(result)
+        state = {"rc3_ocr_result": result}
+
+        result_delivery.arm_result_autoscroll(state, "request-1")
+        result_delivery.consume_result_autoscroll(state, result_present=True)
+
+        self.assertEqual(original, result)
+        self.assertIs(result, state["rc3_ocr_result"])
+
     def test_producer_can_publish_claim_and_commit_in_same_run(self):
         handoff = result_delivery.CompletedResultHandoff()
         payload = {"primary_result": {"readable_translation": "translated"}}
@@ -590,35 +661,75 @@ class ResultDeliveryTests(unittest.TestCase):
         store_success_position = app_source.index(
             '"translation_result_store_success"', store_position
         )
-        report_button_position = app_source.index(
-            'key="prepare_debug_report_download"', store_success_position
-        )
         report_begin_position = app_source.index(
-            '"diagnostic_report_begin"', report_button_position
+            '"diagnostic_report_begin"', store_success_position
+        )
+        report_button_position = app_source.index(
+            'key="download_debug_report_txt"', report_begin_position
         )
 
         self.assertLess(store_position, store_success_position)
-        self.assertLess(store_success_position, report_button_position)
-        self.assertLess(report_button_position, report_begin_position)
+        self.assertLess(store_success_position, report_begin_position)
+        self.assertLess(report_begin_position, report_button_position)
 
-    def test_diagnostic_report_uses_one_localized_action_slot(self):
+    def test_app_arms_scroll_on_commit_and_consumes_it_at_result_anchor(self):
         app_source = (
             Path(__file__).resolve().parents[1] / "pattern_translator" / "app.py"
         ).read_text(encoding="utf-8")
-        diagnostic_start = app_source.index("diagnostic_download_slot = st.empty()")
+        store_position = app_source.index(
+            "result_delivery_engine.store_primary_result("
+        )
+        arm_position = app_source.index(
+            "result_delivery_engine.arm_result_autoscroll(", store_position
+        )
+        lifecycle_position = app_source.index(
+            'st.session_state["ocr_request_lifecycle"]', arm_position
+        )
+        result_position = app_source.index(
+            'result = st.session_state.get("rc3_ocr_result")'
+        )
+        consume_position = app_source.index(
+            "result_delivery_engine.consume_result_autoscroll(", result_position
+        )
+        anchor_position = app_source.index(
+            'f\'<div id="{RESULT_ANCHOR_ID}"></div>\'', consume_position
+        )
+        scroll_position = app_source.index("scrollIntoView", anchor_position)
+
+        self.assertLess(store_position, arm_position)
+        self.assertLess(arm_position, lifecycle_position)
+        self.assertLess(result_position, consume_position)
+        self.assertLess(consume_position, anchor_position)
+        self.assertLess(anchor_position, scroll_position)
+
+    def test_diagnostic_report_is_prepared_before_one_native_download_action(self):
+        app_source = (
+            Path(__file__).resolve().parents[1] / "pattern_translator" / "app.py"
+        ).read_text(encoding="utf-8")
+        diagnostic_start = app_source.index(
+            'debug_report_txt = str(result.get("debug_report_txt", "") or "")'
+        )
         diagnostic_end = app_source.index(
             'st.markdown(f"<div class=\'report-action\'>', diagnostic_start
         )
         diagnostic_source = app_source[diagnostic_start:diagnostic_end]
 
-        self.assertEqual(diagnostic_source.count('t("download_debug_report")'), 2)
+        self.assertEqual(diagnostic_source.count('t("download_debug_report")'), 1)
         self.assertNotIn('t("generate_debug_report")', diagnostic_source)
-        self.assertIn("if diagnostic_requested:", diagnostic_source)
+        self.assertNotIn("diagnostic_download_slot.button(", diagnostic_source)
+        self.assertNotIn('key="prepare_debug_report_download"', diagnostic_source)
         self.assertIn(
             "result_delivery_engine.generate_optional_diagnostic_report(",
             diagnostic_source,
         )
-        self.assertIn("diagnostic_download_slot.download_button(", diagnostic_source)
+        self.assertIn("st.download_button(", diagnostic_source)
+        self.assertLess(
+            diagnostic_source.index(
+                "result_delivery_engine.generate_optional_diagnostic_report("
+            ),
+            diagnostic_source.index("st.download_button("),
+        )
+        self.assertIn('on_click="ignore"', diagnostic_source)
 
     def test_app_publishes_before_any_post_export_streamlit_access(self):
         app_source = (
@@ -658,6 +769,48 @@ class ResultDeliveryTests(unittest.TestCase):
 
         self.assertLess(publish_position, claim_position)
         self.assertNotIn("st.rerun()", app_source[publish_position:exception_position])
+
+    def test_ocr_running_ui_is_localized_and_cleared_in_terminal_states(self):
+        app_source = (
+            Path(__file__).resolve().parents[1] / "pattern_translator" / "app.py"
+        ).read_text(encoding="utf-8")
+        pending_start = app_source.index(
+            '    if st.session_state.get("pending_ocr_run"):'
+        )
+        result_start = app_source.index(
+            '    result = st.session_state.get("rc3_ocr_result")', pending_start
+        )
+        pending_source = app_source[pending_start:result_start]
+        failure_start = pending_source.index("            except Exception")
+        failure_source = pending_source[failure_start:]
+
+        self.assertIn('with st.spinner(t("running_ocr")):', pending_source)
+        self.assertNotIn("OCR started...", pending_source)
+        self.assertNotIn("OCR running...", pending_source)
+        self.assertNotIn("OCR Running...", app_source)
+        self.assertEqual(4, app_source.count('"running_ocr_button":'))
+        for localized in (
+            "OCR running…",
+            "正在辨識文字…",
+            "正在识别文字…",
+            "OCR 実行中…",
+        ):
+            self.assertIn(localized, app_source)
+
+        terminal_render = (
+            '    ocr_status_placeholder.empty()\n'
+            '    render_ocr_action()\n\n'
+            '    result = st.session_state.get("rc3_ocr_result")'
+        )
+        self.assertIn(terminal_render, app_source)
+        self.assertLess(
+            failure_source.index('st.session_state["ocr_running"] = False'),
+            failure_source.index("ocr_status_placeholder.empty()"),
+        )
+        self.assertLess(
+            failure_source.index("ocr_status_placeholder.empty()"),
+            failure_source.index("st.error(t(\"ocr_failed\"))"),
+        )
 
     def test_lifecycle_completion_is_final_result_state_mutation(self):
         app_source = (

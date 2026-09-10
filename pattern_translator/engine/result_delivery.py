@@ -17,6 +17,7 @@ from pattern_translator.engine import line_translation as line_translation_engin
 
 
 RESULT_STATE_KEY = "rc3_ocr_result"
+RESULT_AUTOSCROLL_PENDING_KEY = "result_autoscroll_pending_request_id"
 DEFAULT_HANDOFF_TTL_SECONDS = 300.0
 DEFAULT_HANDOFF_MAX_ENTRIES = 8
 DIAGNOSTIC_SNAPSHOT_SCHEMA_VERSION = 1
@@ -52,6 +53,28 @@ SIGNATURE_EXTRA_FIELD_NAMES = (
     "downscale_option",
     "ocr_resize_option",
 )
+
+
+def arm_result_autoscroll(
+    session_state: MutableMapping[str, Any], request_id: str
+) -> None:
+    """Arm one result scroll for a newly committed successful request."""
+    session_state[RESULT_AUTOSCROLL_PENDING_KEY] = str(request_id or "") or None
+
+
+def clear_result_autoscroll(session_state: MutableMapping[str, Any]) -> None:
+    session_state[RESULT_AUTOSCROLL_PENDING_KEY] = None
+
+
+def consume_result_autoscroll(
+    session_state: MutableMapping[str, Any], *, result_present: bool
+) -> Optional[str]:
+    """Consume a pending scroll token, returning it only for a present result."""
+    request_id = str(session_state.get(RESULT_AUTOSCROLL_PENDING_KEY) or "")
+    if not request_id:
+        return None
+    session_state[RESULT_AUTOSCROLL_PENDING_KEY] = None
+    return request_id if result_present else None
 
 
 def _safe_log_token(value: object) -> str:
@@ -458,6 +481,9 @@ def create_diagnostic_snapshot(
         "downscale_diagnostics": inputs.get("downscale_diagnostics")
         if isinstance(inputs.get("downscale_diagnostics"), Mapping)
         else {},
+        "overlay_renderer_diagnostics": inputs.get("overlay_renderer_diagnostics")
+        if isinstance(inputs.get("overlay_renderer_diagnostics"), Mapping)
+        else {},
         "ocr_resize_test": inputs.get("ocr_resize_test")
         if isinstance(inputs.get("ocr_resize_test"), str)
         else "Auto",
@@ -671,6 +697,7 @@ def restore_diagnostic_snapshot(
         "ocr_workload_diagnostics",
         "ocr_call_diagnostics",
         "downscale_diagnostics",
+        "overlay_renderer_diagnostics",
     ):
         if not isinstance(diagnostics.get(key), dict):
             raise ValueError("diagnostic detail is invalid")
@@ -853,6 +880,7 @@ def build_deferred_diagnostic_report(
         rc11e_normalization_diagnostics=rc11e_normalization_diagnostics,
         rc11f_cache_diagnostics=rc11f_cache_diagnostics,
         rc11g_lookup_index_diagnostics=rc11g_lookup_index_diagnostics,
+        overlay_renderer_diagnostics=inputs.get("overlay_renderer_diagnostics"),
     )
     report_seconds = time.perf_counter() - report_start
     runtime_profile["diagnostic_report_generation"] = report_seconds

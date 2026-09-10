@@ -266,7 +266,7 @@ class PatternApiHttpTests(unittest.TestCase):
             {
                 "request_id", "source_mode", "output_mode", "area_mode", "crop_box",
                 "quality", "raw_ocr_text", "readable_translation", "translation_txt",
-                "overlay_png", "diagnostic_context", "ocr_finished_at",
+                "overlay_png", "overlay_renderer", "diagnostic_context", "ocr_finished_at",
                 "ocr_duration_seconds", "ocr_time_sec", "translation_time_sec",
                 "ocr_box_count", "timings",
             },
@@ -593,6 +593,31 @@ class PatternApiHttpTests(unittest.TestCase):
         self.assertEqual("good", translated.json()["quality"]["level"])
         self.assertFalse(translated.json()["quality"]["requires_confirmation"])
         ocr_spy.assert_called_once()
+
+    def test_small_blank_select_area_still_requires_confirmation(self):
+        uploaded = Image.new("RGB", (240, 180), "white")
+        image_bytes = self._image_bytes(uploaded)
+
+        response = self.client.post(
+            "/api/v1/image-quality",
+            data={
+                "area_mode": "Select Area",
+                "crop_left": "40",
+                "crop_top": "40",
+                "crop_right": "140",
+                "crop_bottom": "100",
+            },
+            files={"image": ("pattern.png", image_bytes, "image/png")},
+        )
+
+        self.assertEqual(200, response.status_code, response.text)
+        payload = response.json()
+        self.assertEqual("poor", payload["quality"]["level"])
+        self.assertTrue(payload["quality"]["requires_confirmation"])
+        self.assertEqual(
+            "blank_or_near_empty",
+            payload["quality"]["metrics"]["classification_reason"],
+        )
 
     def test_poor_preflight_is_canonical_and_never_starts_ocr(self):
         tiny_text = self._component_pattern_image(
@@ -925,13 +950,13 @@ class PatternApiHttpTests(unittest.TestCase):
 
     def test_diagnostic_endpoint_restores_whole_and_selected_area_context(self):
         cases = [
-            ("Whole Pattern", None, [0, 0, 200, 160], "200 x 160 px"),
-            ("Select Area", (40, 30, 140, 110), [40, 30, 140, 110], "100 x 80 px"),
+            ("Whole Pattern", None, [0, 0, 200, 160], "200 x 160 px", "Fair"),
+            ("Select Area", (40, 30, 140, 110), [40, 30, 140, 110], "100 x 80 px", "Poor"),
         ]
         real_builder = (
             pattern_api.result_delivery_engine.build_deferred_diagnostic_report
         )
-        for area_mode, crop_box, expected_crop, expected_resolution in cases:
+        for area_mode, crop_box, expected_crop, expected_resolution, quality_status in cases:
             with self.subTest(area_mode=area_mode):
                 translated = self._translated_payload(area_mode, crop_box)
                 with mock.patch(
@@ -972,7 +997,7 @@ class PatternApiHttpTests(unittest.TestCase):
                 self.assertIn("Interface language: Japanese", response.text)
                 self.assertIn("Platform: Phase3B1-Test-Agent", response.text)
                 self.assertIn(
-                    "Image quality status: Fair",
+                    f"Image quality status: {quality_status}",
                     response.text,
                 )
                 restored_result = report_builder.call_args.args[0]

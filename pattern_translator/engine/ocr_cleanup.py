@@ -15,6 +15,11 @@ def normalize_pattern_rounds(text: str) -> str:
     - Rs-R8:                  -> R5-R8:
     - RI1 / Rl1 / R1o         -> R11 / R11 / R10
     """
+    text = "\n".join(
+        line_translation_engine.normalize_attached_row_stitch_separator(line)
+        for line in text.splitlines()
+    )
+
     # Character-level / short-token repairs often caused by OCR.
     repairs = {
         "R1o": "R10", "R1O": "R10", "R10;": "R10:",

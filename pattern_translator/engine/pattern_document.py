@@ -32,6 +32,40 @@ WATERMARK_TRAILING_PATTERNS = [
     r"[\.。·、,，\s]*(?:转载请|轉載請|转载请|轉載|转载).*$",
 ]
 
+_HANDLE_RE = re.compile(r"@[A-Za-z0-9_.-]{2,}")
+_COPYRIGHT_SYMBOL_RE = re.compile(r"©")
+_COPYRIGHT_YEAR_RE = re.compile(r"(?<!\d)(?:19|20)\d{2}(?!\d)")
+_ACCOUNT_ID_RE = re.compile(
+    r"(?i)(?:(?<![A-Za-z0-9_])(?:user(?:name)?|account|id)\b|"
+    r"小[红紅]書(?:號|号)?)\s*[:：#]?\s*"
+    r"(?P<identity>[A-Za-z0-9_.-]{3,})"
+)
+_ATTRIBUTION_NAME_RE = re.compile(
+    r"(?i:pattern|designed)\s+by\s+"
+    r"(?P<identity>[A-Z][A-Za-z.'’_-]+(?:\s+[A-Z][A-Za-z.'’_-]+){0,3})"
+    r"(?=$|\s+(?:(?i:all\s+rights|copyright)|©|(?:19|20)\d{2}))"
+)
+_ATTRIBUTION_PREFIX_RE = re.compile(
+    r"(?:pattern\s+by|designed\s+by|designer|studio|設計(?:者|師)|设计(?:者|师))",
+    re.IGNORECASE,
+)
+_STUDIO_IDENTITY_RE = re.compile(
+    r"\b(?:[A-Z][A-Za-z.'’_-]+\s+){0,3}(?:Studio|Designs)\b"
+)
+_PURE_NUMERIC_RE = re.compile(r"^[\s\d.,:;_+\-–—~～/()\[\]{}%]+$")
+_PATTERN_PROSE_RE = re.compile(
+    r"(?:\b(?:insert|glue|sew|attach|join|start(?:ing)?|work|repeat|fasten|place|"
+    r"use|make|crochet|change|continue|leave|turn|skip|optional)\b|"
+    r"鉤|钩|針|针|縫|缝|編|编|織|织|起針|起针|換線|换线|收緊|收紧|"
+    r"編む|縫う|付ける|段|目)",
+    re.IGNORECASE,
+)
+_UNRESOLVED_PREFIX_RE = re.compile(
+    r"^\s*⚠\s*(?:未能可靠翻譯|无法可靠翻译|Could not translate reliably|"
+    r"確実に翻訳できませんでした)",
+    re.IGNORECASE,
+)
+
 
 def strip_watermark_substrings(text: str) -> str:
     s = str(text or "").strip()
@@ -123,6 +157,202 @@ def filter_noise_and_watermarks(ocr_rows: pd.DataFrame) -> Tuple[pd.DataFrame, p
         # Keep this hidden unless debugging removed rows.
         pass
     return keep_df, removed_df
+
+
+def protected_identity_spans(text: str) -> Tuple[Dict[str, object], ...]:
+    """Return deterministic identity spans whose source spelling must remain exact."""
+    value = unicodedata.normalize("NFKC", str(text or "")).strip()
+    if not value:
+        return ()
+    candidates: List[Tuple[int, int, str]] = []
+    for match in _HANDLE_RE.finditer(value):
+        candidates.append((match.start(), match.end(), "handle"))
+    for match in _ACCOUNT_ID_RE.finditer(value):
+        candidates.append((*match.span("identity"), "account_id"))
+    for match in _ATTRIBUTION_NAME_RE.finditer(value):
+        candidates.append((*match.span("identity"), "proper_name"))
+    for match in _STUDIO_IDENTITY_RE.finditer(value):
+        candidates.append((match.start(), match.end(), "studio_identity"))
+
+    copyright_symbols = list(_COPYRIGHT_SYMBOL_RE.finditer(value))
+    if copyright_symbols:
+        for match in copyright_symbols:
+            candidates.append((match.start(), match.end(), "copyright_symbol"))
+        for match in _COPYRIGHT_YEAR_RE.finditer(value):
+            candidates.append((match.start(), match.end(), "copyright_year"))
+        boundary_pattern = re.compile(r"(?i)all\s+rights|copyright")
+        for symbol in copyright_symbols:
+            after_symbol = symbol.end()
+            boundary_matches = [
+                match.start()
+                for pattern in (_COPYRIGHT_YEAR_RE, boundary_pattern)
+                for match in pattern.finditer(value, after_symbol)
+            ]
+            boundary = min(boundary_matches) if boundary_matches else len(value)
+            identity_source = value[after_symbol:boundary].strip()
+            identity_match = re.search(
+                r"[A-Z][A-Za-z.'’_-]+(?:\s+[A-Z][A-Za-z.'’_-]+){0,3}",
+                identity_source,
+            )
+            if identity_match:
+                offset = value.find(identity_source, after_symbol, boundary)
+                candidates.append(
+                    (
+                        offset + identity_match.start(),
+                        offset + identity_match.end(),
+                        "copyright_owner",
+                    )
+                )
+
+    if _ATTRIBUTION_PREFIX_RE.search(value) and not any(
+        kind in {"proper_name", "studio_identity", "handle"}
+        for _, _, kind in candidates
+    ):
+        # The attribution is recognizable but its identity is not safely
+        # separable with deterministic rules; preserve this ambiguous unit.
+        candidates.append((0, len(value), "ambiguous_attribution"))
+
+    spans: List[Dict[str, object]] = []
+    occupied: List[Tuple[int, int]] = []
+    for start, end, kind in sorted(
+        candidates,
+        key=lambda item: (item[0], -(item[1] - item[0])),
+    ):
+        if any(start < used_end and used_start < end for used_start, used_end in occupied):
+            continue
+        occupied.append((start, end))
+        spans.append(
+            {
+                "start": start,
+                "end": end,
+                "text": value[start:end],
+                "kind": kind,
+            }
+        )
+    return tuple(spans)
+
+
+def protected_identity_spans_preserved(source: str, translation: str) -> bool:
+    return all(
+        str(span["text"]) in str(translation or "")
+        for span in protected_identity_spans(source)
+    )
+
+
+def classify_overlay_content(text: str, *, near_pattern_content: bool = False) -> str:
+    """Classify translation/preservation policy without an AI classifier."""
+    del near_pattern_content
+    value = unicodedata.normalize("NFKC", str(text or "")).strip()
+    if not value:
+        return "unchanged_non_language"
+    if _PURE_NUMERIC_RE.fullmatch(value):
+        return "unchanged_numeric"
+    spans = protected_identity_spans(value)
+    if not spans:
+        return "translated_content"
+    visible = list(value)
+    for span in spans:
+        for position in range(int(span["start"]), int(span["end"])):
+            visible[position] = " "
+    remainder = re.sub(r"[\W_]+", "", "".join(visible), flags=re.UNICODE)
+    if remainder:
+        return "mixed_protected_translation"
+    return "protected_identity"
+
+
+def overlay_content_layout(text: str) -> str:
+    value = unicodedata.normalize("NFKC", str(text or "")).strip()
+    return "prose" if "\n" in value or _PATTERN_PROSE_RE.search(value) else "structured"
+
+
+def translation_trust_status(row: object) -> str:
+    original = str(row.get("Original", "")).strip()
+    translated = str(row.get("Translation", "")).strip()
+    validation_status = str(row.get("Validation Status", "")).strip().lower()
+    if validation_status == "unresolved" or _UNRESOLVED_PREFIX_RE.search(translated):
+        return "untrusted"
+    if (
+        protected_identity_spans(original)
+        and not protected_identity_spans_preserved(original, translated)
+    ):
+        return "untrusted"
+    if not translated or terminology_engine.norm_text(original) == terminology_engine.norm_text(translated):
+        return "source_preserved"
+    return "trusted"
+
+
+def annotate_overlay_content(line_df: pd.DataFrame) -> pd.DataFrame:
+    """Attach renderer-only content and trust metadata to translated line rows."""
+    if line_df is None or line_df.empty:
+        return pd.DataFrame() if line_df is None else line_df
+    out = line_df
+    max_y = (
+        pd.to_numeric(out["max_y"], errors="coerce")
+        if "max_y" in out.columns
+        else pd.Series(float("nan"), index=out.index, dtype=float)
+    )
+    min_y = (
+        pd.to_numeric(out["min_y"], errors="coerce")
+        if "min_y" in out.columns
+        else pd.Series(float("nan"), index=out.index, dtype=float)
+    )
+    heights = (max_y - min_y).dropna()
+    median_height = float(heights[heights > 0].median() or 20.0) if not heights.empty else 20.0
+    anchor_rows = []
+    for _, row in out.iterrows():
+        original = str(row.get("Original", "")).strip()
+        if looks_like_pattern_text(original) or looks_like_section_header_text(original):
+            anchor_rows.append(row)
+    if anchor_rows:
+        band_min_y = min(float(row.get("min_y", 0) or 0) for row in anchor_rows)
+        band_max_y = max(float(row.get("max_y", 0) or 0) for row in anchor_rows)
+        band_margin = max(80.0, median_height * 8.0)
+    else:
+        band_min_y = band_max_y = band_margin = 0.0
+
+    categories = []
+    trust_statuses = []
+    protected_span_counts = []
+    protected_spans = []
+    protected_span_statuses = []
+    for _, row in out.iterrows():
+        center_y = (
+            float(row.get("min_y", 0) or 0) + float(row.get("max_y", 0) or 0)
+        ) / 2.0
+        near_pattern = bool(
+            anchor_rows
+            and band_min_y - band_margin <= center_y <= band_max_y + band_margin
+        )
+        categories.append(
+            classify_overlay_content(
+                str(row.get("Original", "")),
+                near_pattern_content=near_pattern,
+            )
+        )
+        trust_statuses.append(translation_trust_status(row))
+        spans = protected_identity_spans(str(row.get("Original", "")))
+        protected_span_counts.append(len(spans))
+        protected_spans.append(
+            tuple((str(span["text"]), str(span["kind"])) for span in spans)
+        )
+        protected_span_statuses.append(
+            "not_applicable"
+            if not spans
+            else (
+                "preserved"
+                if protected_identity_spans_preserved(
+                    str(row.get("Original", "")),
+                    str(row.get("Translation", "")),
+                )
+                else "missing_or_changed"
+            )
+        )
+    out["Content Category"] = categories
+    out["Translation Trust"] = trust_statuses
+    out["Protected Identity Span Count"] = protected_span_counts
+    out["Protected Identity Spans"] = protected_spans
+    out["Protected Identity Status"] = protected_span_statuses
+    return out
 
 
 # -----------------------------

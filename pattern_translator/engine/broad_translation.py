@@ -143,12 +143,41 @@ ENGLISH_ORDINAL_WORD_TO_DIGIT = {
     "ninth": "9",
     "tenth": "10",
 }
+ENGLISH_CARDINAL_WORD_TO_DIGIT = {
+    "one": "1",
+    "two": "2",
+    "three": "3",
+    "four": "4",
+    "five": "5",
+    "six": "6",
+    "seven": "7",
+    "eight": "8",
+    "nine": "9",
+    "ten": "10",
+}
 ENGLISH_ORDINAL_WORD_PATTERNS = {
     word: re.compile(
         rf"(?<![A-Za-z0-9_-]){re.escape(word)}(?![A-Za-z0-9_-])",
         re.IGNORECASE,
     )
     for word in ENGLISH_ORDINAL_WORD_TO_DIGIT
+}
+ENGLISH_COUNTED_CROCHET_UNIT = (
+    r"(?:rows?|rounds?|stitches?|chains?|times?|pieces?)"
+)
+ENGLISH_CARDINAL_CROCHET_COUNT_PATTERNS = {
+    word: re.compile(
+        rf"(?<![A-Za-z0-9_-]){re.escape(word)}\s+{ENGLISH_COUNTED_CROCHET_UNIT}"
+        rf"(?![A-Za-z0-9_-])",
+        re.IGNORECASE,
+    )
+    for word in ENGLISH_CARDINAL_WORD_TO_DIGIT
+}
+CHINESE_ARABIC_CROCHET_COUNT_PATTERNS = {
+    digit: re.compile(
+        rf"(?<!\d){re.escape(digit)}(?!\d)\s*(?:行|排|圈|輪|轮|針|针|次|個|个|片)"
+    )
+    for digit in ENGLISH_CARDINAL_WORD_TO_DIGIT.values()
 }
 CHINESE_ARABIC_ORDINAL_PATTERNS = {
     digit: re.compile(rf"第\s*{re.escape(digit)}(?!\d)")
@@ -203,6 +232,23 @@ ROW_ID_EN_RE = re.compile(
     re.IGNORECASE,
 )
 ROW_ID_CN_RE = re.compile(r"第\s*(\d+)(?:\s*[-–—]\s*(\d+))?\s*行")
+
+STRICT_GLOSSARY_SEMANTIC_CATEGORIES = frozenset(
+    {"basic_stitch", "textured_stitch", "increase", "decrease"}
+)
+COMPACT_CHINESE_STITCH_CONCEPTS = {
+    "x": "st_003_single_crochet",
+    "v": "st_009_increase",
+    "a": "st_015_decrease",
+}
+ENGLISH_COLOR_CHANGE_RE = re.compile(
+    r"(?<![A-Za-z0-9])(?:CC|change\s+(?:colou?r|yarn))(?![A-Za-z0-9])",
+    re.IGNORECASE,
+)
+CHINESE_COLOR_CHANGE_RE = re.compile(
+    r"(?:換(?:成|至|用|配色)?|换(?:成|至|用|配色)?|轉(?:成|至|用|色)?|"
+    r"转(?:成|至|用|色)?|改用|變更為|变更为|更換(?:成|至|為)?|更换(?:成|至|为)?)"
+)
 
 MEASUREMENT_UNIT_CANONICAL = {
     "mm": "mm",
@@ -483,6 +529,82 @@ def _source_glossary_forms(
     return list(dict.fromkeys(primary)), list(dict.fromkeys(secondary))
 
 
+def _target_glossary_forms(
+    entry: Mapping[str, Any], config: _RouteConfig
+) -> List[str]:
+    if config.output_mode == TRADITIONAL_CHINESE_TARGET:
+        values = _glossary_values(entry.get("traditional_chinese", ""))
+        values.extend(_glossary_values(entry.get("traditional_chinese_aliases", [])))
+        values.extend(
+            _glossary_values(entry.get("traditional_chinese_abbreviation", ""))
+        )
+    elif config.output_mode == SIMPLIFIED_CHINESE_TARGET:
+        values = _glossary_values(
+            entry.get("simplified_chinese_authoritative_term", "")
+        )
+        values.extend(_glossary_values(entry.get("simplified_chinese_aliases", [])))
+        values.extend(
+            _glossary_values(entry.get("simplified_chinese_abbreviation", ""))
+        )
+    else:
+        values = _glossary_values(entry.get("english_us", ""))
+        values.extend(_glossary_values(entry.get("english_us_aliases", [])))
+        values.extend(_glossary_values(entry.get("english_us_abbreviations", [])))
+    if config.en_us_source:
+        # Protected source abbreviations are also valid in translated crochet notation.
+        values.extend(_glossary_values(entry.get("english_us_abbreviations", [])))
+    return list(dict.fromkeys(value for value in values if value))
+
+
+def _form_match_spans(text: str, form: str) -> List[Tuple[int, int]]:
+    normalized_text = unicodedata.normalize("NFKC", text)
+    normalized_form = unicodedata.normalize("NFKC", str(form or "")).strip()
+    if not normalized_form:
+        return []
+    if re.fullmatch(r"[A-Za-z0-9]+(?:\s+[A-Za-z0-9]+)*", normalized_form):
+        phrase = re.escape(normalized_form).replace(r"\ ", r"\s+")
+        if len(normalized_form) == 1:
+            pattern = re.compile(
+                rf"(?<![A-Za-z]){phrase}(?![A-Za-z])",
+                0 if normalized_form.isupper() else re.IGNORECASE,
+            )
+        else:
+            # Crochet abbreviations are commonly attached directly to counts (11sc,
+            # 6inc). Letter boundaries still prevent matches inside ordinary words.
+            pattern = re.compile(
+                rf"(?<![A-Za-z]){phrase}(?![A-Za-z])",
+                re.IGNORECASE,
+            )
+        return [match.span() for match in pattern.finditer(normalized_text)]
+    return [
+        (match.start(), match.end())
+        for match in re.finditer(re.escape(normalized_form), normalized_text)
+    ]
+
+
+def _form_occurrence_count(text: str, forms: Sequence[str]) -> int:
+    occupied: List[Tuple[int, int]] = []
+    for form in sorted(set(forms), key=len, reverse=True):
+        for span in _form_match_spans(text, form):
+            if any(span[0] < end and start < span[1] for start, end in occupied):
+                continue
+            occupied.append(span)
+    return len(occupied)
+
+
+def _attached_count_abbreviation_present(source: str, form: str) -> bool:
+    normalized_form = unicodedata.normalize("NFKC", str(form or "")).strip()
+    if not re.fullmatch(r"[A-Za-z][A-Za-z0-9]{0,7}", normalized_form):
+        return False
+    return bool(
+        re.search(
+            rf"(?<=\d){re.escape(normalized_form)}(?![A-Za-z])",
+            unicodedata.normalize("NFKC", source),
+            re.IGNORECASE,
+        )
+    )
+
+
 def _ascii_phrase_present(normalized_source: str, normalized_phrase: str) -> bool:
     escaped = re.escape(normalized_phrase).replace(r"\ ", r"\s+")
     return bool(
@@ -502,6 +624,11 @@ def _form_present(
     if not normalized_form:
         return False
     if re.fullmatch(r"[a-z]", normalized_form):
+        if normalized_form == "k" and re.search(
+            r"(?<![A-Za-z0-9])[Kk](?=\d+(?![A-Za-z0-9]))",
+            case_preserved_source,
+        ):
+            return True
         # Single-letter crochet abbreviations are conventionally uppercase. Keeping
         # this case-sensitive avoids treating prose letters as crochet evidence.
         token = normalized_form.upper()
@@ -597,12 +724,25 @@ def select_request_glossary(
         if any(_form_present(normalized_source, case_source, form) for form in primary):
             selected_ids.add(concept_id)
         for form in secondary:
-            if not _form_present(normalized_source, case_source, form):
+            if not (
+                _form_present(normalized_source, case_source, form)
+                or _attached_count_abbreviation_present(case_source, form)
+            ):
                 continue
             key = terminology.norm_text(form)
             owners = secondary_owners.get(key, [])
             if key in explicit_resolutions:
                 selected_ids.update(explicit_resolutions[key])
+            elif (
+                not config.en_us_source
+                and key in COMPACT_CHINESE_STITCH_CONCEPTS
+                and COMPACT_CHINESE_STITCH_CONCEPTS[key] in owners
+            ):
+                # X/V/A are atomic compact Chinese crochet symbols. The glossary
+                # also contains compound sc-inc/sc-dec rows with the same V/A
+                # aliases; selecting every owner makes a single symbol require two
+                # target concepts and falsely rejects a correct inc/dec translation.
+                selected_ids.add(COMPACT_CHINESE_STITCH_CONCEPTS[key])
             else:
                 selected_ids.update(owners)
 
@@ -633,11 +773,11 @@ def build_source_segments(rows: pd.DataFrame) -> Tuple[List[Dict[str, str]], Lis
     segments: List[Dict[str, str]] = []
     segment_rows: List[pd.Series] = []
     for _, row in rows.iterrows():
-        original = str(row.get("text", "")).strip()
-        if not original:
+        semantic_text = str(row.get("semantic_text", row.get("text", ""))).strip()
+        if not semantic_text:
             continue
         segment_id = f"segment-{len(segments):04d}"
-        segments.append({"source_segment_id": segment_id, "text": original})
+        segments.append({"source_segment_id": segment_id, "text": semantic_text})
         segment_rows.append(row)
     return segments, segment_rows
 
@@ -986,6 +1126,44 @@ def _arabic_multiset(text: str) -> Counter[str]:
     return Counter(ARABIC_TOKEN_RE.findall(text))
 
 
+def _identity_duplicate_allowances(
+    source: str,
+    translation: str,
+    config: _RouteConfig,
+) -> Counter[str]:
+    """Allow one equivalent bilingual identity label, never a new identity value."""
+    round_source = Counter(
+        _identity_numbers(source, _source_round_patterns(config))
+    )
+    row_source_patterns = (ROW_EN_RE,) if config.en_us_source else (ROW_CN_RE,)
+    row_source = Counter(_identity_numbers(source, row_source_patterns))
+    chinese_round_pattern = (
+        ROUND_ID_SIMPLIFIED_CN_RE
+        if config.output_mode == SIMPLIFIED_CHINESE_TARGET
+        else ROUND_ID_CN_RE
+    )
+    round_target_families = (
+        ROUND_ID_EN_RE,
+        ROUND_ID_R_RE,
+        chinese_round_pattern,
+    )
+    row_target_families = (ROW_ID_EN_RE, ROW_ID_CN_RE)
+    allowances: Counter[str] = Counter()
+
+    for required, target_families in (
+        (round_source, round_target_families),
+        (row_source, row_target_families),
+    ):
+        for number in required:
+            represented_families = sum(
+                number in _identity_numbers(translation, (pattern,))
+                for pattern in target_families
+            )
+            if represented_families > 1:
+                allowances[number] += represented_families - 1
+    return allowances
+
+
 def _validate_arabic_digit_multiset(
     source: str,
     translation: str,
@@ -997,6 +1175,18 @@ def _validate_arabic_digit_multiset(
         return False
 
     extras = translation_counts - source_counts
+    if extras:
+        identity_allowances = _identity_duplicate_allowances(
+            source,
+            translation,
+            config,
+        )
+        for digit, allowance in identity_allowances.items():
+            if not extras[digit]:
+                continue
+            extras[digit] -= min(extras[digit], allowance)
+            if extras[digit] == 0:
+                del extras[digit]
     if config.en_us_source and extras:
         for word, digit in ENGLISH_ORDINAL_WORD_TO_DIGIT.items():
             if not extras[digit]:
@@ -1006,6 +1196,16 @@ def _validate_arabic_digit_multiset(
                 len(CHINESE_ARABIC_ORDINAL_PATTERNS[digit].findall(translation)),
             )
             extras[digit] -= min(extras[digit], ordinal_allowance)
+            if extras[digit] == 0:
+                del extras[digit]
+        for word, digit in ENGLISH_CARDINAL_WORD_TO_DIGIT.items():
+            if not extras[digit]:
+                continue
+            cardinal_allowance = min(
+                len(ENGLISH_CARDINAL_CROCHET_COUNT_PATTERNS[word].findall(source)),
+                len(CHINESE_ARABIC_CROCHET_COUNT_PATTERNS[digit].findall(translation)),
+            )
+            extras[digit] -= min(extras[digit], cardinal_allowance)
             if extras[digit] == 0:
                 del extras[digit]
     if config.source_mode == EN_US_SOURCE and extras["3"]:
@@ -1150,6 +1350,169 @@ def _validate_measurements(source: str, translation: str, config: _RouteConfig) 
     return True
 
 
+def _strict_glossary_semantic_counts(
+    source: str,
+    translation: str,
+    config: _RouteConfig,
+    terms: Sequence[Dict[str, Any]],
+) -> Tuple[Dict[str, int], Dict[str, int]]:
+    required: Dict[str, int] = {}
+    present: Dict[str, int] = {}
+    for entry in terms:
+        if str(entry.get("category", "")) not in STRICT_GLOSSARY_SEMANTIC_CATEGORIES:
+            continue
+        concept_id = str(entry.get("concept_id", ""))
+        source_primary, source_secondary = _source_glossary_forms(entry, config)
+        source_count = _form_occurrence_count(
+            source,
+            [*source_primary, *source_secondary],
+        )
+        if not source_count:
+            continue
+        required[concept_id] = source_count
+        present[concept_id] = _form_occurrence_count(
+            translation,
+            _target_glossary_forms(entry, config),
+        )
+    compact_required = _compact_chinese_stitch_counts(source, config)
+    if compact_required:
+        compact_present = _compact_english_stitch_counts(translation)
+        for symbol, concept_id in COMPACT_CHINESE_STITCH_CONCEPTS.items():
+            expected = compact_required.get(symbol, 0)
+            observed = compact_present.get(symbol, 0)
+            if expected or observed:
+                required[concept_id] = expected
+                present[concept_id] = observed
+    return required, present
+
+
+def _compact_chinese_stitch_counts(
+    source: str,
+    config: _RouteConfig,
+) -> Dict[str, int]:
+    """Count X/V/A only in compact Chinese crochet-row context."""
+    if config.en_us_source or config.output_mode != EN_US_TARGET:
+        return {}
+    normalized = unicodedata.normalize("NFKC", str(source or ""))
+    has_row_context = bool(
+        re.search(r"(?i)(?<![A-Za-z])R\s*\d+", normalized)
+        or re.search(r"\d\s*[XVA](?![A-Za-z])", normalized)
+    )
+    if not has_row_context:
+        return {}
+    counts: Counter[str] = Counter()
+    for match in re.finditer(r"(?<![A-Za-z])([XVA])(?![A-Za-z])", normalized):
+        counts[match.group(1).lower()] += 1
+    return dict(counts)
+
+
+def _compact_english_stitch_counts(translation: str) -> Dict[str, int]:
+    """Count sc/inc/dec semantics, preferring compound surface forms atomically."""
+    text = unicodedata.normalize("NFKC", str(translation or ""))
+    token_patterns = (
+        (
+            "v",
+            re.compile(
+                r"(?<![A-Za-z])(?:single\s+crochet|sc)\s+"
+                r"(?:increase(?:s)?|inc|incr)(?![A-Za-z])",
+                re.IGNORECASE,
+            ),
+        ),
+        (
+            "a",
+            re.compile(
+                r"(?<![A-Za-z])(?:single\s+crochet|sc)\s+"
+                r"(?:decrease(?:s)?|dec|decr)(?![A-Za-z])",
+                re.IGNORECASE,
+            ),
+        ),
+        (
+            "x",
+            re.compile(
+                r"(?<![A-Za-z])(?:single\s+crochets?|sc)(?![A-Za-z])",
+                re.IGNORECASE,
+            ),
+        ),
+        (
+            "v",
+            re.compile(
+                r"(?<![A-Za-z])(?:increase(?:s)?|inc|incr)(?![A-Za-z])",
+                re.IGNORECASE,
+            ),
+        ),
+        (
+            "a",
+            re.compile(
+                r"(?<![A-Za-z])(?:decrease(?:s)?|dec|decr)(?![A-Za-z])",
+                re.IGNORECASE,
+            ),
+        ),
+    )
+    candidates: List[Tuple[int, int, str]] = []
+    for symbol, pattern in token_patterns:
+        candidates.extend(
+            (match.start(), match.end(), symbol) for match in pattern.finditer(text)
+        )
+    occupied: List[Tuple[int, int]] = []
+    counts: Counter[str] = Counter()
+    for start, end, symbol in sorted(
+        candidates,
+        key=lambda item: (-(item[1] - item[0]), item[0], item[2]),
+    ):
+        if any(start < used_end and used_start < end for used_start, used_end in occupied):
+            continue
+        occupied.append((start, end))
+        counts[symbol] += 1
+    return dict(counts)
+
+
+def _validate_strict_glossary_semantics(
+    source: str,
+    translation: str,
+    config: _RouteConfig,
+    terms: Sequence[Dict[str, Any]],
+) -> bool:
+    required, present = _strict_glossary_semantic_counts(
+        source,
+        translation,
+        config,
+        terms,
+    )
+    return all(
+        present.get(concept_id, 0) == count
+        for concept_id, count in required.items()
+    )
+
+
+def _color_change_counts(
+    source: str,
+    translation: str,
+    config: _RouteConfig,
+) -> Tuple[int, int]:
+    if not config.en_us_source:
+        return 0, 0
+    required = len(ENGLISH_COLOR_CHANGE_RE.findall(source))
+    if config.output_mode == EN_US_TARGET:
+        present = len(ENGLISH_COLOR_CHANGE_RE.findall(translation))
+    else:
+        # Some valid Chinese crochet notation retains CC alongside a translated
+        # change verb. Count either notation family, not both in the same output.
+        present = max(
+            len(CHINESE_COLOR_CHANGE_RE.findall(translation)),
+            len(ENGLISH_COLOR_CHANGE_RE.findall(translation)),
+        )
+    return required, present
+
+
+def _validate_color_changes(
+    source: str,
+    translation: str,
+    config: _RouteConfig,
+) -> bool:
+    required, present = _color_change_counts(source, translation, config)
+    return required == present
+
+
 def _digit_multiset_fields(source: str, translation: str) -> Dict[str, object]:
     source_counts = _arabic_multiset(source)
     translation_counts = _arabic_multiset(translation)
@@ -1281,6 +1644,7 @@ def _objective_validation_failure_fields(
     translation: str,
     config: _RouteConfig,
     failed_rule: str,
+    terms: Sequence[Dict[str, Any]] = (),
 ) -> Dict[str, object]:
     fields: Dict[str, object] = {"failed_rule": failed_rule}
     if failed_rule == "arabic_digit_multiset":
@@ -1304,6 +1668,32 @@ def _objective_validation_failure_fields(
         fields.update(_repeat_fields(source, translation, config))
     elif failed_rule == "measurement_units":
         fields.update(_measurement_fields(source, translation, config))
+    elif failed_rule == "stitch_terminology":
+        required, present = _strict_glossary_semantic_counts(
+            source,
+            translation,
+            config,
+            terms,
+        )
+        fields.update(
+            {
+                "required_stitch_concept_counts": required,
+                "present_stitch_concept_counts": present,
+                "mismatched_stitch_concept_ids": [
+                    concept_id
+                    for concept_id, count in required.items()
+                    if present.get(concept_id, 0) != count
+                ],
+            }
+        )
+    elif failed_rule == "color_change_count":
+        required, present = _color_change_counts(source, translation, config)
+        fields.update(
+            {
+                "required_color_change_count": required,
+                "present_color_change_count": present,
+            }
+        )
     return fields
 
 
@@ -1321,6 +1711,7 @@ def _validate_objective_facts(
     *,
     diagnostic_logger: Optional[DiagnosticLogger] = None,
     source_segment_ids: Optional[Sequence[str]] = None,
+    terms: Sequence[Dict[str, Any]] = (),
 ) -> None:
     def fail(failed_rule: str) -> None:
         fields = _objective_validation_failure_fields(
@@ -1328,6 +1719,7 @@ def _validate_objective_facts(
             translation,
             config,
             failed_rule,
+            terms,
         )
         source_excerpt, source_truncated = _validation_diagnostic_excerpt(source)
         translation_excerpt, translation_truncated = _validation_diagnostic_excerpt(translation)
@@ -1367,6 +1759,15 @@ def _validate_objective_facts(
         fail("repeat_multiplier")
     if not _validate_measurements(source, translation, config):
         fail("measurement_units")
+    if not _validate_strict_glossary_semantics(
+        source,
+        translation,
+        config,
+        terms,
+    ):
+        fail("stitch_terminology")
+    if not _validate_color_changes(source, translation, config):
+        fail("color_change_count")
 
 
 def validate_semantic_units(
@@ -1374,7 +1775,17 @@ def validate_semantic_units(
     segments: Sequence[Dict[str, str]],
     config: _RouteConfig,
     diagnostic_logger: Optional[DiagnosticLogger] = None,
+    terms: Optional[Sequence[Dict[str, Any]]] = None,
 ) -> None:
+    selected_terms = (
+        list(terms)
+        if terms is not None
+        else select_request_glossary(
+            build_glossary(config.source_mode, config.output_mode),
+            segments,
+            config,
+        )
+    )
     expected_ids = [segment["source_segment_id"] for segment in segments]
     _validate_id_coverage(units, expected_ids, diagnostic_logger=diagnostic_logger)
     source_by_id = {segment["source_segment_id"]: segment["text"] for segment in segments}
@@ -1386,6 +1797,7 @@ def validate_semantic_units(
             config,
             diagnostic_logger=diagnostic_logger,
             source_segment_ids=unit["source_segment_ids"],
+            terms=selected_terms,
         )
 
 
@@ -1409,6 +1821,7 @@ def _resolve_objective_validation_failures(
     segments: Sequence[Dict[str, str]],
     config: _RouteConfig,
     diagnostic_logger: Optional[DiagnosticLogger] = None,
+    terms: Optional[Sequence[Dict[str, Any]]] = None,
 ) -> Tuple[List[dict[str, Any]], int]:
     """Fail closed per trusted unit while keeping structural failures request-fatal."""
     expected_ids = [segment["source_segment_id"] for segment in segments]
@@ -1418,6 +1831,15 @@ def _resolve_objective_validation_failures(
     }
     resolved_units: List[dict[str, Any]] = []
     failures: List[_ObjectiveValidationError] = []
+    selected_terms = (
+        list(terms)
+        if terms is not None
+        else select_request_glossary(
+            build_glossary(config.source_mode, config.output_mode),
+            segments,
+            config,
+        )
+    )
 
     for unit in units:
         resolved = dict(unit)
@@ -1431,6 +1853,7 @@ def _resolve_objective_validation_failures(
                 config,
                 diagnostic_logger=diagnostic_logger,
                 source_segment_ids=unit["source_segment_ids"],
+                terms=selected_terms,
             )
         except _ObjectiveValidationError as error:
             failures.append(error)
@@ -1498,12 +1921,50 @@ def adapt_semantic_units_to_line_df(
         segments[index]["source_segment_id"]: segment_rows[index]
         for index in range(len(segments))
     }
-    source_by_id = {segment["source_segment_id"]: segment["text"] for segment in segments}
     out: List[Dict[str, object]] = []
     for unit in semantic_units:
         ids = unit["source_segment_ids"]
         member_rows = [segment_row_by_id[source_id] for source_id in ids]
-        original = "\n".join(source_by_id[source_id] for source_id in ids)
+        source_regions: List[Dict[str, object]] = []
+        for source_id, row in zip(ids, member_rows):
+            row_min_x = _row_geometry_value(row, "min_x", "x", 0.0)
+            row_max_x = _row_geometry_value(row, "max_x", "x", row_min_x + 80.0)
+            row_min_y = _row_geometry_value(row, "min_y", "y", 0.0)
+            row_max_y = _row_geometry_value(row, "max_y", "y", row_min_y + 20.0)
+            raw_member_boxes = row.get("Member Boxes", ())
+            member_boxes = tuple(
+                dict(member)
+                for member in raw_member_boxes
+                if isinstance(member, dict)
+            ) if isinstance(raw_member_boxes, (list, tuple)) else ()
+            if not member_boxes:
+                member_boxes = (
+                    {
+                        "text": str(row.get("text", "")).strip(),
+                        "confidence": round(float(row.get("confidence", 0) or 0), 3),
+                        "min_x": row_min_x,
+                        "max_x": row_max_x,
+                        "min_y": row_min_y,
+                        "max_y": row_max_y,
+                    },
+                )
+            source_regions.append(
+                {
+                    "source_segment_id": source_id,
+                    "visual_line_id": str(row.get("Visual Line ID", "")),
+                    "reading_order": int(row.get("Reading Order", len(source_regions)) or 0),
+                    "text": str(row.get("text", "")).strip(),
+                    "confidence": round(float(row.get("confidence", 0) or 0), 3),
+                    "member_boxes": member_boxes,
+                    "min_x": row_min_x,
+                    "max_x": row_max_x,
+                    "min_y": row_min_y,
+                    "max_y": row_max_y,
+                }
+            )
+        original = "\n".join(
+            str(row.get("text", "")).strip() for row in member_rows
+        )
         translation = unit["translation"]
         confidences = [float(row.get("confidence", 0) or 0) for row in member_rows]
         min_x = min(_row_geometry_value(row, "min_x", "x", 0.0) for row in member_rows)
@@ -1526,6 +1987,13 @@ def adapt_semantic_units_to_line_df(
                 "Validation Status": str(unit.get("validation_status", "validated")),
                 "Validation Failure Reason": str(
                     unit.get("validation_failure_reason", "")
+                ),
+                "Source Regions": tuple(source_regions),
+                "Visual Line IDs": tuple(
+                    str(region.get("visual_line_id", "")) for region in source_regions
+                ),
+                "Reading Order": min(
+                    int(region.get("reading_order", 0) or 0) for region in source_regions
                 ),
                 "min_x": min_x,
                 "max_x": max_x,
@@ -1847,6 +2315,7 @@ def translate_merged_ocr_lines_broad(
             segments,
             config,
             diagnostic_logger=diagnostic_logger,
+            terms=terms,
         )
         result = adapt_semantic_units_to_line_df(units, segments, segment_rows)
         all_units_invalid = bool(units) and partial_failure_count == len(units)

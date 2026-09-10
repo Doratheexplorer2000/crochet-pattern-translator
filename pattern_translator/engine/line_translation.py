@@ -83,6 +83,16 @@ lookup_term = terminology.lookup_term
 term_kind = terminology.term_kind
 _looks_like_prose_line = terminology.looks_like_prose_line
 
+OCR_ATTACHED_ROW_STITCH_RE = re.compile(
+    r"^(?P<row>\d{1,3})\s*\.\s*(?=\d+\s*(?:sl\s*st|slst|sc|inc|dec|hdc|dc|tr|mr|ch|blo|flo|fo|sts?|stitches?)\b)",
+    flags=re.I,
+)
+
+
+def normalize_attached_row_stitch_separator(text: str) -> str:
+    """Restore an OCR-lost row boundary without treating decimals as rows."""
+    return OCR_ATTACHED_ROW_STITCH_RE.sub(r"R\g<row>: ", str(text), count=1)
+
 def format_counted_term(term_text: str, number: str, kind: str, output_mode: str) -> str:
     kind = kind.lower()
     n = str(number)
@@ -588,6 +598,13 @@ def translate_piece(piece: str, index: Dict[str, int], df: pd.DataFrame, output_
         n, term = m.groups()
         return translate_counted_token(n, term, index, df, output_mode)
 
+    # Mainland skip shorthand places the count after K: K3 / k3.
+    m = re.fullmatch(r"([Kk])(\d+)", p)
+    if m and lookup_row(m.group(1), index, df) is not None:
+        term, n = m.groups()
+        term_text = lookup_expression_symbol(term, index, df, output_mode)
+        return format_counted_term(term_text, n, term_kind(term, index, df), output_mode)
+
     # English shorthand: 6SC / 1DEC / 2 SC
     m = re.fullmatch(r"(\d+)\s*(SC|INC|DEC|HDC|DC|TR|SLST|SL\s*ST|MR|CH|BLO|FLO|FO|STS?|STITCHES?)", p, flags=re.I)
     if m:
@@ -809,6 +826,7 @@ def clean_single_ocr_line(text: str) -> str:
     if not s:
         return ""
     s = normalize_decimal_mm(s)
+    s = normalize_attached_row_stitch_separator(s)
     # Keep this conservative. Do not invent missing separators such as XV -> X,V.
     s = s.replace("：", ":").replace("；", ":").replace(";", ":")
     s = s.replace("，", ",").replace("、", ",").replace("。", ".")

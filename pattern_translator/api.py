@@ -24,6 +24,7 @@ from pattern_translator.translation_service import (
     CSV_TERM_CACHE_STATS,
     NORMALIZED_LOOKUP_INDEX_STATS,
     TranslateImageRequest,
+    apply_select_area_empty_gate,
     assess_image_quality,
     get_quality_status,
     load_database_dataframe,
@@ -171,8 +172,14 @@ def _downscale_settings(working_image: Image.Image, ocr_resize_test: str) -> Tup
     return experimental_downscale, downscale_max_height_option
 
 
-def _quality_details(image: Image.Image) -> Dict[str, Any]:
+def _quality_details(
+    image: Image.Image,
+    area_mode: str = translation_area_state_engine.WHOLE_PATTERN,
+) -> Dict[str, Any]:
     errors, warnings, metrics = assess_image_quality(image)
+    errors, warnings, metrics = apply_select_area_empty_gate(
+        errors, warnings, metrics, area_mode
+    )
     level, _status_label, _message = get_quality_status(errors, warnings)
     return {
         "level": level,
@@ -303,6 +310,7 @@ def _serialize_success(
         "readable_translation": primary.get("readable_translation", ""),
         "translation_txt": primary.get("translation_txt", ""),
         "overlay_png": _overlay_png_payload(primary.get("overlay_png")),
+        "overlay_renderer": primary.get("overlay_renderer", "legacy"),
         "diagnostic_context": diagnostic_context,
         "ocr_finished_at": result.ocr_finished_at,
         "ocr_duration_seconds": result.ocr_duration_seconds,
@@ -399,7 +407,7 @@ def image_quality(
             if area_mode == translation_area_state_engine.SELECT_AREA
             else decoded_image
         )
-        quality = _quality_details(working_image)
+        quality = _quality_details(working_image, area_mode)
     except HTTPException as error:
         return _image_quality_error(error.status_code, request_id)
     except Exception:
@@ -453,7 +461,7 @@ def translate_pattern(
     crop_extraction_seconds = time.perf_counter() - crop_extract_start
 
     try:
-        quality = _quality_details(working_image)
+        quality = _quality_details(working_image, area_mode)
     except Exception:
         return _image_quality_error(500, request_id)
     if quality["requires_confirmation"] and not force_run:
