@@ -32,7 +32,13 @@ _DIAGNOSTIC_MATCH_FRAME_BUDGET = 120_000
 _DIAGNOSTIC_OCR_FRAME_BUDGET = 180_000
 _DIAGNOSTIC_INPUT_BUDGET = 70_000
 _DIAGNOSTIC_STAT_BUDGET = 11_000
-_DIAGNOSTIC_LINE_COLUMNS = ("Original", "Translation")
+_DIAGNOSTIC_REQUIRED_LINE_COLUMNS = ("Original", "Translation")
+_DIAGNOSTIC_LINE_COLUMNS = (
+    *_DIAGNOSTIC_REQUIRED_LINE_COLUMNS,
+    "Validation Status",
+    "Validation Failure Reason",
+    "Semantic Unit ID",
+)
 _DIAGNOSTIC_OCR_COLUMNS = (
     "text",
     "confidence",
@@ -488,6 +494,16 @@ def create_diagnostic_snapshot(
         if isinstance(inputs.get("ocr_resize_test"), str)
         else "Auto",
     }
+    line_frame = result.get("line_df")
+    line_columns = (
+        tuple(
+            column
+            for column in _DIAGNOSTIC_LINE_COLUMNS
+            if column in line_frame.columns
+        )
+        if isinstance(line_frame, pd.DataFrame)
+        else _DIAGNOSTIC_REQUIRED_LINE_COLUMNS
+    )
     snapshot = {
         "schema_version": DIAGNOSTIC_SNAPSHOT_SCHEMA_VERSION,
         "result": {
@@ -515,9 +531,9 @@ def create_diagnostic_snapshot(
         },
         "frames": {
             "line_df": _dataframe_snapshot(
-                result.get("line_df"),
+                line_frame,
                 _JsonBudget(_DIAGNOSTIC_LINE_FRAME_BUDGET),
-                columns=_DIAGNOSTIC_LINE_COLUMNS,
+                columns=line_columns,
             ),
             "matches_df": _dataframe_snapshot(
                 result.get("matches_df"),
@@ -592,6 +608,8 @@ def _restore_dataframe(
     value: object,
     *,
     expected_columns: Optional[Tuple[str, ...]] = None,
+    allowed_columns: Optional[Tuple[str, ...]] = None,
+    required_columns: Tuple[str, ...] = (),
 ) -> pd.DataFrame:
     if not isinstance(value, dict):
         raise ValueError("diagnostic frame is invalid")
@@ -609,6 +627,15 @@ def _restore_dataframe(
         raise ValueError("diagnostic frame columns are duplicated")
     if expected_columns is not None and tuple(columns) != expected_columns:
         raise ValueError("diagnostic frame columns are invalid")
+    if allowed_columns is not None:
+        ordered_allowed = tuple(
+            column for column in allowed_columns if column in columns
+        )
+        if (
+            tuple(columns) != ordered_allowed
+            or any(column not in columns for column in required_columns)
+        ):
+            raise ValueError("diagnostic frame columns are invalid")
     for row in data:
         if not isinstance(row, list) or len(row) != len(columns):
             raise ValueError("diagnostic frame row is invalid")
@@ -722,7 +749,8 @@ def restore_diagnostic_snapshot(
 
     line_df = _restore_dataframe(
         frames.get("line_df"),
-        expected_columns=_DIAGNOSTIC_LINE_COLUMNS,
+        allowed_columns=_DIAGNOSTIC_LINE_COLUMNS,
+        required_columns=_DIAGNOSTIC_REQUIRED_LINE_COLUMNS,
     )
     request_warning = request_warning_value.strip()
     if request_warning:

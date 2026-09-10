@@ -560,6 +560,7 @@ async function translate() {
     }
     try {
       showResult(body);
+      requestCompletedResultScroll();
     } catch (_) {
       surfaceTranslationError(text.errorGeneric);
       return;
@@ -579,6 +580,13 @@ async function translate() {
       updateTranslateAvailability();
     }
   }
+}
+
+function requestCompletedResultScroll() {
+  const resultSection = $("result-section");
+  window.requestAnimationFrame(() => {
+    resultSection.scrollIntoView({ block: "start" });
+  });
 }
 
 function showResult(body) {

@@ -563,6 +563,88 @@ class ResultDeliveryTests(unittest.TestCase):
         )
         self.assertEqual(result["quality_metrics"], restored.result["quality_metrics"])
 
+    def test_broad_validation_metadata_survives_production_snapshot(self):
+        line_df = pd.DataFrame(
+            [
+                {
+                    "Original": "R1: 6X",
+                    "Translation": "R1: 6 sc",
+                    "Validation Status": "validated",
+                    "Validation Failure Reason": "",
+                    "Semantic Unit ID": "unit-0000",
+                },
+                {
+                    "Original": "R2: unclear",
+                    "Translation": "R2: unclear",
+                    "Validation Status": "unresolved",
+                    "Validation Failure Reason": "stitch_terminology",
+                    "Semantic Unit ID": "unit-0001",
+                },
+            ]
+        )
+        result = {
+            "line_df": line_df,
+            "ocr_rows": pd.DataFrame(),
+            "overlay_legend_df": pd.DataFrame(),
+            "source_mode": "English — US",
+            "output_mode": "Traditional Chinese",
+            "area_mode": "Whole Pattern",
+            "crop_box": (0, 0, 120, 80),
+            "quality_metrics": {},
+            "timings": {},
+            "runtime_profile": {},
+            "translation_profile": {},
+            "request_warning": "",
+            "overlay_legend": "",
+            "raw_ocr_text": "R1: 6X\nR2: unclear",
+            "clean_text": "R1: 6X\nR2: unclear",
+            "unmatched": [],
+            "readable_translation": "R1: 6 sc\nR2: unclear",
+            "matches_df": pd.DataFrame(),
+            "diagnostic_report_inputs": {
+                "ocr_box_rows": pd.DataFrame(
+                    columns=[
+                        "text",
+                        "confidence",
+                        "min_x",
+                        "max_x",
+                        "min_y",
+                        "max_y",
+                    ]
+                )
+            },
+        }
+
+        snapshot = result_delivery.create_diagnostic_snapshot(
+            result,
+            terminology_row_count=0,
+        )
+        restored = result_delivery.restore_diagnostic_snapshot(
+            json.loads(json.dumps(snapshot)),
+            interface_language="English",
+            platform="production-style-test",
+        )
+        report = result_delivery.build_deferred_diagnostic_report(
+            restored.result,
+            terminology_row_count=restored.terminology_row_count,
+        )
+
+        self.assertEqual(
+            [
+                "Original",
+                "Translation",
+                "Validation Status",
+                "Validation Failure Reason",
+                "Semantic Unit ID",
+            ],
+            list(restored.result["line_df"].columns),
+        )
+        self.assertIn("Broad units accepted: 1", report)
+        self.assertIn("Broad units rejected: 1", report)
+        self.assertIn("stitch_terminology=1", report)
+        self.assertIn("unit-0001=stitch_terminology", report)
+        self.assertNotIn("raw provider", json.dumps(snapshot).lower())
+
     def test_large_diagnostic_snapshot_remains_bounded_and_restorable(self):
         line_df = pd.DataFrame(
             [

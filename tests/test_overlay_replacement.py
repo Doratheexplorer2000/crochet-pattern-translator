@@ -279,6 +279,177 @@ class SourceReplacementRendererTests(unittest.TestCase):
         self.assertEqual(30, rows.loc[0, "Overlay Minimum Font Size"])
         self.assertEqual("[1]", rows.loc[0, "Overlay Marker"])
 
+    def test_vertical_padding_reduces_for_tall_font_metrics_only(self):
+        penguin_cases = {
+            "R1": (35.1, 33, 1),
+            "R3": (35.0, 33, 1),
+            "R5": (36.0, 33, 1),
+            "R6": (73.4, 68, 2),
+            "R7-R8": (35.0, 33, 1),
+            "safety-eyes": (73.4, 68, 2),
+        }
+
+        for row, (
+            corridor_height,
+            text_height,
+            expected_padding,
+        ) in penguin_cases.items():
+            with self.subTest(row=row):
+                self.assertEqual(
+                    expected_padding,
+                    overlay._bounded_vertical_padding(
+                        corridor_height,
+                        text_height,
+                        preferred_padding=4 if text_height == 68 else 2,
+                    ),
+                )
+
+        self.assertEqual(
+            2,
+            overlay._bounded_vertical_padding(35.1, 29, preferred_padding=2),
+        )
+        self.assertIsNone(
+            overlay._bounded_vertical_padding(34.9, 33, preferred_padding=2)
+        )
+        self.assertEqual(1, overlay._MIN_VERTICAL_PLATE_PADDING)
+
+    def test_tall_font_single_line_uses_padding_floor_without_overflow(self):
+        rows = pd.DataFrame(
+            [
+                self._row("@above", "@above", x1=100, x2=500, y1=60, y2=99),
+                self._row(
+                    "R1: 6 sc in mr (6)",
+                    "R1：環狀起針中織 6 短針（6）",
+                    x1=102.6,
+                    x2=299.2,
+                    y1=100,
+                    y2=130,
+                ),
+                self._row("@below", "@below", x1=100, x2=500, y1=135, y2=175),
+            ]
+        )
+
+        with mock.patch.object(
+            overlay, "_replacement_font_size", return_value=(30, 30)
+        ), mock.patch.object(overlay, "_line_height", return_value=33):
+            image, _legend, _legend_df = overlay.make_line_translation_overlay(
+                Image.new("RGB", (1080, 220), "white"),
+                rows,
+                "Traditional Chinese",
+            )
+
+        decision = rows.attrs["overlay_renderer_diagnostics"]["units"][1]
+        self.assertIsNotNone(image)
+        self.assertEqual("expanded_replacement", rows.loc[1, "Overlay State"])
+        self.assertEqual(30, rows.loc[1, "Overlay Font Size"])
+        self.assertEqual(30, rows.loc[1, "Overlay Minimum Font Size"])
+        self.assertEqual(1, decision["vertical_padding"])
+        self.assertEqual(35, decision["required_rendered_height"])
+        self.assertEqual("", rows.loc[1, "Overlay Marker"])
+
+    def test_text_taller_than_corridor_still_uses_real_overflow(self):
+        rows = pd.DataFrame(
+            [
+                self._row("@above", "@above", x1=100, x2=500, y1=60, y2=99),
+                self._row(
+                    "R1: 6 sc in mr (6)",
+                    "R1：環狀起針中織 6 短針（6）",
+                    x1=102.6,
+                    x2=299.2,
+                    y1=100,
+                    y2=130,
+                ),
+                self._row("@below", "@below", x1=100, x2=500, y1=135, y2=175),
+            ]
+        )
+
+        with mock.patch.object(
+            overlay, "_replacement_font_size", return_value=(30, 30)
+        ), mock.patch.object(overlay, "_line_height", return_value=34):
+            image, legend, legend_df = overlay.make_line_translation_overlay(
+                Image.new("RGB", (1080, 220), "white"),
+                rows,
+                "Traditional Chinese",
+            )
+
+        decision = rows.attrs["overlay_renderer_diagnostics"]["units"][1]
+        self.assertGreater(image.height, 220)
+        self.assertEqual("overflow", rows.loc[1, "Overlay State"])
+        self.assertEqual("single_line_corridor_fit", rows.loc[1, "Overflow Reason"])
+        self.assertIsNone(decision["vertical_padding"])
+        self.assertEqual("[1]", rows.loc[1, "Overlay Marker"])
+        self.assertEqual("[1]", legend_df.loc[0, "Marker"])
+        self.assertIn("R1：環狀起針中織 6 短針（6）", legend)
+
+    def test_tall_font_compound_row_reduces_padding_without_overflow(self):
+        regions = (
+            {
+                "source_segment_id": "segment-0000",
+                "visual_line_id": "visual-0000",
+                "reading_order": 0,
+                "member_boxes": (),
+                "min_x": 104.0,
+                "max_x": 900.0,
+                "min_y": 100.0,
+                "max_y": 130.0,
+            },
+            {
+                "source_segment_id": "segment-0001",
+                "visual_line_id": "visual-0001",
+                "reading_order": 1,
+                "member_boxes": (),
+                "min_x": 104.0,
+                "max_x": 520.0,
+                "min_y": 136.0,
+                "max_y": 166.0,
+            },
+        )
+        rows = pd.DataFrame(
+            [
+                self._row(
+                    "R6 source line one\nR6 source line two",
+                    "R6 translated line one and translated line two",
+                    x1=104,
+                    x2=900,
+                    y1=100,
+                    y2=166,
+                    Source_Regions=regions,
+                ),
+                self._row(
+                    "@below",
+                    "@below",
+                    x1=100,
+                    x2=950,
+                    y1=169.9,
+                    y2=210,
+                ),
+            ]
+        ).rename(columns={"Source_Regions": "Source Regions"})
+
+        with mock.patch.object(
+            overlay, "_replacement_font_size", return_value=(30, 30)
+        ), mock.patch.object(
+            overlay, "_line_height", return_value=33
+        ), mock.patch.object(
+            overlay,
+            "_wrap_text_unlimited",
+            return_value=["R6 translated line one", "and translated line two"],
+        ):
+            image, _legend, _legend_df = overlay.make_line_translation_overlay(
+                Image.new("RGB", (1080, 240), "white"),
+                rows,
+                "Traditional Chinese",
+            )
+
+        decision = rows.attrs["overlay_renderer_diagnostics"]["units"][0]
+        self.assertIsNotNone(image)
+        self.assertEqual("expanded_replacement", rows.loc[0, "Overlay State"])
+        self.assertEqual(30, rows.loc[0, "Overlay Font Size"])
+        self.assertEqual(2, decision["vertical_padding"])
+        self.assertEqual(72, decision["required_rendered_height"])
+        self.assertEqual(73.4, decision["available_corridor_height"])
+        self.assertEqual("", rows.loc[0, "Overlay Marker"])
+
     def test_single_line_fit_stops_before_neighboring_ocr_content(self):
         source = Image.new("RGB", (1080, 260), (245, 245, 245))
         ImageDraw.Draw(source).rectangle(

@@ -600,6 +600,37 @@ class PatternBrowserUiTests(unittest.TestCase):
         self.assertIn('$("error").scrollIntoView({ block: "center" })', error_source)
         self.assertEqual(4, translate_source.count("surfaceTranslationError("))
 
+    def test_success_scrolls_once_and_failures_or_downloads_do_not_scroll(self):
+        app_source = (
+            REPO_ROOT / "pattern_translator" / "web" / "app.js"
+        ).read_text(encoding="utf-8")
+        translate_start = app_source.index("async function translate()")
+        translate_end = app_source.index(
+            "\nfunction requestCompletedResultScroll()", translate_start
+        )
+        translate_source = app_source[translate_start:translate_end]
+        scroll_start = translate_end + 1
+        scroll_end = app_source.index("\nfunction showResult(", scroll_start)
+        scroll_source = app_source[scroll_start:scroll_end]
+        diagnostic_start = app_source.index("async function downloadDiagnostic()")
+        diagnostic_end = app_source.index("\nfunction track(", diagnostic_start)
+        download_source = app_source[diagnostic_start:diagnostic_end]
+        handlers_source = app_source[
+            app_source.index('input.addEventListener("change"') :
+        ]
+
+        self.assertEqual(1, translate_source.count("requestCompletedResultScroll();"))
+        self.assertLess(
+            translate_source.index("showResult(body);"),
+            translate_source.index("requestCompletedResultScroll();"),
+        )
+        self.assertIn("window.requestAnimationFrame", scroll_source)
+        self.assertIn(
+            'resultSection.scrollIntoView({ block: "start" })', scroll_source
+        )
+        self.assertNotIn("requestCompletedResultScroll", download_source)
+        self.assertNotIn("requestCompletedResultScroll", handlers_source)
+
     def test_diagnostic_ui_strings_exist_in_all_four_languages(self):
         payload = run_browser_modules(
             """

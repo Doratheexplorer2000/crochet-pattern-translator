@@ -34,6 +34,7 @@ _PLATE_FILL = (255, 255, 245)
 _PLATE_TEXT = (15, 15, 15)
 _TEAL = (15, 118, 110)
 _WARNING = (183, 121, 31)
+_MIN_VERTICAL_PLATE_PADDING = 1
 
 
 def is_source_replacement_overlay_enabled(environ: Optional[Dict[str, str]] = None) -> bool:
@@ -690,6 +691,19 @@ def _line_height(draw: ImageDraw.ImageDraw, font: object) -> int:
     return max(1, int(bbox[3] - bbox[1]))
 
 
+def _bounded_vertical_padding(
+    available_height: float,
+    content_height: float,
+    preferred_padding: int,
+) -> Optional[int]:
+    """Return the largest fitting padding without dropping below one pixel per side."""
+    preferred = max(_MIN_VERTICAL_PLATE_PADDING, int(preferred_padding))
+    for candidate in range(preferred, _MIN_VERTICAL_PLATE_PADDING - 1, -1):
+        if float(content_height) + candidate * 2 <= float(available_height) + 0.01:
+            return candidate
+    return None
+
+
 def _clamped_rect(
     min_x: object,
     min_y: object,
@@ -919,10 +933,10 @@ def _compound_source_corridor(
 def _corridor_line_capacity(
     corridor_height: float,
     line_height: int,
-    padding: int,
+    vertical_padding: int,
+    line_gap: int,
 ) -> int:
-    line_gap = max(2, padding // 2)
-    usable = max(0.0, float(corridor_height) - padding * 2)
+    usable = max(0.0, float(corridor_height) - vertical_padding * 2)
     return max(0, int((usable + line_gap) // (line_height + line_gap)))
 
 
@@ -977,12 +991,26 @@ def _draw_text_lines(
     lines: List[str],
     font: object,
     line_height: int,
-    padding: int,
+    horizontal_padding: int,
+    *,
+    vertical_padding: Optional[int] = None,
+    line_gap: Optional[int] = None,
 ) -> None:
-    y = rect[1] + padding
+    vertical_padding = (
+        horizontal_padding if vertical_padding is None else vertical_padding
+    )
+    line_gap = (
+        max(2, horizontal_padding // 2) if line_gap is None else line_gap
+    )
+    y = rect[1] + vertical_padding
     for line in lines:
-        draw.text((rect[0] + padding, y), line, fill=_PLATE_TEXT, font=font)
-        y += line_height + max(2, padding // 2)
+        draw.text(
+            (rect[0] + horizontal_padding, y),
+            line,
+            fill=_PLATE_TEXT,
+            font=font,
+        )
+        y += line_height + line_gap
 
 
 def _warning_badge_position(
@@ -1374,7 +1402,6 @@ def _make_source_replacement_overlay(
                             _text_width(draw, font, lines[0])
                             + text_padding * 2
                         )
-                        required_height = line_height + text_padding * 2
                         corridor, blocking_region = _single_line_row_corridor(
                             original_rects[0],
                             plate_rects[0],
@@ -1390,6 +1417,16 @@ def _make_source_replacement_overlay(
                             if corridor is not None
                             else 0.0
                         )
+                        vertical_padding = _bounded_vertical_padding(
+                            available_height,
+                            line_height,
+                            text_padding,
+                        )
+                        required_height = line_height + (
+                            vertical_padding
+                            if vertical_padding is not None
+                            else _MIN_VERTICAL_PLATE_PADDING
+                        ) * 2
                         fit_metrics = {
                             "available_corridor_width": round(
                                 available_width, 1
@@ -1414,11 +1451,15 @@ def _make_source_replacement_overlay(
                                 else ""
                             ),
                             "text_padding": text_padding,
+                            "vertical_padding": vertical_padding,
                         }
                         diagnostic.update(fit_metrics)
                         if corridor is None:
                             fit_reason = "protected_region_collision"
                             collision_rejections += 1
+                            continue
+                        if vertical_padding is None:
+                            fit_reason = "single_line_corridor_fit"
                             continue
                         plate = _single_line_plate(
                             original_rects[0],
@@ -1516,11 +1557,6 @@ def _make_source_replacement_overlay(
                     corridor_width = corridor[2] - corridor[0]
                     corridor_height = corridor[3] - corridor[1]
                     inner_width = max(1.0, corridor_width - padding * 2)
-                    allowed_lines = _corridor_line_capacity(
-                        corridor_height,
-                        line_height,
-                        padding,
-                    )
                     wrapped = _wrap_text_unlimited(
                         translated,
                         draw,
@@ -1528,6 +1564,26 @@ def _make_source_replacement_overlay(
                         inner_width,
                     )
                     line_gap = max(2, padding // 2)
+                    text_height = (
+                        len(wrapped) * line_height
+                        + max(0, len(wrapped) - 1) * line_gap
+                    )
+                    vertical_padding = _bounded_vertical_padding(
+                        corridor_height,
+                        text_height,
+                        padding,
+                    )
+                    capacity_padding = (
+                        vertical_padding
+                        if vertical_padding is not None
+                        else _MIN_VERTICAL_PLATE_PADDING
+                    )
+                    allowed_lines = _corridor_line_capacity(
+                        corridor_height,
+                        line_height,
+                        capacity_padding,
+                        line_gap,
+                    )
                     required_width = (
                         max(
                             (_text_width(draw, font, line) for line in wrapped),
@@ -1535,11 +1591,7 @@ def _make_source_replacement_overlay(
                         )
                         + padding * 2
                     )
-                    required_height = (
-                        len(wrapped) * line_height
-                        + max(0, len(wrapped) - 1) * line_gap
-                        + padding * 2
-                    )
+                    required_height = text_height + capacity_padding * 2
                     metrics = {
                         "available_corridor_width": round(corridor_width, 1),
                         "available_corridor_height": round(corridor_height, 1),
@@ -1547,6 +1599,9 @@ def _make_source_replacement_overlay(
                         "required_rendered_height": round(required_height, 1),
                         "allowed_line_count": allowed_lines,
                         "actual_wrapped_line_count": len(wrapped),
+                        "text_padding": padding,
+                        "vertical_padding": vertical_padding,
+                        "line_gap": line_gap,
                         "blocking_protected_region": (
                             tuple(round(value, 1) for value in blocking_region)
                             if blocking_region is not None
@@ -1554,7 +1609,11 @@ def _make_source_replacement_overlay(
                         ),
                     }
                     diagnostic.update(metrics)
-                    if not wrapped or len(wrapped) > allowed_lines:
+                    if (
+                        not wrapped
+                        or vertical_padding is None
+                        or len(wrapped) > allowed_lines
+                    ):
                         fit_reason = "compound_corridor_height"
                         continue
                     needed_bottom = max(
@@ -1602,6 +1661,12 @@ def _make_source_replacement_overlay(
                     font,
                     line_height,
                     int(fit_metrics.get("text_padding", padding)),
+                    vertical_padding=int(
+                        fit_metrics.get("vertical_padding", padding)
+                    ),
+                    line_gap=int(
+                        fit_metrics.get("line_gap", max(2, padding // 2))
+                    ),
                 )
             else:
                 for line_index, line in enumerate(lines):
