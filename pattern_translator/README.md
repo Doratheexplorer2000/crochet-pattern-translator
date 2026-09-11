@@ -2,7 +2,7 @@
 
 Mobile-first OCR translation for crochet pattern images.
 
-Current production baseline: `f1a9b45cad9e361bcdeb4c7066fe66f1d45ec07d` (`Improve Broad translation failure recovery`)
+Current production baseline: `96dd8034b6d70433f848568ec9d34aabd113e334` (`Fix dense overlay placement and page metadata handling`)
 
 The deployed shadow classifier remains observational: `PATTERN_LUNA_TITLE_PRIMARY_ENABLED` is unset/OFF in production. Later title-primary and translation-architecture experiments are local research only and are not committed, deployed, or enabled in Railway. See `pattern_translator/PROJECT_STATUS.md` for the current production/paused-research/next-prototype distinction.
 
@@ -14,17 +14,13 @@ pattern_translator.api:app
 
 Preserved Streamlit rollback entry point: `pattern_translator/app.py`.
 
-## Pending Soft Launch Correction Set — Local Only (2026-09-10)
+## Production Closeout — 2026-09-11
 
-The current local release candidate contains the completed Soft Launch correction set. The full automated suite passed (`560 / 560`), `git diff --check` passed, and Kerry and Penguin Human UAT passed. This release candidate has not been pushed or deployed. The production site still runs the baseline identified above and does not yet contain the complete correction set; production smoke UAT and Railway/Linux performance validation remain pending.
+Railway production is running `96dd8034b6d70433f848568ec9d34aabd113e334`. Deployment succeeded, `/health` returned `{"status":"ok"}`, and both the health endpoint and public UI returned HTTP 200.
 
-User-facing translation corrections include compact `K3` skip handling, the `BOB` Bobble alias, attached row-punctuation normalization such as `5.24 sc`, and Simplified Chinese compact notation (`X` -> `sc`, `V` -> `inc`, `A` -> `dec`). Broad validation now avoids the confirmed false rejections for number-word/count equivalence, bilingual row or round identity, compact X/V/A notation, Bobble multiplicity, and colour changes, and records rejection reason codes for diagnostics. Trusted readable text is translated broadly while protected identity spans such as `@handles` remain exact.
+Human UAT approved the source-replacement renderer, source-aware language typography, one-shot post-success result scrolling, previously shipped Broad cross-language corrections, bounded dense-row placement, the subpixel source-anchor correction, Flower short-CJK continuation preservation, and detached page-number handling. Whole Pattern and Select Area remain tested workflows. The source-replacement code default remains OFF; production activation continues to use `PATTERN_SOURCE_REPLACEMENT_OVERLAY_ENABLED=1` in Railway.
 
-The browser UX now has one localized OCR-running state, one-click Diagnostic Report download, one-shot scrolling to Translation Result after a new successful request, a clearer numbered-marker explanation, the official feedback-form URL, and the new source-replacement PNG presentation.
-
-The source-replacement renderer is gated by `PATTERN_SOURCE_REPLACEMENT_OVERLAY_ENABLED`, which defaults to **OFF**. Local UAT passed; production activation requires a later explicit deployment/config decision. When enabled, trusted translations replace source text in anchored plates with safe expansion and bounded font reduction. Content that cannot fit uses a source marker plus a newly appended footer; the original canvas is preserved and the new mode does not add floating legacy labels. Protected identity spans remain exact, surrounding natural language (including phrases such as `all rights reserved`) may translate, and unresolved or untrusted content preserves its source text.
-
-Local macOS ARM PaddleOCR timing is highly variable. A native Paddle/Accelerate crash was observed, and a controlled cold-worker call exceeded the 120-second limit inside `predict()`. This is not production performance evidence, and no safe application-level optimization has been justified. Benchmark the deployed Railway/Linux runtime after release before making an OCR performance change.
+Deferred to the next engineering thread: completion of the four-language Broad route matrix; Simplified Chinese → Japanese, Traditional Chinese → Japanese, and Simplified/Traditional Chinese cross-translation; review of Simplified Chinese → English UK architecture; English → Simplified Chinese/Japanese quality work; implicit-number `arabic_digit_multiset` validation; multilingual warning/footer font fallback; provider-call diagnostic visibility; Japanese provider-output variance; and difficult dense/table layout polish. These are not regressions or blockers caused by the Flower page-number correction.
 
 ## Soft Launch Status — 2026-09-07
 
@@ -53,7 +49,7 @@ The production baseline is now frozen for Soft Launch. Further UI polish, Stream
 
 ## Current Product Status
 
-The current production revision is `f1a9b45cad9e361bcdeb4c7066fe66f1d45ec07d`, deployed from GitHub `main` to Railway and publicly available at `https://pattern.crochetintelligence.com`. It includes the FastAPI/browser production cutover and the production-validated Portal Centralization, Broad and Legacy translation routes, shared Plausible analytics, custom domain, isolated OCR worker, canonical translation state, and rerun-safe result delivery. Railway deployment of this revision is human-confirmed.
+The current production revision is `96dd8034b6d70433f848568ec9d34aabd113e334`, deployed from GitHub `main` to Railway and publicly available at `https://pattern.crochetintelligence.com`. It includes the FastAPI/browser production cutover and the production-validated Portal Centralization, Broad and Legacy translation routes, source-replacement presentation, source-aware typography, shared Plausible analytics, custom domain, isolated OCR worker, canonical translation state, and rerun-safe result delivery. Railway deployment of this revision is verified.
 
 Key validated behavior:
 
@@ -140,8 +136,10 @@ Production routes:
 
 - English US → Traditional Chinese: Broad.
 - English US → Simplified Chinese: Broad.
+- English US → Japanese: Broad.
 - Simplified Chinese → English US: Broad.
-- Traditional Chinese → English US: Legacy.
+- Traditional Chinese → English US: Broad.
+- Traditional Chinese → English UK: Broad.
 - All other routes remain Legacy unless explicitly documented otherwise.
 
 Commit `f1a9b45cad9e361bcdeb4c7066fe66f1d45ec07d` (`Improve Broad translation failure recovery`) keeps a normal successful Broad translation to one provider call. Selected promptly returned malformed/schema failures and selected transient provider failures may retry Broad once within the shared existing 90-second budget; timeouts do not retry.
@@ -176,7 +174,7 @@ Validation passed: Hybrid/Human-UAT automated suite `73 / 73`; feature-flag-OFF 
 
 ## Current Project Status
 
-- Current production baseline: `f1a9b45cad9e361bcdeb4c7066fe66f1d45ec07d`
+- Current production baseline: `96dd8034b6d70433f848568ec9d34aabd113e334`
 - Current app version string: `Pattern OCR Translator (Beta RC26)`
 - Current production runtime: FastAPI/browser; Streamlit is preserved as rollback-only.
 - Latest Pattern Translator analytics milestone: RC54B Analytics Transport Migration completed with Production Human UAT PASS.

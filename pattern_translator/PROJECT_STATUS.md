@@ -1,20 +1,20 @@
 # Crochet Pattern Translator Project Status
 
-Last updated: 2026-09-10
+Last updated: 2026-09-11
 
-## Pending Soft Launch Correction Release — 2026-09-10
+## Production Engineering Closeout — 2026-09-11
 
-The current local release candidate implements the approved Soft Launch corrections and is ready for release review. Automated validation passed `560 / 560`, the latest `git diff --check` passed, and Kerry and Penguin Human UAT passed. This release candidate has not been pushed or deployed. Production remains on `f1a9b45cad9e361bcdeb4c7066fe66f1d45ec07d`; production smoke UAT and a Railway/Linux performance benchmark are still required after deployment.
+Production baseline `96dd8034b6d70433f848568ec9d34aabd113e334` is deployed from GitHub `main` to Railway. Railway reported deployment success for Pattern Translator; `/health` returned `{"status":"ok"}`, and the health endpoint and public UI returned HTTP 200. Release validation passed `623 / 623` tests, Python compilation, and diff checks without real OCR or paid provider calls.
 
-The correction set covers the official feedback-form URL; `K3` skip, `BOB` Bobble, attached row-punctuation, and Simplified Chinese X/V/A translation; Broad validator false-rejection fixes and rejection reason diagnostics; broad translation of trusted readable text with exact preservation of protected identity spans; Select Area quality gating; localized single OCR-running state; one-click Diagnostic Report; improved numbered-marker guidance; and one-shot post-success scrolling to Translation Result.
+Human UAT approved the source-replacement renderer, source-aware language typography, production result auto-scroll, previously shipped Broad cross-language corrections, dense-row/subpixel placement correction, Flower short-CJK continuation preservation, and detached page-number handling. Whole Pattern and Select Area were exercised. The Flower final instruction translates completely, while `-7-` remains untouched and excluded from semantic/provider grouping without a warning/footer entry.
 
-The source-replacement overlay is implemented behind `PATTERN_SOURCE_REPLACEMENT_OVERLAY_ENABLED`. The code default is **OFF**, local Kerry and Penguin UAT passed, and any production activation requires an explicit later environment/config action. In this mode, trusted text replaces its source in anchored plates using safe expansion and bounded font reduction. Genuine overflow uses a source marker and appended footer; the original canvas is retained; floating legacy labels are not used; `@handles` and other protected identity spans remain exact; surrounding natural language, including `all rights reserved`, may translate; and unresolved or untrusted content stays source-preserved.
+The source-replacement overlay remains gated by `PATTERN_SOURCE_REPLACEMENT_OVERLAY_ENABLED`; the code default is OFF and Railway owns production activation. `PATTERN_BROAD_DEBUG_CAPTURE` remains default OFF and this closeout did not add it to Railway. Luna title-primary remains absent/OFF.
 
-Local macOS ARM performance is not representative of Railway: PaddleOCR latency was highly variable, a native Paddle/Accelerate crash occurred, and a controlled cold-worker call exceeded 120 seconds inside `predict()`. No safe application-level optimization is justified by that evidence. Railway/Linux measurement is the next performance validation step after deployment.
+Deferred to the next engineering thread: complete the four-language Broad route matrix; Simplified Chinese → Japanese; Traditional Chinese → Japanese; Simplified/Traditional Chinese cross-translation; review Simplified Chinese → English UK architecture; English → Simplified Chinese/Japanese quality and regression work; implicit-number `arabic_digit_multiset` validation; multilingual warning/footer font fallback; provider-call diagnostic visibility; Japanese provider-output variance; and further difficult dense/table rendering polish. None is a blocker caused by the page-number fix.
 
 ## Current Version
 
-Current FastAPI production application baseline: `f1a9b45cad9e361bcdeb4c7066fe66f1d45ec07d` (`Improve Broad translation failure recovery`)
+Current FastAPI production application baseline: `96dd8034b6d70433f848568ec9d34aabd113e334` (`Fix dense overlay placement and page metadata handling`)
 
 Application version string: `Pattern OCR Translator (Beta RC26)`
 
@@ -32,7 +32,7 @@ pattern_translator/app.py
 
 ## Current Production Status
 
-The FastAPI/browser Crochet Pattern Translator is live at `https://pattern.crochetintelligence.com` from GitHub `main`, using the existing Railway service and custom domain. The production application baseline is `f1a9b45cad9e361bcdeb4c7066fe66f1d45ec07d`. Railway deployment of this revision is human-confirmed. The deployed shadow Luna title classifier remains observational, and unrelated title-primary experiments remain local and uncommitted. Railway uses this validated Custom Start Command with one Uvicorn worker:
+The FastAPI/browser Crochet Pattern Translator is live at `https://pattern.crochetintelligence.com` from GitHub `main`, using the existing Railway service and custom domain. The production application baseline is `96dd8034b6d70433f848568ec9d34aabd113e334`. Railway deployment of this revision is verified. The deployed shadow Luna title classifier remains observational, and unrelated title-primary experiments remain local and uncommitted. Railway uses this validated Custom Start Command with one Uvicorn worker:
 
 ```sh
 sh -c 'python -m uvicorn pattern_translator.api:app --host 0.0.0.0 --port "$PORT" --workers 1'
@@ -68,8 +68,10 @@ Production routes:
 
 - English US → Traditional Chinese: Broad.
 - English US → Simplified Chinese: Broad.
+- English US → Japanese: Broad.
 - Simplified Chinese → English US: Broad.
-- Traditional Chinese → English US: Legacy.
+- Traditional Chinese → English US: Broad.
+- Traditional Chinese → English UK: Broad.
 - All other routes remain Legacy unless explicitly documented otherwise.
 
 Production commit `f1a9b45cad9e361bcdeb4c7066fe66f1d45ec07d` (`Improve Broad translation failure recovery`) preserves the normal one-call Broad success path. Selected promptly returned malformed/schema failures and selected transient provider failures may retry Broad once, sharing the existing 90-second budget. Timeouts do not retry.
