@@ -47,6 +47,7 @@ _DIAGNOSTIC_OCR_COLUMNS = (
     "min_y",
     "max_y",
 )
+_BROAD_DEBUG_CAPTURE_KEY = "broad_raw_candidate_debug"
 SIGNATURE_FIELD_NAMES = (
     "image_signature",
     "source_language",
@@ -446,6 +447,64 @@ def _row_count(value: object) -> int:
     )
 
 
+def _exact_broad_debug_capture(value: object) -> Optional[Dict[str, object]]:
+    """Whitelist an opt-in Broad capture without truncating provider candidates."""
+    if not isinstance(value, Mapping) or value.get("enabled") is not True:
+        return None
+    route = value.get("route")
+    units = value.get("units")
+    if not isinstance(route, str) or not isinstance(units, (list, tuple)):
+        raise ValueError("Broad debug capture is invalid")
+    if len(route) > MAX_DIAGNOSTIC_STRING_CHARS:
+        raise ValueError("Broad debug capture route is too long")
+    if len(units) > MAX_DIAGNOSTIC_COLLECTION_ITEMS:
+        raise ValueError("Broad debug capture has too many units")
+    exact_units = []
+    for unit in units:
+        if not isinstance(unit, Mapping):
+            raise ValueError("Broad debug capture unit is invalid")
+        exact_unit: Dict[str, object] = {}
+        for key in (
+            "semantic_unit_id",
+            "source_text",
+            "raw_candidate",
+            "validation_status",
+            "rejection_reason",
+            "route",
+        ):
+            item = unit.get(key)
+            if not isinstance(item, str) or len(item) > MAX_DIAGNOSTIC_STRING_CHARS:
+                raise ValueError("Broad debug capture text is invalid")
+            exact_unit[key] = item
+        if "processed_candidate" in unit:
+            processed = unit.get("processed_candidate")
+            if (
+                not isinstance(processed, str)
+                or len(processed) > MAX_DIAGNOSTIC_STRING_CHARS
+            ):
+                raise ValueError("Broad debug processed candidate is invalid")
+            exact_unit["processed_candidate"] = processed
+        protected = unit.get("protected_spans")
+        if not isinstance(protected, (list, tuple)):
+            raise ValueError("Broad debug protected spans are invalid")
+        if len(protected) > MAX_DIAGNOSTIC_COLLECTION_ITEMS:
+            raise ValueError("Broad debug capture has too many protected spans")
+        exact_spans = []
+        for span in protected:
+            if not isinstance(span, Mapping):
+                raise ValueError("Broad debug protected span is invalid")
+            exact_span = {}
+            for key in ("source_segment_id", "kind", "text"):
+                item = span.get(key)
+                if not isinstance(item, str) or len(item) > MAX_DIAGNOSTIC_STRING_CHARS:
+                    raise ValueError("Broad debug protected span text is invalid")
+                exact_span[key] = item
+            exact_spans.append(exact_span)
+        exact_unit["protected_spans"] = exact_spans
+        exact_units.append(exact_unit)
+    return {"enabled": True, "route": route, "units": exact_units}
+
+
 def create_diagnostic_snapshot(
     result: Mapping[str, object],
     *,
@@ -494,6 +553,11 @@ def create_diagnostic_snapshot(
         if isinstance(inputs.get("ocr_resize_test"), str)
         else "Auto",
     }
+    broad_debug_capture = _exact_broad_debug_capture(
+        inputs.get(_BROAD_DEBUG_CAPTURE_KEY)
+    )
+    if broad_debug_capture is not None:
+        diagnostic_values[_BROAD_DEBUG_CAPTURE_KEY] = broad_debug_capture
     line_frame = result.get("line_df")
     line_columns = (
         tuple(
@@ -551,7 +615,11 @@ def create_diagnostic_snapshot(
             "terminology_rows": max(0, min(int(terminology_row_count), 100_000)),
         },
         "diagnostics": {
-            key: _json_safe_value(value, input_budget)
+            key: (
+                value
+                if key == _BROAD_DEBUG_CAPTURE_KEY
+                else _json_safe_value(value, input_budget)
+            )
             for key, value in diagnostic_values.items()
         },
         "csv_term_cache_stats": _json_safe_value(
@@ -746,6 +814,9 @@ def restore_diagnostic_snapshot(
     for key in ("ocr_engine", "ocr_resize_test"):
         if not isinstance(diagnostics.get(key), str):
             raise ValueError("diagnostic detail text is invalid")
+    broad_debug_capture = _exact_broad_debug_capture(
+        diagnostics.get(_BROAD_DEBUG_CAPTURE_KEY)
+    )
 
     line_df = _restore_dataframe(
         frames.get("line_df"),
@@ -765,6 +836,9 @@ def restore_diagnostic_snapshot(
     terminology_row_count = _validated_count(counts.get("terminology_rows"))
 
     restored_inputs = dict(diagnostics)
+    restored_inputs.pop(_BROAD_DEBUG_CAPTURE_KEY, None)
+    if broad_debug_capture is not None:
+        restored_inputs[_BROAD_DEBUG_CAPTURE_KEY] = broad_debug_capture
     restored_inputs["ocr_box_rows"] = ocr_box_rows
     restored_inputs["interface_language"] = str(interface_language)[:128]
     restored_inputs["platform"] = str(platform or "Not captured")[:512]
@@ -909,6 +983,7 @@ def build_deferred_diagnostic_report(
         rc11f_cache_diagnostics=rc11f_cache_diagnostics,
         rc11g_lookup_index_diagnostics=rc11g_lookup_index_diagnostics,
         overlay_renderer_diagnostics=inputs.get("overlay_renderer_diagnostics"),
+        broad_raw_candidate_debug=inputs.get(_BROAD_DEBUG_CAPTURE_KEY),
     )
     report_seconds = time.perf_counter() - report_start
     runtime_profile["diagnostic_report_generation"] = report_seconds

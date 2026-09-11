@@ -5,7 +5,8 @@ import re
 import sys
 import time
 import unicodedata
-from typing import Callable, Dict, List, Mapping, Optional, Tuple
+from collections import Counter
+from typing import Callable, Dict, Iterable, List, Mapping, Optional, Tuple
 
 import pandas as pd
 
@@ -14,9 +15,83 @@ ProfileGetter = Callable[[], object]
 ProfileCount = Callable[[str, float], None]
 ProfileAddTime = Callable[[str, float], None]
 
+
+URL_OR_DOMAIN_RE = re.compile(
+    r"(?:"
+    r"(?:https?://|www\.)"
+    r"[A-Za-z0-9](?:[A-Za-z0-9._~:/?#@!$&'()*+,;=%-]*[A-Za-z0-9/_~#=%-])?"
+    r"|"
+    r"(?<![A-Za-z0-9@])(?:[A-Za-z][A-Za-z0-9-]*\.)+[A-Za-z]{2,24}"
+    r"(?::\d+)?(?:/[A-Za-z0-9._~:/?#@!$&'()*+,;=%-]*)?"
+    r")",
+    re.IGNORECASE,
+)
+URL_PLACEHOLDER_RE = re.compile(r"__ciurl[a-z]+__")
+
 _profile_getter: ProfileGetter = lambda: None
 _profile_count_func: ProfileCount = lambda name, amount=1.0: None
 _profile_add_time_func: ProfileAddTime = lambda name, seconds: None
+
+
+def _placeholder_letters(index: int) -> str:
+    letters = ""
+    value = max(0, int(index))
+    while True:
+        letters = chr(ord("a") + value % 26) + letters
+        value = value // 26 - 1
+        if value < 0:
+            return letters
+
+
+def iter_url_domain_spans(text: object) -> Iterable[Tuple[int, int, str]]:
+    """Yield exact URL/domain identity spans without interpreting internal periods."""
+    value = str(text or "")
+    for match in URL_OR_DOMAIN_RE.finditer(value):
+        start, end = match.span()
+        yield start, end, value[start:end]
+
+
+def protect_url_domains(
+    text: object,
+    placeholder_start_index: int = 0,
+) -> Tuple[str, Dict[str, str]]:
+    """Replace URL/domain spans with dot-free opaque placeholders."""
+    value = str(text or "")
+    spans = list(iter_url_domain_spans(value))
+    if not spans:
+        return value, {}
+    replacements: Dict[str, str] = {}
+    chunks: List[str] = []
+    cursor = 0
+    for offset, (start, end, identity) in enumerate(spans):
+        placeholder = (
+            f"__ciurl{_placeholder_letters(placeholder_start_index + offset)}__"
+        )
+        chunks.extend((value[cursor:start], placeholder))
+        replacements[placeholder] = identity
+        cursor = end
+    chunks.append(value[cursor:])
+    return "".join(chunks), replacements
+
+
+def restore_url_domains(
+    text: object,
+    replacements: Mapping[str, str],
+) -> Optional[str]:
+    """Restore an exact one-to-one URL placeholder mapping, or fail closed."""
+    value = str(text or "")
+    expected = set(replacements)
+    found = URL_PLACEHOLDER_RE.findall(value)
+    if Counter(found) != Counter({placeholder: 1 for placeholder in expected}):
+        return None
+    if any(placeholder not in expected for placeholder in found):
+        return None
+    restored = value
+    for placeholder, identity in replacements.items():
+        restored = restored.replace(placeholder, identity)
+    if URL_PLACEHOLDER_RE.search(restored):
+        return None
+    return restored
 
 
 def configure_profile_context(

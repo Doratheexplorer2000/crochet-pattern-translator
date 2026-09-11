@@ -647,7 +647,10 @@ class BroadArabicDigitPromptContractTests(unittest.TestCase):
     ROUTES = (
         ("English — US", "Traditional Chinese"),
         ("English — US", "Simplified Chinese"),
+        ("English — US", "Japanese"),
         ("Simplified Chinese", "English — US"),
+        ("Traditional Chinese", "English — US"),
+        ("Traditional Chinese", "English — UK"),
     )
 
     def _mocked_translation(
@@ -732,7 +735,7 @@ class BroadArabicDigitPromptContractTests(unittest.TestCase):
         )
         self.assertEqual("arabic_digit_multiset", failure["failed_rule"])
 
-    def test_one_explicit_digit_contract_is_shared_by_all_three_routes(self):
+    def test_one_explicit_digit_contract_is_shared_by_all_routes(self):
         required_clauses = (
             "Preserve every explicit Arabic digit from the assigned source segments as "
             "the same Arabic digit in the translation.",
@@ -832,7 +835,10 @@ class BroadTranslationCompletenessPromptContractTests(unittest.TestCase):
     ROUTES = (
         ("English — US", "Traditional Chinese"),
         ("English — US", "Simplified Chinese"),
+        ("English — US", "Japanese"),
         ("Simplified Chinese", "English — US"),
+        ("Traditional Chinese", "English — US"),
+        ("Traditional Chinese", "English — UK"),
     )
 
     def test_all_routes_require_complete_translation_without_glossary_gating(self):
@@ -1323,18 +1329,18 @@ class BroadRequestScopedGlossaryTests(unittest.TestCase):
         self.assertEqual(expected_ids, selected_ids)
         self.assertEqual(83, len(self.route_terms))
         self.assertEqual(12, len(selected))
-        self.assertEqual(21850, broad_translation._glossary_char_count(self.route_terms))
-        self.assertEqual(3147, broad_translation._glossary_char_count(selected))
+        self.assertEqual(21855, broad_translation._glossary_char_count(self.route_terms))
+        self.assertEqual(3152, broad_translation._glossary_char_count(selected))
         segments = [
             {"source_segment_id": f"segment-{index:04d}", "text": text}
             for index, text in enumerate(texts)
         ]
         self.assertEqual(
-            25955,
+            26321,
             len(broad_translation.build_prompt(segments, self.route_terms, self.config)),
         )
         self.assertEqual(
-            7252,
+            7618,
             len(broad_translation.build_prompt(segments, selected, self.config)),
         )
 
@@ -1900,7 +1906,10 @@ class BroadRoutingTests(unittest.TestCase):
         expected = {
             ("English — US", "Traditional Chinese"),
             ("English — US", "Simplified Chinese"),
+            ("English — US", "Japanese"),
             ("Simplified Chinese", "English — US"),
+            ("Traditional Chinese", "English — US"),
+            ("Traditional Chinese", "English — UK"),
         }
         self.assertEqual(expected, set(broad_translation._ROUTE_CONFIGS))
 
@@ -2205,35 +2214,19 @@ class BroadRoutingTests(unittest.TestCase):
                 self.assertEqual("deterministic", result.loc[0, "Translation"])
                 self.assertTrue(result.attrs.get("request_warning"))
 
-    @mock.patch.dict(
-        os.environ,
-        {
-            "PATTERN_BROAD_TRANSLATION_ENABLED": "1",
-            "OPENAI_API_KEY": "test-key",
-        },
-        clear=False,
-    )
-    def test_traditional_chinese_to_english_uses_legacy(self):
-        rows = pd.DataFrame([_ocr_row("第1圈：6短針")])
-        with mock.patch.object(
-            broad_translation,
-            "translate_merged_ocr_lines_broad",
-            side_effect=AssertionError("broad path executed"),
-        ) as broad_mock, mock.patch.object(
-            line_translation,
-            "translate_ocr_line",
-            return_value="legacy",
-        ) as legacy_mock:
-            result = ocr_lines.build_ocr_line_translations(
-                rows,
-                self.traditional_index,
-                self.df,
-                "English — US",
+    def test_traditional_chinese_to_english_routes_use_broad(self):
+        self.assertTrue(
+            broad_translation.is_broad_translation_route(
                 "Traditional Chinese",
+                "English — US",
             )
-        broad_mock.assert_not_called()
-        legacy_mock.assert_called()
-        self.assertEqual("legacy", result.loc[0, "Translation"])
+        )
+        self.assertTrue(
+            broad_translation.is_broad_translation_route(
+                "Traditional Chinese",
+                "English — UK",
+            )
+        )
 
     def test_unsupported_pair_uses_legacy(self):
         rows = pd.DataFrame([_ocr_row("R1: 6X")])

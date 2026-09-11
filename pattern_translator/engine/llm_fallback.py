@@ -85,14 +85,11 @@ _NUMBER_RE = re.compile(r"\d+(?:\.\d+)?(?:\s*[-–—~～〜－]\s*\d+)?")
 _BRACKET_RE = re.compile(r"[()（）\[\]{}]")
 _ABBREVIATION_RE = re.compile(r"\b(?:sl\s*st|slst|sc|dc|hdc|tr|inc|dec|mr|blo|flo|ch|sts?|fo)\b", re.IGNORECASE)
 _UNKNOWN_TOKEN_RE = re.compile(r"\b[A-Z][A-Z0-9]{1,7}\b")
-_PLACEHOLDER_RE = re.compile(r"__ciq[a-z]+__")
+_PLACEHOLDER_RE = re.compile(r"__(?:ciq|ciurl)[a-z]+__")
 _LATIN_TOKEN_RE = re.compile(
     r"(?<![A-Za-z0-9])([A-Za-z][A-Za-z0-9]*(?:[-'’][A-Za-z0-9]+)*)(?![A-Za-z0-9])"
 )
-_URL_OR_DOMAIN_RE = re.compile(
-    r"(?:https?://|www\.|(?<![A-Za-z0-9])(?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,24}\b)",
-    re.IGNORECASE,
-)
+_URL_OR_DOMAIN_RE = terminology.URL_OR_DOMAIN_RE
 _PAGE_LABEL_RE = re.compile(
     r"(?:[-–—]?\s*\d+\s*[-–—]?|(?:第\s*)?\d+\s*[頁页]|[頁页]\s*\d+)",
     re.IGNORECASE,
@@ -177,14 +174,16 @@ def should_use_llm(
         return False
 
     if output_mode in _ENGLISH_OUTPUTS:
+        # URL/domain-bearing fragments are protected identities and never enter the
+        # line-level provider path. This guard must precede residual-CJK branching.
+        if _URL_OR_DOMAIN_RE.search(source) or _URL_OR_DOMAIN_RE.search(deterministic):
+            return False
         unresolved = len(_CJK_RE.findall(deterministic))
         if _PAGE_LABEL_RE.fullmatch(source) or _PAGE_LABEL_RE.fullmatch(deterministic):
             return False
         if unresolved >= 2:
             return len(source) >= 4
         if unresolved != 1 or source_mode not in _CHINESE_SOURCE_MODES:
-            return False
-        if _URL_OR_DOMAIN_RE.search(source) or _URL_OR_DOMAIN_RE.search(deterministic):
             return False
         return True
     if output_mode in _CHINESE_OUTPUTS:
@@ -293,6 +292,10 @@ def protect_authoritative_content(text: str, df: pd.DataFrame, output_mode: str)
         return key
 
     protected = str(text or "")
+    protected, url_replacements = terminology.protect_url_domains(
+        protected,
+    )
+    replacements.update(url_replacements)
     for pattern in (_ROUND_RE, _REPEAT_RE, _UNKNOWN_TOKEN_RE):
         protected = pattern.sub(protect_match, protected)
 
@@ -400,7 +403,7 @@ def create_openai_provider(api_key: str, timeout_seconds: float = DEFAULT_TIMEOU
                 "When context supports it, interpret object, part, and material words as components "
                 f"of the item being crocheted. Translate only CURRENT LINE into {target}. "
                 "PATTERN CONTEXT contains semantic clues only: do not copy context words into the output "
-                "unless they belong to CURRENT LINE. Preserve every opaque __ciq...__ placeholder exactly "
+                "unless they belong to CURRENT LINE. Preserve every opaque __ciq...__ or __ciurl...__ placeholder exactly "
                 "once and unchanged. Do not repair OCR, invent crochet terminology, or reinterpret designer "
                 "shorthand. Return only the translated CURRENT LINE.\n"
                 f"PATTERN CONTEXT: {semantic_context or '[none]'}\n"

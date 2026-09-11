@@ -8,7 +8,7 @@ analytics stay in app.py.
 
 import hashlib
 import time
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Mapping, Optional, Tuple
 
 import pandas as pd
 
@@ -901,13 +901,28 @@ def _format_ai_fallback_diagnostics(
     return "\n".join(lines)
 
 
-def _format_broad_validation_diagnostics(line_df: Optional[pd.DataFrame]) -> str:
+def _broad_debug_capture_enabled(capture: Optional[Mapping[str, object]]) -> bool:
+    return isinstance(capture, Mapping) and capture.get("enabled") is True
+
+
+def _format_broad_validation_diagnostics(
+    line_df: Optional[pd.DataFrame],
+    broad_raw_candidate_debug: Optional[Mapping[str, object]] = None,
+) -> str:
+    retained = (
+        "Yes" if _broad_debug_capture_enabled(broad_raw_candidate_debug) else "No"
+    )
     if (
         line_df is None
         or line_df.empty
         or "Validation Status" not in line_df.columns
     ):
-        return "No Broad validation metadata captured."
+        return "\n".join(
+            [
+                "No Broad validation metadata captured.",
+                f"Raw provider output retained: {retained}",
+            ]
+        )
     statuses = line_df["Validation Status"].fillna("").astype(str)
     rejected = line_df[statuses.eq("unresolved")]
     reason_counts: Dict[str, int] = {}
@@ -931,9 +946,62 @@ def _format_broad_validation_diagnostics(line_df: Optional[pd.DataFrame]) -> str
             ),
             "Rejected semantic units: "
             + (", ".join(rejected_units) if rejected_units else "None"),
-            "Raw provider output retained: No",
+            f"Raw provider output retained: {retained}",
         ]
     )
+
+
+def _format_broad_raw_candidate_debug(
+    capture: Optional[Mapping[str, object]],
+) -> str:
+    if not _broad_debug_capture_enabled(capture):
+        return ""
+    units = capture.get("units", ()) if isinstance(capture, Mapping) else ()
+    lines = ["Raw Broad candidate capture enabled: Yes"]
+    for unit in units if isinstance(units, (list, tuple)) else ():
+        if not isinstance(unit, Mapping):
+            continue
+        if len(lines) > 1:
+            lines.append("")
+        lines.extend(
+            [
+                f"Semantic Unit: {unit.get('semantic_unit_id', '')}",
+                f"Route: {unit.get('route', '')}",
+                "Source:",
+                str(unit.get("source_text", "")),
+                "Raw Candidate:",
+                str(unit.get("raw_candidate", "")),
+            ]
+        )
+        if "processed_candidate" in unit:
+            lines.extend(
+                [
+                    "Processed Candidate:",
+                    str(unit.get("processed_candidate", "")),
+                ]
+            )
+        lines.extend(
+            [
+                f"Validation: {unit.get('validation_status', '')}",
+                f"Reason: {unit.get('rejection_reason', '') or 'None'}",
+            ]
+        )
+        protected = unit.get("protected_spans", ())
+        if not isinstance(protected, (list, tuple)) or not protected:
+            lines.append("Protected spans: None")
+            continue
+        lines.append("Protected spans:")
+        for span in protected:
+            if not isinstance(span, Mapping):
+                continue
+            lines.append(
+                "- {kind} | {source_id} | {text}".format(
+                    kind=span.get("kind", ""),
+                    source_id=span.get("source_segment_id", ""),
+                    text=span.get("text", ""),
+                )
+            )
+    return "\n".join(lines)
 
 
 def _format_overlay_renderer_diagnostics(diagnostics: Optional[Dict[str, object]]) -> str:
@@ -1122,6 +1190,7 @@ def build_debug_report_text(
     rc11f_cache_diagnostics: Optional[Dict[str, object]] = None,
     rc11g_lookup_index_diagnostics: Optional[Dict[str, object]] = None,
     overlay_renderer_diagnostics: Optional[Dict[str, object]] = None,
+    broad_raw_candidate_debug: Optional[Mapping[str, object]] = None,
 ) -> str:
     """Developer-facing diagnostic export for beta testing."""
     quality_metrics = quality_metrics or {}
@@ -1213,7 +1282,16 @@ def build_debug_report_text(
         _format_rc11c_translation_diagnostics(rc11c_translation_diagnostics),
         "",
         "=== Broad Validation Diagnostics ===",
-        _format_broad_validation_diagnostics(line_df),
+        _format_broad_validation_diagnostics(line_df, broad_raw_candidate_debug),
+        *(
+            [
+                "",
+                "=== Broad Raw Candidate Debug ===",
+                _format_broad_raw_candidate_debug(broad_raw_candidate_debug),
+            ]
+            if _broad_debug_capture_enabled(broad_raw_candidate_debug)
+            else []
+        ),
         "",
         "=== Translation Cost Summary ===",
         _format_rc11c_translation_cost_summary(rc11c_translation_diagnostics),

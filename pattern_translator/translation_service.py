@@ -1516,6 +1516,32 @@ def translate_image(request: TranslateImageRequest) -> TranslateImageResult:
         delivery_session_diagnostics["ocr_started_at"] = request.session_diagnostics.get(
             "ocr_started_at"
         )
+    diagnostic_report_inputs = {
+        "ocr_engine": str(candidate_result.get("selected_name", "")),
+        "image_quality_status": quality_label,
+        "session_diagnostics": delivery_session_diagnostics,
+        "events": delivery_diagnostic_events,
+        "ai_fallback_diagnostics": sorted(
+            ai_fallback_diagnostics,
+            key=lambda record: int(record["call_ordinal"]),
+        ),
+        "ocr_workload_diagnostics": ocr_workload_diagnostics,
+        "ocr_box_rows": detected_ocr_rows,
+        "ocr_call_diagnostics": ocr_call_diagnostics,
+        "ocr_call_trace": list(ocr_call_trace),
+        "downscale_diagnostics": downscale_diagnostics,
+        "ocr_resize_test": ocr_resize_test,
+        "overlay_renderer_diagnostics": overlay_renderer_diagnostics,
+        "interface_language": request.interface_language,
+        "platform": delivery_diagnostic_platform,
+    }
+    broad_debug_capture = line_df.attrs.get("broad_raw_candidate_debug")
+    if (
+        isinstance(broad_debug_capture, dict)
+        and broad_debug_capture.get("enabled") is True
+    ):
+        diagnostic_report_inputs["broad_raw_candidate_debug"] = broad_debug_capture
+
     primary_result = {
         "overlay_image": overlay_image,
         "overlay_png": overlay_png,
@@ -1546,25 +1572,7 @@ def translate_image(request: TranslateImageRequest) -> TranslateImageResult:
         "crop_box": crop_box,
         "diagnostic_request_id": diagnostic_request_id,
         "diagnostic_session_generation": diagnostic_session_generation,
-        "diagnostic_report_inputs": {
-            "ocr_engine": str(candidate_result.get("selected_name", "")),
-            "image_quality_status": quality_label,
-            "session_diagnostics": delivery_session_diagnostics,
-            "events": delivery_diagnostic_events,
-            "ai_fallback_diagnostics": sorted(
-                ai_fallback_diagnostics,
-                key=lambda record: int(record["call_ordinal"]),
-            ),
-            "ocr_workload_diagnostics": ocr_workload_diagnostics,
-            "ocr_box_rows": detected_ocr_rows,
-            "ocr_call_diagnostics": ocr_call_diagnostics,
-            "ocr_call_trace": list(ocr_call_trace),
-            "downscale_diagnostics": downscale_diagnostics,
-            "ocr_resize_test": ocr_resize_test,
-            "overlay_renderer_diagnostics": overlay_renderer_diagnostics,
-            "interface_language": request.interface_language,
-            "platform": delivery_diagnostic_platform,
-        },
+        "diagnostic_report_inputs": diagnostic_report_inputs,
     }
     analytics = {
         "area_mode": area_mode,

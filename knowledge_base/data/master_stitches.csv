@@ -1,6 +1,6 @@
 US_term,US_term_alias,US_abb,US_abb1,UK_term,UK_term_alias,UK_abb,UK_abb1,Chinese_term,Chinese_term_alias,Chinese_abb,Japanese,Japanese_alias,stitch_id,category,equivalence_group,symbol_file,search_status,ambiguity_note,tutorial_search
 chain,chain stitch,ch,,chain,,ch,,鎖針,辮子針|辫针,CH,鎖編み,,st_001_chain,basic_stitch,,chain.svg,active,,yes
-slip stitch,slst,sl st,,slip stitch,slst,ss,sl st,引拔針,,SL,引き抜き編み,,st_002_slip_stitch,basic_stitch,,sl_st.svg,active,,yes
+slip stitch,slst,sl st,,slip stitch,slst,ss,sl st,引拔針,引拔,SL,引き抜き編み,,st_002_slip_stitch,basic_stitch,,sl_st.svg,active,,yes
 single crochet,,sc,,double crochet,,dc,,短針,,X,細編み,,st_003_single_crochet,basic_stitch,,sc_x.svg,active,,yes
 half double crochet,,hdc,,half treble crochet,,htr,,中長針,,T,中長編み目,中長編み,st_004_half_double_crochet,basic_stitch,,hdc.svg,active,,yes
 double crochet,,dc,,treble crochet,,tr,,長針,,F,長編み目,長編み,st_005_double_crochet,basic_stitch,,dc.svg,active,,yes
@@ -26,7 +26,7 @@ single crochet 3 stitches together,,sc3tog,,double crochet 3 stitches together,,
 ,,,,,,,,中長針三針併一針,,TM,中長編み3目一度,,st_025_unnamed_3,decrease,,,active,,
 ,,dc3tog,,,,,,長針三針併一針,,FM,長編み3目一度,,st_026_unnamed_4,decrease,,,active,,
 ,,,,,,,,長長針三針併一針,,EM,,,st_027_unnamed_5,decrease,,,active,,
-magic ring,magic ring|magic circle|adjustable ring,mr,,,,mr,,環狀起針,魔術環|环起|環起|环形起针|環形起針|圈起|起圈|環,,,,st_028_magic_ring,basic_stitch,,magic_ring.svg,active,,yes
+magic ring,magic ring|magic circle|adjustable ring,mr,,,,mr,,環狀起針,魔術環|环起|環起|环形起针|環形起針|圈起|起圈|環,,輪の作り目,,st_028_magic_ring,basic_stitch,,magic_ring.svg,active,,yes
 back loop,in bl|back loop|back loops|work in back loop|work in back loops,bl,,back loop,in bl|back loop|back loops|work in back loop|work in back loops,bl,,後半針,內半針,,,,st_029_back_loop,loop_placement,eq_back_loop,back_loop.svg,active,Intentional equivalent/search-friendly duplicate; do not treat as error.,yes
 back loop only,in blo|back loop only|back loops only|work in back loop only|work in back loops only,blo,,back loop only,in blo|back loop only|back loops only|work in back loop only|work in back loops only,blo,,後半針,內半針,,,,st_030_back_loop_only,loop_placement,eq_back_loop,back_loop.svg,active,Intentional equivalent/search-friendly duplicate; do not treat as error.,yes
 front loop,in fl|front loop|front loops|work in front loop|work in front loops,fl,,front loop,in fl|front loop|front loops|work in front loop|work in front loops,fl,,前半針,外半針,,,,st_031_front_loop,loop_placement,eq_front_loop,front_loop.svg,active,Intentional equivalent/search-friendly duplicate; do not treat as error.,yes
@@ -34,8 +34,8 @@ front loop only,in flo|front loop only|front loops only|work in front loop only|
 single crochet 2 stitches together,,sc2tog,,double crochet 2 stitches together,,dc2tog,,兩短針併一針,,,細編み2目一度,,st_033_single_crochet_2_stitches_together,decrease,,,active,,yes
 yarn over,,yo,,yarn over,,yo,,繞線,,,,,st_034_yarn_over,pattern_instruction,eq_yarn_over,,active,Intentional equivalent/search-friendly duplicate; do not treat as error.,
 yarn over hook,,yoh,,yarn over hook,,yoh,,繞線,,,,,st_035_yarn_over_hook,pattern_instruction,eq_yarn_over,,active,Intentional equivalent/search-friendly duplicate; do not treat as error.,
-round,,rnd,r,round,,rnd,r,圈,,R,,,st_036_round,pattern_instruction,,,active,,
-rounds,,rnds,,rounds,,rnds,,圈,,R,,,st_093_rounds,pattern_instruction,,,active,,
+round,,rnd,r,round,,rnd,r,圈,,R,段,,st_036_round,pattern_instruction,,,active,,
+rounds,,rnds,,rounds,,rnds,,圈,,R,段,,st_093_rounds,pattern_instruction,,,active,,
 row,,r,,row,,r,,行,,R,,,st_094_row,pattern_instruction,,,active,,
 rows ,,rows,,rows,,rows,,行,,R,,,st_095_rows,pattern_instruction,,,active,,
 skip,,sk,,skip,,sk,,跳過,,K,,,st_037_skip,pattern_instruction,,,active,,yes
@@ -78,7 +78,7 @@ front post treble crochet,,FPtr,,front post double treble crochet,,FPdtr,,外鈎
 loop,,lp,,loop,,lp,,環圈,圈,,,,st_075_loop,uncategorized,,,active,,
 marker,,m,,marker,,m,,記號扣,,,,,st_076_marker,pattern_instruction,,,active,,
 main color,,MC,,main color,,MC,,主色,,,,,st_077_main_color,pattern_instruction,,,active,,
-pattern,pat,patt,,pattern,pat,patt,,花樣,,,,,st_078_pattern,pattern_instruction,,,active,,
+pattern,pat,patt,,pattern,pat,patt,,花樣,,,パターン,,st_078_pattern,pattern_instruction,,,active,,
 place marker,,pm,,place marker,,pm,,扣上記號扣,,,,,st_079_place_marker,pattern_instruction,,,active,,yes
 previous,,prev,,previous,,prev,,之前,,,,,st_080_previous,pattern_instruction,,,active,,
 remaining,,rem,,remaining,,rem,,餘下的,,,,,st_081_remaining,pattern_instruction,,,active,,
@@ -86,7 +86,7 @@ right side,,RS,,right side,,RS,,正面,,,,,st_082_right_side,pattern_instruction
 shell,,sh,,,,,,貝殼針,,,,,st_083_shell,textured_stitch,,,active,,yes
 slip marker,,sl m,,slip marker,sm,sl m,,,,,,,st_084_slip_marker,pattern_instruction,,,active,,
 space,,sp,,space,,sp,,空位,,,,,st_085_space,pattern_instruction,,,active,,
-stitch,,st,sts|stitch|stitches,stitch,,st,sts|stitch|stitches,針目,,針,,,st_086_stitch,pattern_instruction,,,active,,
+stitch,,st,sts|stitch|stitches,stitch,,st,sts|stitch|stitches,針目,,針,目,,st_086_stitch,pattern_instruction,,,active,,
 through back loop,,tbl,,,,,,,,,,,st_087_through_back_loop,loop_placement,,,active,,yes
 together,,tog,,together,,tog,,一起,,,,,st_088_together,pattern_instruction,,,active,,
 wrong side,,ws,,wrong side,,ws,,反面,,,,,st_089_wrong_side,pattern_instruction,,,active,,
@@ -97,12 +97,12 @@ stuff firmly,firmly stuff,,,stuff firmly,firmly stuff,,,塞滿棉花,緊塞棉�
 stuff lightly,lightly stuff,,,stuff lightly,lightly stuff,,,輕輕塞入棉花,輕塞棉花,,,,st_099_stuff_lightly,pattern_instruction,,,active,,
 around,all around|all-around|allaround,around,,around,all around|all-around|allaround,around,,一圈,,,,,st_096_around,pattern_instruction,,,active,,
 total,,total,,total,,total,,共,共計|總數|總共,,,,st_097_total,pattern_instruction,,,active,,
-change color,,,,change color,,,,轉顏色,換顏色|轉顏色|轉色|換色,,,,st_098_change_ color,pattern_instruction,,,active,,
+change color,,,,change color,,,,轉顏色,換顏色|轉顏色|轉色|換色,,色を替える,色を変える|色替え,st_098_change_ color,pattern_instruction,,,active,,
 change yarn,,,,change yarn,,,,換毛線,換線|轉線,,,,st_099_change_yarn,pattern_instruction,,,active,,
-join with sl st,join with slst|join with a slip stitch|join with a sl st|join with a slst,,,join with sl st,join with slst|join with a slip stitch|join with a sl st|join with a slst|join with a ss,,,以引拔針縫合,以引拔針連結|引拔針連結|以引拔針連結|引拔縫合|引拔針縫合,,,,st_100_join_with_sl_st,pattern_instruction,,,active,,yes
+join with sl st,join with slst|join with a slip stitch|join with a sl st|join with a slst,,,join with sl st,join with slst|join with a slip stitch|join with a sl st|join with a slst|join with a ss,,,以引拔針縫合,以引拔針連結|引拔針連結|以引拔針連結|引拔縫合|引拔針縫合,,引き抜き編みでつなぐ,,st_100_join_with_sl_st,pattern_instruction,,,active,,yes
 work even,evenly work,,,work even,evenly work,,,平均鈎織,,,,,st_101_work_even,pattern_instruction,,,active,,
-attach,,,,attach,,,,連接,,,,,st_102_attach,pattern_instruction,,,active,,
-sew,,,,sew,,,,縫合,縫上,,,,st_103_sew,pattern_instruction,,,active,,
+attach,,,,attach,,,,連接,,,取り付ける,,st_102_attach,pattern_instruction,,,active,,
+sew,,,,sew,,,,縫合,縫上,,縫い付ける,,st_103_sew,pattern_instruction,,,active,,
 hook,,,,hook,,,,鈎針,鉤針,,,,st_104_hook,pattern_instruction,,,active,,
 with diagram,diagram included,,,with diagram,diagram included,,,附圖解,附图解,,,,st_105_with_diagram,pattern_instruction,,,active,,
 leave a yarn tail,leave yarn,,,leave a yarn tail,leave yarn,,,留線,留线,,,,st_106_leave_yarn,pattern_instruction,,,active,,

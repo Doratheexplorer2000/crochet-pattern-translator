@@ -766,6 +766,55 @@ class TranslationServiceOrchestrationTests(unittest.TestCase):
     @mock.patch("pattern_translator.translation_service.overlay_engine.make_line_translation_overlay")
     @mock.patch("pattern_translator.translation_service.ocr_lines_engine.build_ocr_line_translations")
     @mock.patch("pattern_translator.translation_service.run_primary_ocr")
+    def test_broad_debug_capture_flows_only_to_diagnostic_inputs(
+        self,
+        mock_run_primary_ocr,
+        mock_build_lines,
+        mock_make_overlay,
+        mock_png_bytes,
+    ):
+        ocr_rows, line_df, overlay_image = self._mock_pipeline()
+        capture = {
+            "enabled": True,
+            "route": "English US -> Traditional Chinese",
+            "units": [
+                {
+                    "semantic_unit_id": "unit-0000",
+                    "source_text": "R1: 6X",
+                    "raw_candidate": "R1：6 短針",
+                    "validation_status": "accepted",
+                    "rejection_reason": "",
+                    "route": "English US -> Traditional Chinese",
+                    "protected_spans": [],
+                }
+            ],
+        }
+        line_df.attrs["broad_raw_candidate_debug"] = capture
+        mock_run_primary_ocr.return_value = {
+            "selected_name": "PaddleOCR",
+            "selected_text": "R1: 6X",
+            "selected_rows": ocr_rows,
+            "paddle_inference_seconds": 0.5,
+        }
+        mock_build_lines.return_value = line_df
+        mock_make_overlay.return_value = (overlay_image, "[1] R1: 6 sc", line_df)
+        mock_png_bytes.return_value = b"png-bytes"
+
+        result = translate_image(self._base_request(area_mode="Whole Pattern"))
+
+        self.assertEqual(
+            capture,
+            result.primary_result["diagnostic_report_inputs"][
+                "broad_raw_candidate_debug"
+            ],
+        )
+        self.assertNotIn("broad_raw_candidate_debug", result.analytics)
+        self.assertIs(line_df, result.primary_result["line_df"])
+
+    @mock.patch("pattern_translator.translation_service.overlay_engine.image_to_png_bytes")
+    @mock.patch("pattern_translator.translation_service.overlay_engine.make_line_translation_overlay")
+    @mock.patch("pattern_translator.translation_service.ocr_lines_engine.build_ocr_line_translations")
+    @mock.patch("pattern_translator.translation_service.run_primary_ocr")
     def test_select_area_path_uses_cropped_working_image(
         self,
         mock_run_primary_ocr,

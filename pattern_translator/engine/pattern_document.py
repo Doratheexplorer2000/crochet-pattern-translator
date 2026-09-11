@@ -165,6 +165,8 @@ def protected_identity_spans(text: str) -> Tuple[Dict[str, object], ...]:
     if not value:
         return ()
     candidates: List[Tuple[int, int, str]] = []
+    for start, end, _identity in terminology_engine.iter_url_domain_spans(value):
+        candidates.append((start, end, "url_or_domain"))
     for match in _HANDLE_RE.finditer(value):
         candidates.append((match.start(), match.end(), "handle"))
     for match in _ACCOUNT_ID_RE.finditer(value):

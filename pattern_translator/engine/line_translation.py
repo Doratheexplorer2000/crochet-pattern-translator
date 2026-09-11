@@ -468,10 +468,11 @@ def split_expression_parts(text: str) -> List[str]:
     if text is None:
         return []
     s = unicodedata.normalize("NFKC", str(text)).strip()
+    protected, url_replacements = terminology.protect_url_domains(s)
     parts: List[str] = []
     buf: List[str] = []
     depth = 0
-    for i, ch in enumerate(s):
+    for i, ch in enumerate(protected):
         if ch in "([{（【":
             depth += 1
             buf.append(ch)
@@ -482,8 +483,8 @@ def split_expression_parts(text: str) -> List[str]:
             continue
         # Dot is a separator in mainland symbol strings, but only outside brackets.
         if depth == 0 and ch == ".":
-            prev_ch = s[i - 1] if i > 0 else ""
-            next_ch = s[i + 1] if i + 1 < len(s) else ""
+            prev_ch = protected[i - 1] if i > 0 else ""
+            next_ch = protected[i + 1] if i + 1 < len(protected) else ""
             if prev_ch.isdigit() and next_ch.isdigit():
                 buf.append(ch)
                 continue
@@ -497,7 +498,58 @@ def split_expression_parts(text: str) -> List[str]:
     item = "".join(buf).strip()
     if item:
         parts.append(item)
-    return parts
+    restored_parts: List[str] = []
+    for part in parts:
+        replacements = {
+            placeholder: identity
+            for placeholder, identity in url_replacements.items()
+            if placeholder in part
+        }
+        restored_parts.append(
+            terminology.restore_url_domains(part, replacements) or part
+        )
+    return restored_parts
+
+
+_COMPACT_CROCHET_ROW_PREFIX_RE = re.compile(
+    r"^\s*(?:R|Rnd|Row)\s*\d+(?:\s*[-–—~～〜－]\s*\d+)?\s*[:：]",
+    re.IGNORECASE,
+)
+_COMPACT_INCREASE_CONFUSION_RE = re.compile(
+    r"(?P<prefix>^|[\s,，、;；:：(\[\{（【])(?P<symbol>[√∨])"
+    r"(?=$|[\s,，、;；:：)\]\}）】*x×])"
+)
+_COMPACT_RECOGNIZED_TOKEN_RE = re.compile(
+    r"(?<![A-Za-z])(?:X|A|V|sc|inc|dec)(?![A-Za-z])",
+    re.IGNORECASE,
+)
+_COMPACT_REPEAT_OR_TOTAL_RE = re.compile(
+    r"(?:[*x×]\s*\d+|(?:\(\s*\d+\s*\)|\[\s*\d+\s*\]|"
+    r"\b\d+\s*(?:sts?|目|針|针))\s*$)",
+    re.IGNORECASE,
+)
+
+
+def normalize_compact_increase_glyphs(text: str) -> str:
+    """Repair standalone √/∨ only inside strongly identified compact crochet rows."""
+    value = str(text or "")
+    if not _COMPACT_CROCHET_ROW_PREFIX_RE.search(value):
+        return value
+    candidates = list(_COMPACT_INCREASE_CONFUSION_RE.finditer(value))
+    if not candidates:
+        return value
+    without_candidates = _COMPACT_INCREASE_CONFUSION_RE.sub(
+        lambda match: match.group("prefix") + " ",
+        value,
+    )
+    if not _COMPACT_RECOGNIZED_TOKEN_RE.search(without_candidates):
+        return value
+    if not _COMPACT_REPEAT_OR_TOTAL_RE.search(value):
+        return value
+    return _COMPACT_INCREASE_CONFUSION_RE.sub(
+        lambda match: match.group("prefix") + "V",
+        value,
+    )
 
 def translate_group_part(part: str, index: Dict[str, int], df: pd.DataFrame, output_mode: str = "Traditional Chinese") -> str:
     part_text = normalize_decimal_mm(unicodedata.normalize("NFKC", str(part or "")).strip())
@@ -825,11 +877,13 @@ def clean_single_ocr_line(text: str) -> str:
     s = unicodedata.normalize("NFKC", str(text)).strip()
     if not s:
         return ""
+    s, url_replacements = terminology.protect_url_domains(s)
     s = normalize_decimal_mm(s)
     s = normalize_attached_row_stitch_separator(s)
     # Keep this conservative. Do not invent missing separators such as XV -> X,V.
     s = s.replace("：", ":").replace("；", ":").replace(";", ":")
     s = s.replace("，", ",").replace("、", ",").replace("。", ".")
+    s = normalize_compact_increase_glyphs(s)
     s = normalize_decimal_mm(s)
     s = repair_ocr_round_token(s)
     # Common OCR repairs only when very safe.
@@ -850,7 +904,8 @@ def clean_single_ocr_line(text: str) -> str:
     # Normalize punctuation between stitch symbols only if OCR already saw a dot/comma.
     s = re.sub(r"([xvatfeXVATFE])\s*[.]\s*([xvatfeXVATFE])", r"\1,\2", s)
     s = normalize_decimal_mm(s)
-    return s.strip()
+    restored = terminology.restore_url_domains(s.strip(), url_replacements)
+    return restored if restored is not None else s.strip()
 
 def translate_common_instruction_line(s: str, index: Dict[str, int], df: pd.DataFrame, output_mode: str) -> Optional[str]:
     """Conservative translation for common non-round crochet instruction lines.
