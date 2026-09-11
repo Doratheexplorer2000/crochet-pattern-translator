@@ -40,6 +40,13 @@ _WARNING = (183, 121, 31)
 _MIN_VERTICAL_PLATE_PADDING = 1
 _ABSOLUTE_MIN_FONT_PX = 6
 _SOURCE_GLYPH_HEIGHT_TOLERANCE_PX = 1.0
+_SOURCE_ANCHOR_TOLERANCE_PX = 0.5
+_NEIGHBOUR_SEPARATION_PX = 0.5
+_DENSE_ROW_MAX_GAP_HEIGHT_RATIO = 1.0
+_DENSE_ROW_MIN_HORIZONTAL_OVERLAP = 0.55
+_DENSE_ROW_MIN_MEMBER_GAP_HEIGHT_RATIO = 1.25
+_DENSE_ROW_MAX_PITCH_RATIO = 1.75
+_DENSE_ROW_NEIGHBOUR_HEIGHT_RANGE = (0.5, 1.75)
 
 
 @dataclass(frozen=True)
@@ -950,26 +957,70 @@ def _single_line_row_corridor(
 ) -> Tuple[
     Optional[Tuple[float, float, float, float]],
     Optional[Tuple[float, float, float, float]],
+    Dict[str, object],
 ]:
     """Return collision-free vertical space for one source-anchored row."""
     top = 0.0
     bottom = float(image_h)
     nearest: Optional[Tuple[float, float, float, float]] = None
+    boundary_before = {"top": top, "bottom": bottom}
+    boundary_after = {"top": top, "bottom": bottom}
+    clamp_applied = {"top": False, "bottom": False}
     horizontal_band = (horizontal[0], 0.0, horizontal[2], float(image_h))
     for other in protected + used:
         if not _horizontal_overlap(horizontal_band, other):
             continue
         if _rects_overlap(source, other):
-            return None, other
+            return None, other, {
+                "neighbour_boundary_before_tolerance": boundary_before,
+                "neighbour_boundary_after_tolerance": boundary_after,
+                "source_anchor_tolerance_px": _SOURCE_ANCHOR_TOLERANCE_PX,
+                "source_anchor_clamp_applied": clamp_applied,
+                "final_failure_predicate": "source_overlaps_protected_neighbour",
+            }
         if other[3] <= source[1] and other[3] > top:
-            top = other[3] + 0.5
+            raw_top = other[3] + _NEIGHBOUR_SEPARATION_PX
+            adjusted_top = raw_top
+            if (
+                other[3] < source[1]
+                and raw_top > source[1]
+                and raw_top - source[1] <= _SOURCE_ANCHOR_TOLERANCE_PX
+            ):
+                adjusted_top = source[1]
+                clamp_applied["top"] = True
+            top = adjusted_top
+            boundary_before["top"] = raw_top
+            boundary_after["top"] = adjusted_top
             nearest = other
         elif other[1] >= source[3] and other[1] < bottom:
-            bottom = other[1] - 0.5
+            raw_bottom = other[1] - _NEIGHBOUR_SEPARATION_PX
+            adjusted_bottom = raw_bottom
+            if (
+                other[1] > source[3]
+                and raw_bottom < source[3]
+                and source[3] - raw_bottom <= _SOURCE_ANCHOR_TOLERANCE_PX
+            ):
+                adjusted_bottom = source[3]
+                clamp_applied["bottom"] = True
+            bottom = adjusted_bottom
+            boundary_before["bottom"] = raw_bottom
+            boundary_after["bottom"] = adjusted_bottom
             nearest = other
     if bottom <= top:
-        return None, nearest
-    return (horizontal[0], top, horizontal[2], bottom), nearest
+        return None, nearest, {
+            "neighbour_boundary_before_tolerance": boundary_before,
+            "neighbour_boundary_after_tolerance": boundary_after,
+            "source_anchor_tolerance_px": _SOURCE_ANCHOR_TOLERANCE_PX,
+            "source_anchor_clamp_applied": clamp_applied,
+            "final_failure_predicate": f"corridor_bottom={bottom:.3f} <= corridor_top={top:.3f}",
+        }
+    return (horizontal[0], top, horizontal[2], bottom), nearest, {
+        "neighbour_boundary_before_tolerance": boundary_before,
+        "neighbour_boundary_after_tolerance": boundary_after,
+        "source_anchor_tolerance_px": _SOURCE_ANCHOR_TOLERANCE_PX,
+        "source_anchor_clamp_applied": clamp_applied,
+        "final_failure_predicate": "passed",
+    }
 
 
 def _single_line_plate(
@@ -979,22 +1030,183 @@ def _single_line_plate(
     required_width: float,
     required_height: float,
     padding: int,
-) -> Optional[Tuple[float, float, float, float]]:
+) -> Tuple[Optional[Tuple[float, float, float, float]], Dict[str, object]]:
     """Fit a one-line plate while covering its source and no neighboring row."""
     left = horizontal[0]
     minimum_right = source[2] + padding
     right = max(minimum_right, left + required_width)
     if right > horizontal[2] + 0.01:
-        return None
+        return None, {
+            "source_rectangle": tuple(round(value, 3) for value in source),
+            "source_anchor_top_range": (),
+            "lowest_feasible_top": "",
+            "highest_feasible_top": "",
+            "final_failure_predicate": (
+                f"plate_right={right:.3f} > horizontal_right={horizontal[2]:.3f} + 0.01"
+            ),
+        }
 
     plate_height = max(source[3] - source[1], required_height)
     lowest_top = max(corridor[1], source[3] - plate_height)
     highest_top = min(source[1], corridor[3] - plate_height)
+    metrics = {
+        "source_rectangle": tuple(round(value, 3) for value in source),
+        "source_anchor_top_range": (
+            round(lowest_top, 3),
+            round(highest_top, 3),
+        ),
+        "lowest_feasible_top": round(lowest_top, 3),
+        "highest_feasible_top": round(highest_top, 3),
+        "final_failure_predicate": "passed",
+    }
     if lowest_top > highest_top + 0.01:
-        return None
+        metrics["final_failure_predicate"] = (
+            f"lowest_top={lowest_top:.3f} > highest_top={highest_top:.3f} + 0.01"
+        )
+        return None, metrics
     centered_top = ((source[1] + source[3]) - plate_height) / 2.0
     top = min(highest_top, max(lowest_top, centered_top))
-    return (left, top, right, top + plate_height)
+    return (left, top, right, top + plate_height), metrics
+
+
+def _member_rects(region: Dict[str, object]) -> List[Tuple[float, float, float, float]]:
+    rects: List[Tuple[float, float, float, float]] = []
+    raw_members = region.get("member_boxes", ()) or ()
+    if not isinstance(raw_members, (list, tuple)):
+        return rects
+    for member in raw_members:
+        if not isinstance(member, dict):
+            continue
+        try:
+            rect = (
+                float(member["min_x"]),
+                float(member["min_y"]),
+                float(member["max_x"]),
+                float(member["max_y"]),
+            )
+        except (KeyError, TypeError, ValueError):
+            continue
+        if rect[2] > rect[0] and rect[3] > rect[1]:
+            rects.append(rect)
+    return sorted(rects, key=lambda rect: (rect[0], rect[1]))
+
+
+def _horizontal_overlap_ratio(
+    first: Tuple[float, float, float, float],
+    second: Tuple[float, float, float, float],
+) -> float:
+    overlap = max(0.0, min(first[2], second[2]) - max(first[0], second[0]))
+    reference = max(1.0, min(first[2] - first[0], second[2] - second[0]))
+    return overlap / reference
+
+
+def _dense_row_geometry(
+    region: Dict[str, object],
+    source: Tuple[float, float, float, float],
+    source_height: float,
+    protected: List[Tuple[float, float, float, float]],
+) -> Dict[str, object]:
+    """Identify table-like rows only from strong, repeated OCR geometry."""
+    result: Dict[str, object] = {
+        "dense_row_candidate": False,
+        "dense_row_reason": "insufficient_geometry_evidence",
+        "row_band_top": 0.0,
+        "row_band_bottom": 0.0,
+    }
+    members = _member_rects(region)
+    if len(members) < 2:
+        result["dense_row_reason"] = "fewer_than_two_member_boxes"
+        return result
+
+    aligned_gaps: List[float] = []
+    for left, right in zip(members, members[1:]):
+        vertical_overlap = max(
+            0.0,
+            min(left[3], right[3]) - max(left[1], right[1]),
+        )
+        member_height = max(1.0, min(left[3] - left[1], right[3] - right[1]))
+        gap = right[0] - left[2]
+        if vertical_overlap / member_height >= 0.5 and gap > 0:
+            aligned_gaps.append(gap)
+    minimum_member_gap = max(
+        _SOURCE_ANCHOR_TOLERANCE_PX,
+        source_height * _DENSE_ROW_MIN_MEMBER_GAP_HEIGHT_RATIO,
+    )
+    if not aligned_gaps or max(aligned_gaps) < minimum_member_gap:
+        result["dense_row_reason"] = "member_boxes_not_cell_spaced"
+        return result
+
+    above = [
+        rect
+        for rect in protected
+        if rect[3] <= source[1]
+        and _horizontal_overlap_ratio(source, rect)
+        >= _DENSE_ROW_MIN_HORIZONTAL_OVERLAP
+    ]
+    below = [
+        rect
+        for rect in protected
+        if rect[1] >= source[3]
+        and _horizontal_overlap_ratio(source, rect)
+        >= _DENSE_ROW_MIN_HORIZONTAL_OVERLAP
+    ]
+    if not above or not below:
+        result["dense_row_reason"] = "missing_aligned_neighbour_above_or_below"
+        return result
+    nearest_above = max(above, key=lambda rect: rect[3])
+    nearest_below = min(below, key=lambda rect: rect[1])
+    gap_above = source[1] - nearest_above[3]
+    gap_below = nearest_below[1] - source[3]
+    maximum_gap = max(4.0, source_height * _DENSE_ROW_MAX_GAP_HEIGHT_RATIO)
+    if gap_above > maximum_gap or gap_below > maximum_gap:
+        result["dense_row_reason"] = "neighbour_spacing_not_dense"
+        return result
+
+    neighbour_heights = (
+        nearest_above[3] - nearest_above[1],
+        nearest_below[3] - nearest_below[1],
+    )
+    minimum_height = source_height * _DENSE_ROW_NEIGHBOUR_HEIGHT_RANGE[0]
+    maximum_height = source_height * _DENSE_ROW_NEIGHBOUR_HEIGHT_RANGE[1]
+    if any(
+        height < minimum_height or height > maximum_height
+        for height in neighbour_heights
+    ):
+        result["dense_row_reason"] = "neighbour_row_heights_not_similar"
+        return result
+
+    source_center = (source[1] + source[3]) / 2.0
+    pitch_above = source_center - (
+        (nearest_above[1] + nearest_above[3]) / 2.0
+    )
+    pitch_below = (
+        (nearest_below[1] + nearest_below[3]) / 2.0
+    ) - source_center
+    if (
+        min(pitch_above, pitch_below) <= 0
+        or max(pitch_above, pitch_below) / min(pitch_above, pitch_below)
+        > _DENSE_ROW_MAX_PITCH_RATIO
+    ):
+        result["dense_row_reason"] = "neighbour_row_spacing_not_repeating"
+        return result
+
+    row_band_top = (nearest_above[3] + source[1]) / 2.0
+    row_band_bottom = (source[3] + nearest_below[1]) / 2.0
+    result.update(
+        {
+            "dense_row_candidate": True,
+            "dense_row_reason": "cell_spaced_members_with_aligned_dense_neighbours",
+            "row_band_top": round(row_band_top, 3),
+            "row_band_bottom": round(row_band_bottom, 3),
+            "dense_row_neighbour_above": tuple(
+                round(value, 3) for value in nearest_above
+            ),
+            "dense_row_neighbour_below": tuple(
+                round(value, 3) for value in nearest_below
+            ),
+        }
+    )
+    return result
 
 
 def _compound_source_corridor(
@@ -1381,6 +1593,21 @@ def _make_source_replacement_overlay(
         protected = [
             rect for owner, rect in all_source_rects if owner != position
         ] + externally_protected_rects
+        dense_row_geometry = (
+            _dense_row_geometry(
+                regions[0],
+                original_rects[0],
+                representative_source_height,
+                protected,
+            )
+            if len(regions) == 1
+            else {
+                "dense_row_candidate": False,
+                "dense_row_reason": "multiple_source_regions",
+                "row_band_top": 0.0,
+                "row_band_bottom": 0.0,
+            }
+        )
         raw_segment_ids = row.get("Source Segment IDs", ())
         source_segment_ids = (
             tuple(raw_segment_ids)
@@ -1434,6 +1661,24 @@ def _make_source_replacement_overlay(
             "allowed_line_count": 0,
             "actual_wrapped_line_count": 0,
             "blocking_protected_region": "",
+            "source_rectangle": (
+                tuple(round(value, 3) for value in original_rects[0])
+                if len(original_rects) == 1
+                else tuple(
+                    tuple(round(value, 3) for value in rect)
+                    for rect in original_rects
+                )
+            ),
+            "source_anchor_top_range": "",
+            "lowest_feasible_top": "",
+            "highest_feasible_top": "",
+            "neighbour_boundary_before_tolerance": "",
+            "neighbour_boundary_after_tolerance": "",
+            "source_anchor_tolerance_px": _SOURCE_ANCHOR_TOLERANCE_PX,
+            "source_anchor_clamp_applied": {"top": False, "bottom": False},
+            "final_failure_predicate": "",
+            "placement_strategy": "normal",
+            **dense_row_geometry,
         }
 
         if category not in {"translated_content", "mixed_protected_translation"}:
@@ -1527,6 +1772,167 @@ def _make_source_replacement_overlay(
         selected_layout = None
         fit_reason = overflow_reason or ("unsupported_geometry" if not horizontal_geometry else "text_did_not_fit")
         if horizontal_geometry and not overflow_reason:
+            if dense_row_geometry["dense_row_candidate"]:
+                source = original_rects[0]
+                dense_horizontal = (
+                    max(0.0, source[0] - padding),
+                    max(0.0, source[1] - padding),
+                    min(float(width), source[2] + padding),
+                    min(float(height), source[3] + padding),
+                )
+                corridor, blocking_region, boundary_metrics = (
+                    _single_line_row_corridor(
+                        source,
+                        dense_horizontal,
+                        height,
+                        protected,
+                        used_slots,
+                    )
+                )
+                if corridor is not None:
+                    row_band = (
+                        dense_horizontal[0],
+                        max(corridor[1], float(dense_row_geometry["row_band_top"])),
+                        dense_horizontal[2],
+                        min(corridor[3], float(dense_row_geometry["row_band_bottom"])),
+                    )
+                    if row_band[1] <= source[1] and row_band[3] >= source[3]:
+                        for font_size in _replacement_font_candidates(
+                            source_start_size,
+                            _ABSOLUTE_MIN_FONT_PX,
+                        ):
+                            font_resolution = _resolve_overlay_font(
+                                font_size,
+                                output_mode,
+                            )
+                            font = font_resolution.font
+                            inner_width = max(
+                                1.0,
+                                dense_horizontal[2]
+                                - dense_horizontal[0]
+                                - padding * 2,
+                            )
+                            wrapped = _wrap_text_unlimited(
+                                translated,
+                                draw,
+                                font,
+                                inner_width,
+                            )
+                            line_gap = max(2, padding // 2)
+                            line_heights = _text_line_heights(draw, font, wrapped)
+                            text_height = _text_block_height(line_heights, line_gap)
+                            available_height = row_band[3] - row_band[1]
+                            vertical_padding = _bounded_vertical_padding(
+                                available_height,
+                                text_height,
+                                padding,
+                            )
+                            capacity_padding = (
+                                vertical_padding
+                                if vertical_padding is not None
+                                else _MIN_VERTICAL_PLATE_PADDING
+                            )
+                            allowed_lines = _corridor_line_capacity(
+                                available_height,
+                                max(line_heights, default=1),
+                                capacity_padding,
+                                line_gap,
+                            )
+                            required_width = (
+                                max(
+                                    (
+                                        _text_width(draw, font, line)
+                                        for line in wrapped
+                                    ),
+                                    default=0.0,
+                                )
+                                + padding * 2
+                            )
+                            required_height = text_height + capacity_padding * 2
+                            plate, anchor_metrics = _single_line_plate(
+                                source,
+                                dense_horizontal,
+                                row_band,
+                                required_width,
+                                required_height,
+                                padding,
+                            )
+                            metrics = {
+                                "available_corridor_width": round(
+                                    dense_horizontal[2] - dense_horizontal[0],
+                                    1,
+                                ),
+                                "available_corridor_height": round(
+                                    available_height,
+                                    1,
+                                ),
+                                "required_rendered_width": round(
+                                    required_width,
+                                    1,
+                                ),
+                                "required_rendered_height": round(
+                                    required_height,
+                                    1,
+                                ),
+                                "allowed_line_count": allowed_lines,
+                                "actual_wrapped_line_count": len(wrapped),
+                                "blocking_protected_region": (
+                                    tuple(
+                                        round(value, 1)
+                                        for value in blocking_region
+                                    )
+                                    if blocking_region is not None
+                                    else ""
+                                ),
+                                "text_padding": padding,
+                                "vertical_padding": vertical_padding,
+                                "line_gap": line_gap,
+                                **boundary_metrics,
+                                **anchor_metrics,
+                            }
+                            diagnostic.update(metrics)
+                            if (
+                                not wrapped
+                                or vertical_padding is None
+                                or len(wrapped) > allowed_lines
+                                or plate is None
+                            ):
+                                fit_reason = (
+                                    "single_line_source_anchor_fit"
+                                    if plate is None
+                                    and str(
+                                        anchor_metrics.get(
+                                            "final_failure_predicate", ""
+                                        )
+                                    ).startswith("lowest_top=")
+                                    else "dense_row_band_fit"
+                                )
+                                continue
+                            if _candidate_collides(
+                                [plate],
+                                protected,
+                                used_slots,
+                            ):
+                                collision_rejections += 1
+                                fit_reason = "protected_region_collision"
+                                continue
+                            strategy = (
+                                "dense_row_wrap"
+                                if len(wrapped) > 1
+                                else "dense_row_shrink"
+                            )
+                            selected_layout = (
+                                font_size,
+                                font_resolution,
+                                line_heights,
+                                wrapped,
+                                [plate],
+                                "dense_row",
+                                metrics,
+                                strategy,
+                            )
+                            break
+
             candidate_modes = []
             for font_size in _replacement_font_candidates(
                 source_start_size, _ABSOLUTE_MIN_FONT_PX
@@ -1534,7 +1940,9 @@ def _make_source_replacement_overlay(
                 candidate_modes.extend(
                     ((font_size, False), (font_size, True))
                 )
-            for font_size, allow_expansion in candidate_modes:
+            for font_size, allow_expansion in (
+                candidate_modes if selected_layout is None else ()
+            ):
                 font_resolution = _resolve_overlay_font(font_size, output_mode)
                 font = font_resolution.font
                 short_single_source_row = (
@@ -1605,12 +2013,14 @@ def _make_source_replacement_overlay(
                             _text_width(draw, font, lines[0])
                             + text_padding * 2
                         )
-                        corridor, blocking_region = _single_line_row_corridor(
-                            original_rects[0],
-                            plate_rects[0],
-                            height,
-                            protected,
-                            used_slots,
+                        corridor, blocking_region, boundary_metrics = (
+                            _single_line_row_corridor(
+                                original_rects[0],
+                                plate_rects[0],
+                                height,
+                                protected,
+                                used_slots,
+                            )
                         )
                         available_width = (
                             plate_rects[0][2] - plate_rects[0][0]
@@ -1655,6 +2065,7 @@ def _make_source_replacement_overlay(
                             ),
                             "text_padding": text_padding,
                             "vertical_padding": vertical_padding,
+                            **boundary_metrics,
                         }
                         diagnostic.update(fit_metrics)
                         if corridor is None:
@@ -1664,7 +2075,7 @@ def _make_source_replacement_overlay(
                         if vertical_padding is None:
                             fit_reason = "single_line_corridor_fit"
                             continue
-                        plate = _single_line_plate(
+                        plate, anchor_metrics = _single_line_plate(
                             original_rects[0],
                             plate_rects[0],
                             corridor,
@@ -1672,8 +2083,18 @@ def _make_source_replacement_overlay(
                             required_height,
                             padding,
                         )
+                        fit_metrics.update(anchor_metrics)
+                        diagnostic.update(anchor_metrics)
                         if plate is None:
-                            fit_reason = "single_line_corridor_fit"
+                            fit_reason = (
+                                "single_line_source_anchor_fit"
+                                if str(
+                                    anchor_metrics.get(
+                                        "final_failure_predicate", ""
+                                    )
+                                ).startswith("lowest_top=")
+                                else "single_line_corridor_fit"
+                            )
                             continue
                         plate_rects[0] = plate
                     else:
@@ -1746,6 +2167,7 @@ def _make_source_replacement_overlay(
                     plate_rects,
                     "per_region",
                     fit_metrics,
+                    "broad_expansion" if allow_expansion else "normal",
                 )
                 break
 
@@ -1852,6 +2274,7 @@ def _make_source_replacement_overlay(
                         [plate],
                         "compound",
                         metrics,
+                        "broad_expansion",
                     )
                     break
 
@@ -1864,6 +2287,7 @@ def _make_source_replacement_overlay(
                 plate_rects,
                 layout_kind,
                 fit_metrics,
+                placement_strategy,
             ) = selected_layout
             font = font_resolution.font
             for rect in plate_rects:
@@ -1943,6 +2367,7 @@ def _make_source_replacement_overlay(
                     "font_path": font_resolution.path,
                     "font_face_index": font_resolution.face_index,
                     "font_weight": font_resolution.weight,
+                    "placement_strategy": placement_strategy,
                     **fit_metrics,
                 }
             )
@@ -2027,6 +2452,7 @@ def _make_source_replacement_overlay(
                 "collision_decision": "accepted",
                 "overflow_reason": fit_reason,
                 "marker": marker,
+                "placement_strategy": "overflow",
             }
         )
         legend_rows.append(

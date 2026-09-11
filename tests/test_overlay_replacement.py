@@ -619,6 +619,209 @@ class SourceReplacementRendererTests(unittest.TestCase):
             image.crop((520, 70, 721, 126)).tobytes(),
         )
 
+    def test_flower_subpixel_anchor_clamp_preserves_source_without_overlap(self):
+        source_rect = (257.6, 407.8, 967.4, 463.0)
+        horizontal = (253.6, 403.8, 1018.0, 467.0)
+        above = (216.8, 373.5, 984.0, 407.5)
+        below = (259.1, 484.4, 964.3, 530.4)
+
+        corridor, blocker, metrics = overlay._single_line_row_corridor(
+            source_rect,
+            horizontal,
+            1533,
+            [above, below],
+            [],
+        )
+
+        self.assertEqual((253.6, 407.8, 1018.0, 483.9), corridor)
+        self.assertEqual(below, blocker)
+        self.assertEqual(408.0, metrics["neighbour_boundary_before_tolerance"]["top"])
+        self.assertEqual(407.8, metrics["neighbour_boundary_after_tolerance"]["top"])
+        self.assertTrue(metrics["source_anchor_clamp_applied"]["top"])
+        plate, anchor = overlay._single_line_plate(
+            source_rect,
+            horizontal,
+            corridor,
+            234.0,
+            12.0,
+            4,
+        )
+        self.assertIsNotNone(plate)
+        self.assertEqual("passed", anchor["final_failure_predicate"])
+        self.assertFalse(overlay._rects_overlap(plate, above))
+        self.assertFalse(overlay._rects_overlap(plate, below))
+
+    def test_flower_dense_row_stays_on_image_with_production_geometry(self):
+        member_boxes = (
+            {
+                "text": "立3鎖針，長針，14長針加針，引拔",
+                "min_x": 257.6,
+                "max_x": 751.2,
+                "min_y": 415.4,
+                "max_y": 453.8,
+            },
+            {
+                "text": "共30針",
+                "min_x": 850.9,
+                "max_x": 967.4,
+                "min_y": 407.8,
+                "max_y": 463.0,
+            },
+        )
+        flower_region = {
+            "source_segment_id": "segment-0005",
+            "visual_line_id": "visual-0005",
+            "reading_order": 5,
+            "member_boxes": member_boxes,
+            "min_x": 257.6,
+            "max_x": 967.4,
+            "min_y": 407.8,
+            "max_y": 463.0,
+        }
+        translated = (
+            "Chain 3, double crochet, 14 double crochet increases, "
+            "slip stitch. Total: 30 stitches."
+        )
+        rows = pd.DataFrame(
+            [
+                self._row(
+                    "@row_1",
+                    "@row_1",
+                    x1=216.8,
+                    x2=984.0,
+                    y1=373.5,
+                    y2=407.5,
+                ),
+                self._row(
+                    "立3鎖針，長針，14長針加針，引拔 共30針",
+                    translated,
+                    x1=257.6,
+                    x2=967.4,
+                    y1=407.8,
+                    y2=463.0,
+                    **{
+                        "Source Regions": (flower_region,),
+                        "Semantic Unit ID": "unit-0003",
+                        "Source Segment IDs": ("segment-0005",),
+                    },
+                ),
+                self._row(
+                    "@row_3",
+                    "@row_3",
+                    x1=259.1,
+                    x2=964.3,
+                    y1=484.4,
+                    y2=530.4,
+                ),
+            ]
+        )
+        source = Image.new("RGB", (1018, 600), (245, 245, 245))
+        source_draw = ImageDraw.Draw(source)
+        source_draw.rectangle((216, 373, 984, 407), fill=(31, 61, 91))
+        source_draw.rectangle((259, 484, 965, 531), fill=(91, 61, 31))
+        above_before = source.crop((216, 373, 985, 408)).tobytes()
+        below_before = source.crop((259, 484, 966, 532)).tobytes()
+
+        image, legend, legend_df = overlay.make_line_translation_overlay(
+            source,
+            rows,
+            "English — US",
+        )
+
+        decision = next(
+            unit
+            for unit in rows.attrs["overlay_renderer_diagnostics"]["units"]
+            if unit["semantic_unit_id"] == "unit-0003"
+        )
+        self.assertEqual("expanded_replacement", rows.loc[1, "Overlay State"])
+        self.assertEqual("", rows.loc[1, "Overlay Marker"])
+        self.assertTrue(decision["dense_row_candidate"])
+        self.assertEqual(
+            "cell_spaced_members_with_aligned_dense_neighbours",
+            decision["dense_row_reason"],
+        )
+        self.assertEqual("dense_row_wrap", decision["placement_strategy"])
+        self.assertGreater(decision["actual_wrapped_line_count"], 1)
+        self.assertEqual("passed", decision["final_failure_predicate"])
+        self.assertTrue(decision["source_anchor_clamp_applied"]["top"])
+        self.assertEqual(0, rows.attrs["overlay_renderer_diagnostics"]["footer_height"])
+        self.assertEqual("", legend_df.loc[0, "Marker"])
+        self.assertIn(translated, legend)
+        self.assertEqual(above_before, image.crop((216, 373, 985, 408)).tobytes())
+        self.assertEqual(below_before, image.crop((259, 484, 966, 532)).tobytes())
+
+    def test_source_anchor_tolerance_never_clamps_actual_overlap(self):
+        source_rect = (100.0, 40.0, 300.0, 80.0)
+        overlapping_above = (90.0, 10.0, 310.0, 40.1)
+
+        corridor, blocker, metrics = overlay._single_line_row_corridor(
+            source_rect,
+            (96.0, 36.0, 304.0, 84.0),
+            160,
+            [overlapping_above],
+            [],
+        )
+
+        self.assertIsNone(corridor)
+        self.assertEqual(overlapping_above, blocker)
+        self.assertEqual(
+            "source_overlaps_protected_neighbour",
+            metrics["final_failure_predicate"],
+        )
+
+    def test_genuinely_impossible_dense_row_still_uses_footer(self):
+        dense_region = {
+            "source_segment_id": "segment-0001",
+            "visual_line_id": "visual-0001",
+            "reading_order": 1,
+            "member_boxes": (
+                {"min_x": 100, "max_x": 150, "min_y": 42, "max_y": 72},
+                {"min_x": 200, "max_x": 300, "min_y": 40, "max_y": 75},
+            ),
+            "min_x": 100,
+            "max_x": 300,
+            "min_y": 40,
+            "max_y": 80,
+        }
+        translation = "complete translated instruction " * 12
+        rows = pd.DataFrame(
+            [
+                self._row("@above", "@above", x1=90, x2=310, y1=2, y2=35),
+                self._row(
+                    "dense source row",
+                    translation,
+                    x1=100,
+                    x2=300,
+                    y1=40,
+                    y2=80,
+                    **{
+                        "Source Regions": (dense_region,),
+                        "Semantic Unit ID": "unit-dense-overflow",
+                    },
+                ),
+                self._row("@below", "@below", x1=90, x2=310, y1=85, y2=120),
+            ]
+        )
+
+        image, legend, legend_df = overlay.make_line_translation_overlay(
+            Image.new("RGB", (400, 150), "white"),
+            rows,
+            "English — US",
+        )
+
+        decision = next(
+            unit
+            for unit in rows.attrs["overlay_renderer_diagnostics"]["units"]
+            if unit["semantic_unit_id"] == "unit-dense-overflow"
+        )
+        self.assertGreater(image.height, 150)
+        self.assertTrue(decision["dense_row_candidate"])
+        self.assertEqual("overflow", decision["placement_strategy"])
+        self.assertEqual("overflow", rows.loc[1, "Overlay State"])
+        self.assertEqual("[1]", rows.loc[1, "Overlay Marker"])
+        self.assertEqual("[1]", legend_df.loc[0, "Marker"])
+        self.assertIn(translation.strip(), legend)
+
     def test_penguin_rows_use_safe_same_row_fitting_before_overflow(self):
         def region(segment, x1, x2, y1, y2, order):
             return {
@@ -723,6 +926,12 @@ class SourceReplacementRendererTests(unittest.TestCase):
             "expanded_replacement",
             rows.loc[8, "Overlay State"],
             rows.attrs["overlay_renderer_diagnostics"]["units"][8],
+        )
+        self.assertFalse(
+            any(
+                unit["dense_row_candidate"]
+                for unit in rows.attrs["overlay_renderer_diagnostics"]["units"]
+            )
         )
         for position in (12, 13):
             self.assertEqual("trusted", rows.loc[position, "Translation Trust"])
@@ -1093,6 +1302,8 @@ class SourceReplacementRendererTests(unittest.TestCase):
         )
         self.assertGreaterEqual(rows.loc[0, "Overlay Wrapped Lines"], 3)
         self.assertEqual("accepted", decision["collision_decision"])
+        self.assertFalse(decision["dense_row_candidate"])
+        self.assertEqual("multiple_source_regions", decision["dense_row_reason"])
         self.assertEqual(0, rows.attrs["overlay_renderer_diagnostics"]["footer_height"])
         self.assertEqual("", legend_df.loc[0, "Marker"])
         self.assertEqual((1080, 700), image.size)
@@ -1278,6 +1489,14 @@ class SourceReplacementRendererTests(unittest.TestCase):
         self.assertIn("allowed_lines=", report)
         self.assertIn("actual_lines=", report)
         self.assertIn("blocker=", report)
+        self.assertIn("dense_row_candidate=", report)
+        self.assertIn("dense_row_reason=", report)
+        self.assertIn("row_band=", report)
+        self.assertIn("strategy=", report)
+        self.assertIn("source_anchor_top_range=", report)
+        self.assertIn("neighbour_boundary_before=", report)
+        self.assertIn("neighbour_boundary_after=", report)
+        self.assertIn("failure_predicate=", report)
         self.assertIn("absolute_minimum_font=", report)
         self.assertIn("source_height=", report)
         self.assertIn("calibrated_start=", report)

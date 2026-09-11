@@ -53,6 +53,15 @@ _STUDIO_IDENTITY_RE = re.compile(
     r"\b(?:[A-Z][A-Za-z.'’_-]+\s+){0,3}(?:Studio|Designs)\b"
 )
 _PURE_NUMERIC_RE = re.compile(r"^[\s\d.,:;_+\-–—~～/()\[\]{}%]+$")
+_DECORATED_PAGE_LABEL_RE = re.compile(r"^\s*[-–—]\s*\d{1,4}\s*[-–—]\s*$")
+_PLAIN_PAGE_LABEL_RE = re.compile(r"^\s*\d{1,4}\s*$")
+_SINGLE_CJK_RE = re.compile(r"^[\u3400-\u9fff\uf900-\ufaff]$")
+_SHORT_CJK_TERMINAL_RE = re.compile(
+    r"^\s*([\u3400-\u9fff\uf900-\ufaff])\s*[。！？!?]\s*$"
+)
+_SHORT_CJK_INSTRUCTION_CONTINUATIONS = frozenset(
+    "結结緊紧縫缝合收斷断剪織织編编"
+)
 _PATTERN_PROSE_RE = re.compile(
     r"(?:\b(?:insert|glue|sew|attach|join|start(?:ing)?|work|repeat|fasten|place|"
     r"use|make|crochet|change|continue|leave|turn|skip|optional)\b|"
@@ -102,7 +111,12 @@ def looks_like_pattern_text(text: str) -> bool:
     return any(re.search(pat, s, flags=re.I) for pat in patterns)
 
 
-def is_watermark_like_text(text: str, repeated_count: int = 1) -> bool:
+def is_watermark_like_text(
+    text: str,
+    repeated_count: int = 1,
+    *,
+    contextual_short_cjk: bool = False,
+) -> bool:
     s = unicodedata.normalize("NFKC", str(text or "")).strip()
     if not s:
         return True
@@ -112,13 +126,125 @@ def is_watermark_like_text(text: str, repeated_count: int = 1) -> bool:
     # Repeated text filter: safe version. Never remove crochet-looking content.
     if repeated_count >= 5 and not looks_like_pattern_text(s):
         return True
+    if contextual_short_cjk and (
+        _SINGLE_CJK_RE.fullmatch(s) or _SHORT_CJK_TERMINAL_RE.fullmatch(s)
+    ):
+        return False
     # Very short decorative leftovers with no crochet meaning.
     if len(s) <= 2 and not looks_like_pattern_text(s):
         return True
     return False
 
 
-def filter_noise_and_watermarks(ocr_rows: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
+def _positive_row_height(row: object, default: float = 20.0) -> float:
+    try:
+        height = float(row.get("max_y", 0) or 0) - float(
+            row.get("min_y", 0) or 0
+        )
+    except (TypeError, ValueError):
+        return default
+    return height if height > 0 else default
+
+
+def _contextual_short_cjk_continuation_indices(rows: pd.DataFrame) -> set:
+    """Find punctuation-ended one-character continuations beside prior CJK prose."""
+    if rows is None or rows.empty:
+        return set()
+    ordered = rows.sort_values(["min_y", "min_x"], na_position="last")
+    heights = [
+        _positive_row_height(row)
+        for _, row in ordered.iterrows()
+    ]
+    median_height = float(pd.Series(heights).median() or 20.0)
+    preserved = set()
+    previous = None
+    for index, row in ordered.iterrows():
+        original = str(row.get("original_text_before_filter", "") or "").strip()
+        match = _SHORT_CJK_TERMINAL_RE.fullmatch(original)
+        if match is not None and previous is not None:
+            character = match.group(1)
+            previous_text = str(previous.get("text", "") or "").strip()
+            vertical_gap = float(row.get("min_y", 0) or 0) - float(
+                previous.get("max_y", 0) or 0
+            )
+            left_delta = abs(
+                float(row.get("min_x", 0) or 0)
+                - float(previous.get("min_x", 0) or 0)
+            )
+            if (
+                character in _SHORT_CJK_INSTRUCTION_CONTINUATIONS
+                and len(previous_text) >= 4
+                and re.search(r"[\u3400-\u9fff\uf900-\ufaff]", previous_text)
+                and 0 <= vertical_gap <= max(12.0, median_height * 0.75)
+                and left_delta <= max(20.0, median_height)
+            ):
+                preserved.add(index)
+        previous = row
+    return preserved
+
+
+def _standalone_page_label_reason(
+    row: object,
+    rows: pd.DataFrame,
+    *,
+    image_width: Optional[float],
+    image_height: Optional[float],
+) -> str:
+    """Classify detached footer page labels without consuming crochet counts."""
+    text = unicodedata.normalize("NFKC", str(row.get("text", "") or "")).strip()
+    decorated = _DECORATED_PAGE_LABEL_RE.fullmatch(text) is not None
+    plain = _PLAIN_PAGE_LABEL_RE.fullmatch(text) is not None
+    if not (decorated or plain) or not image_width or not image_height:
+        return ""
+
+    try:
+        min_x = float(row.get("min_x", 0) or 0)
+        max_x = float(row.get("max_x", min_x) or min_x)
+        min_y = float(row.get("min_y", 0) or 0)
+        max_y = float(row.get("max_y", min_y) or min_y)
+    except (TypeError, ValueError):
+        return ""
+    if max_x <= min_x or max_y <= min_y:
+        return ""
+
+    height_values = [
+        _positive_row_height(other)
+        for _, other in rows.iterrows()
+    ]
+    median_height = float(pd.Series(height_values).median() or 20.0)
+    center_x = (min_x + max_x) / 2.0
+    center_y = (min_y + max_y) / 2.0
+    bottom_threshold = 0.90 if plain else 0.85
+    center_tolerance = 0.08 if plain else 0.18
+    minimum_gap = median_height * (1.0 if plain else 0.5)
+    if center_y < float(image_height) * bottom_threshold:
+        return ""
+    if abs(center_x - float(image_width) / 2.0) > float(image_width) * center_tolerance:
+        return ""
+
+    same_line_threshold = max(10.0, median_height * 0.65)
+    nearest_above_bottom = 0.0
+    for other_index, other in rows.iterrows():
+        if other_index == row.name:
+            continue
+        other_min_y = float(other.get("min_y", 0) or 0)
+        other_max_y = float(other.get("max_y", other_min_y) or other_min_y)
+        other_center_y = (other_min_y + other_max_y) / 2.0
+        if abs(other_center_y - center_y) <= same_line_threshold:
+            return ""
+        if other_max_y <= min_y:
+            nearest_above_bottom = max(nearest_above_bottom, other_max_y)
+    if nearest_above_bottom and min_y - nearest_above_bottom < minimum_gap:
+        return ""
+    return "detached_footer_page_label"
+
+
+def filter_noise_and_watermarks(
+    ocr_rows: pd.DataFrame,
+    *,
+    image_width: Optional[float] = None,
+    image_height: Optional[float] = None,
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """Remove common watermark/noise rows without deleting real pattern rows.
 
     Also strips trailing watermark fragments from otherwise useful rows, e.g.
@@ -130,23 +256,48 @@ def filter_noise_and_watermarks(ocr_rows: pd.DataFrame) -> Tuple[pd.DataFrame, p
     rows = ocr_rows.copy().reset_index(drop=True)
     rows["original_text_before_filter"] = rows["text"].astype(str)
     rows["text"] = rows["text"].astype(str).map(strip_watermark_substrings)
+    contextual_short_cjk = _contextual_short_cjk_continuation_indices(rows)
 
     norm_counts = rows["text"].map(lambda x: terminology_engine.norm_text(x)).value_counts().to_dict()
     keep = []
     removed = []
-    for _, r in rows.iterrows():
+    for row_index, r in rows.iterrows():
         txt = str(r.get("text", "")).strip()
         original_txt = str(r.get("original_text_before_filter", "")).strip()
+        if row_index in contextual_short_cjk:
+            txt = original_txt
+            r["text"] = original_txt
         nkey = terminology_engine.norm_text(txt)
         repeated = int(norm_counts.get(nkey, 0)) if nkey else 0
         reason = ""
-        if original_txt and txt != original_txt and not txt:
+        content_category = ""
+        exclusion_reason = _standalone_page_label_reason(
+            r,
+            rows,
+            image_width=image_width,
+            image_height=image_height,
+        )
+        if exclusion_reason:
+            reason = f"page metadata; {exclusion_reason}"
+            content_category = "page_label"
+        elif original_txt and txt != original_txt and not txt:
             reason = "watermark substring only"
-        elif is_watermark_like_text(txt, repeated_count=repeated):
+        elif (
+            not _PLAIN_PAGE_LABEL_RE.fullmatch(txt)
+            and is_watermark_like_text(
+                txt,
+                repeated_count=repeated,
+                contextual_short_cjk=row_index in contextual_short_cjk,
+            )
+        ):
             reason = f"watermark/noise; repeated={repeated}"
         if reason:
             rr = r.to_dict()
             rr["removed_reason"] = reason
+            if content_category:
+                rr["Content Category"] = content_category
+                rr["Content Exclusion Reason"] = exclusion_reason
+                rr["Preserved State"] = "preserved_in_source"
             removed.append(rr)
         else:
             keep.append(r.to_dict())

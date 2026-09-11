@@ -1363,7 +1363,11 @@ def translate_image(request: TranslateImageRequest) -> TranslateImageResult:
     raw_ocr_text = candidate_result["selected_text"]
     ocr_rows = candidate_result["selected_rows"]
     detected_ocr_rows = ocr_rows.copy() if ocr_rows is not None else pd.DataFrame()
-    ocr_rows, removed_noise_df = pattern_document_engine.filter_noise_and_watermarks(ocr_rows)
+    ocr_rows, removed_noise_df = pattern_document_engine.filter_noise_and_watermarks(
+        ocr_rows,
+        image_width=float(working_image.width),
+        image_height=float(working_image.height),
+    )
     raw_ocr_text = "\n".join(ocr_rows["text"].astype(str).tolist()) if ocr_rows is not None and not ocr_rows.empty else ""
     clean_text = ocr_cleanup_engine.clean_ocr_text(raw_ocr_text)
     cleanup_seconds = time.perf_counter() - cleanup_start

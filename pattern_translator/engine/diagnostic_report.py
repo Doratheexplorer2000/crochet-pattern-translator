@@ -1058,7 +1058,13 @@ def _format_overlay_renderer_diagnostics(diagnostics: Optional[Dict[str, object]
                 "lines={wrapped} | expansion={expand_x},{expand_y} | collision={collision} | "
                 "corridor={available_width}x{available_height} | required={required_width}x{required_height} | "
                 "allowed_lines={allowed_lines} | actual_lines={actual_lines} | blocker={blocker} | "
-                "overflow={overflow} | marker={marker}".format(
+                "dense_row_candidate={dense_row_candidate} | dense_row_reason={dense_row_reason} | "
+                "row_band={row_band_top}..{row_band_bottom} | strategy={placement_strategy} | "
+                "source_rect={source_rectangle} | source_anchor_top_range={source_anchor_top_range} | "
+                "neighbour_boundary_before={neighbour_boundary_before} | "
+                "neighbour_boundary_after={neighbour_boundary_after} | "
+                "anchor_tolerance={anchor_tolerance} | anchor_clamp={anchor_clamp} | "
+                "failure_predicate={failure_predicate} | overflow={overflow} | marker={marker}".format(
                     unit=_debug_cell(unit.get("semantic_unit_id", "")) or f"row-{index}",
                     segments=_debug_cell(unit.get("source_segment_ids", "")),
                     regions=_debug_cell(unit.get("source_region_count", 0)),
@@ -1115,6 +1121,38 @@ def _format_overlay_renderer_diagnostics(diagnostics: Optional[Dict[str, object]
                     ),
                     blocker=_debug_cell(
                         unit.get("blocking_protected_region", "")
+                    ),
+                    dense_row_candidate=_debug_cell(
+                        "yes" if unit.get("dense_row_candidate") else "no"
+                    ),
+                    dense_row_reason=_debug_cell(
+                        unit.get("dense_row_reason", "")
+                    ),
+                    row_band_top=_debug_cell(unit.get("row_band_top", 0)),
+                    row_band_bottom=_debug_cell(unit.get("row_band_bottom", 0)),
+                    placement_strategy=_debug_cell(
+                        unit.get("placement_strategy", "normal")
+                    ),
+                    source_rectangle=_debug_cell(
+                        unit.get("source_rectangle", "")
+                    ),
+                    source_anchor_top_range=_debug_cell(
+                        unit.get("source_anchor_top_range", "")
+                    ),
+                    neighbour_boundary_before=_debug_cell(
+                        unit.get("neighbour_boundary_before_tolerance", "")
+                    ),
+                    neighbour_boundary_after=_debug_cell(
+                        unit.get("neighbour_boundary_after_tolerance", "")
+                    ),
+                    anchor_tolerance=_debug_cell(
+                        unit.get("source_anchor_tolerance_px", 0)
+                    ),
+                    anchor_clamp=_debug_cell(
+                        unit.get("source_anchor_clamp_applied", "")
+                    ),
+                    failure_predicate=_debug_cell(
+                        unit.get("final_failure_predicate", "")
                     ),
                     overflow=_debug_cell(unit.get("overflow_reason", "")),
                     marker=_debug_cell(unit.get("marker", "")),
