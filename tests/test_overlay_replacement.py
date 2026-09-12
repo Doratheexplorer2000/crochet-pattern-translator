@@ -140,6 +140,48 @@ class ContentClassificationTests(unittest.TestCase):
             [(span["text"], span["kind"]) for span in account_span],
         )
 
+    def test_accepted_broad_unchanged_units_remain_trusted(self):
+        cases = (
+            ("EN-US to EN-UK", "Pattern notes"),
+            ("EN-UK to EN-US", "Pattern notes"),
+            ("TC to SC", "R2:6v=12"),
+            ("SC to TC", "R2:6v=12"),
+            ("Japanese protected domain", "Visit example.com"),
+        )
+        for route, text in cases:
+            with self.subTest(route=route):
+                row = {
+                    "Original": text,
+                    "Translation": text,
+                    "Validation Status": "validated",
+                }
+                annotated = pattern_document.annotate_overlay_content(
+                    pd.DataFrame([row])
+                )
+                self.assertEqual(
+                    "trusted",
+                    annotated.loc[0, "Translation Trust"],
+                )
+
+    def test_structural_failure_and_legacy_unchanged_statuses_are_preserved(self):
+        unresolved = {
+            "Original": "R2:6v=12",
+            "Translation": "R2:6v=12",
+            "Validation Status": "unresolved",
+        }
+        legacy = {
+            "Original": "R2:6v=12",
+            "Translation": "R2:6v=12",
+        }
+        self.assertEqual(
+            "untrusted",
+            pattern_document.translation_trust_status(unresolved),
+        )
+        self.assertEqual(
+            "source_preserved",
+            pattern_document.translation_trust_status(legacy),
+        )
+
 
 class OverlayFontResolverTests(unittest.TestCase):
     def setUp(self):
@@ -1233,6 +1275,82 @@ class SourceReplacementRendererTests(unittest.TestCase):
         decision = rows.attrs["overlay_renderer_diagnostics"]["units"][0]
         self.assertEqual(2, decision["source_region_count"])
         self.assertIn(rows.loc[0, "Overlay State"], {"replacement", "expanded_replacement", "overflow"})
+
+    def test_bottom_clamped_extra_plate_uses_safe_compound_layout(self):
+        translated_lines = [
+            "鎖編7目、裏返して2目めから細編み1目、中長編み1目、長編み3目、",
+            "中長編み1目、細編み1目、鎖編2目、戻って引き抜き編2目：細編み1目、",
+            "中長編み1目、長編み3目、中長編み1目、細編み1目、引き抜き編み。糸を切らずに続けて茎を編む：鎖編6目、",
+            "細編5目。糸を残し、オレンジの上部に縫い付ける。",
+        ]
+        translated = "".join(translated_lines)
+        regions = (
+            {"source_segment_id": "segment-0016", "visual_line_id": "visual-0016", "reading_order": 16, "member_boxes": (), "min_x": 23.2, "max_x": 741.9, "min_y": 946.1, "max_y": 982.6},
+            {"source_segment_id": "segment-0017", "visual_line_id": "visual-0017", "reading_order": 17, "member_boxes": (), "min_x": 23.2, "max_x": 808.1, "min_y": 1000.2, "max_y": 1036.7},
+            {"source_segment_id": "segment-0018", "visual_line_id": "visual-0018", "reading_order": 18, "member_boxes": (), "min_x": 18.8, "max_x": 364.3, "min_y": 1049.9, "max_y": 1095.2},
+        )
+        rows = pd.DataFrame(
+            [
+                self._row(
+                    "leaf and stem instructions",
+                    translated,
+                    x1=18.8,
+                    x2=808.1,
+                    y1=946.1,
+                    y2=1095.2,
+                    Source_Regions=regions,
+                    **{
+                        "Source Segment IDs": (
+                            "segment-0016",
+                            "segment-0017",
+                            "segment-0018",
+                        )
+                    },
+                )
+            ]
+        ).rename(columns={"Source_Regions": "Source Regions"})
+        rendered_calls = []
+
+        def capture_draw(*args, **kwargs):
+            rendered_calls.append(
+                {
+                    "rect": args[1],
+                    "lines": list(args[2]),
+                    "line_heights": list(args[4]),
+                    "padding": args[5],
+                    "vertical_padding": kwargs.get("vertical_padding"),
+                }
+            )
+            return original_draw(*args, **kwargs)
+
+        original_draw = overlay._draw_text_lines
+        with mock.patch.object(
+            overlay,
+            "_wrap_text_to_widths",
+            return_value=(translated_lines, True),
+        ), mock.patch.object(
+            overlay,
+            "_wrap_text_unlimited",
+            return_value=translated_lines,
+        ), mock.patch.object(
+            overlay,
+            "_draw_text_lines",
+            side_effect=capture_draw,
+        ):
+            image, _legend, _legend_df = overlay.make_line_translation_overlay(
+                Image.new("RGB", (828, 1104), "white"), rows, "Japanese"
+            )
+
+        decision = rows.attrs["overlay_renderer_diagnostics"]["units"][0]
+        self.assertEqual("expanded_replacement", rows.loc[0, "Overlay State"])
+        self.assertEqual("broad_expansion", decision["placement_strategy"])
+        self.assertEqual(1, len(rendered_calls))
+        self.assertEqual(translated_lines, rendered_calls[0]["lines"])
+        self.assertEqual(translated_lines[-1], rendered_calls[0]["lines"][-1])
+        self.assertEqual(4, decision["actual_wrapped_line_count"])
+        self.assertGreater(decision["required_rendered_height"], 0)
+        self.assertEqual(0, rows.attrs["overlay_renderer_diagnostics"]["footer_height"])
+        self.assertEqual((828, 1104), image.size)
 
     def test_kerry_hashtags_use_safe_compound_corridor_without_overflow(self):
         original = (

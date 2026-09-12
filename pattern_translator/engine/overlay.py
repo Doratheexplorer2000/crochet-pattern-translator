@@ -2151,7 +2151,12 @@ def _make_source_replacement_overlay(
                                 + padding * 2,
                             ),
                         )
-                        if extra[3] - last[3] > source_start_size + padding * 2:
+                        extra_height = extra[3] - last[3]
+                        required_extra_height = line_heights[-1] + padding * 2
+                        if (
+                            extra_height < required_extra_height
+                            or extra_height > source_start_size + padding * 2
+                        ):
                             continue
                         plate_rects.append(extra)
 

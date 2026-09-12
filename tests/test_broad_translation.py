@@ -8,28 +8,45 @@ from unittest import mock
 import pandas as pd
 
 from pattern_translator.engine import broad_translation
-from pattern_translator.engine import diagnostic_report
 from pattern_translator.engine import line_translation
 from pattern_translator.engine import ocr_lines
-from pattern_translator.engine import overlay
 from pattern_translator.engine import shadow_title_classifier
-from pattern_translator.engine import terminology
-from pattern_translator.translation_service import (
-    TranslateImageRequest,
-    prepare_translation_dataframe,
-    translate_image,
+
+
+ROUTES = (
+    ("English — US", "English — UK"),
+    ("English — US", "Traditional Chinese"),
+    ("English — US", "Simplified Chinese"),
+    ("English — US", "Japanese"),
+    ("English — UK", "English — US"),
+    ("English — UK", "Traditional Chinese"),
+    ("English — UK", "Simplified Chinese"),
+    ("English — UK", "Japanese"),
+    ("Simplified Chinese", "English — US"),
+    ("Simplified Chinese", "English — UK"),
+    ("Simplified Chinese", "Traditional Chinese"),
+    ("Simplified Chinese", "Japanese"),
+    ("Traditional Chinese", "English — US"),
+    ("Traditional Chinese", "English — UK"),
+    ("Traditional Chinese", "Simplified Chinese"),
+    ("Traditional Chinese", "Japanese"),
+    ("Japanese", "English — US"),
+    ("Japanese", "English — UK"),
+    ("Japanese", "Traditional Chinese"),
+    ("Japanese", "Simplified Chinese"),
 )
 
 
 def _ocr_row(text: str, **geometry) -> dict:
     values = {
         "text": text,
+        "semantic_text": text,
         "confidence": 0.95,
         "x": 10.0,
         "global_x": 10.0,
         "y": 10.0,
         "min_x": 0.0,
-        "max_x": 40.0,
+        "max_x": 120.0,
         "min_y": 0.0,
         "max_y": 20.0,
     }
@@ -37,2770 +54,622 @@ def _ocr_row(text: str, **geometry) -> dict:
     return values
 
 
-def _valid_units(segments: list[dict[str, str]], translations: list[str]) -> list[dict]:
-    return [
-        {
-            "source_segment_ids": [segment["source_segment_id"]],
-            "translation": translation,
-        }
-        for segment, translation in zip(segments, translations)
-    ]
-
-
-def _keyed_response_from_units(units: list[dict]) -> dict:
-    segment_assignments: dict[str, str] = {}
-    semantic_units: dict[str, dict[str, str]] = {}
-    for index, unit in enumerate(units):
-        unit_id = f"unit-{index:04d}"
-        semantic_units[unit_id] = {"translated_text": unit["translation"]}
-        for source_id in unit["source_segment_ids"]:
-            segment_assignments[source_id] = unit_id
+def _response_text(response: object) -> dict:
     return {
-        "segment_assignments": segment_assignments,
-        "semantic_units": semantic_units,
+        "output": [
+            {
+                "content": [
+                    {"type": "output_text", "text": json.dumps(response, ensure_ascii=False)}
+                ]
+            }
+        ]
     }
 
 
-def _route_config(source_mode: str, output_mode: str) -> broad_translation._RouteConfig:
-    return broad_translation._route_config(source_mode, output_mode)
+def _keyed_response(
+    segments: list[dict[str, str]],
+    translations: list[str],
+) -> dict:
+    assignments = {}
+    units = {}
+    for index, (segment, translation) in enumerate(zip(segments, translations)):
+        unit_id = f"unit-{index:04d}"
+        assignments[segment["source_segment_id"]] = unit_id
+        units[unit_id] = {"translated_text": translation}
+    return {"segment_assignments": assignments, "semantic_units": units}
 
 
-class BroadValidationRegressionTests(unittest.TestCase):
-    def _segments(self, text: str) -> list[dict[str, str]]:
-        return [{"source_segment_id": "segment-0000", "text": text}]
-
-    def _assert_rejects(self, source: str, translation: str, *, en_us_source: bool) -> None:
-        segments = self._segments(source)
-        units = _valid_units(segments, [translation])
-        config = _route_config(
-            "English — US" if en_us_source else "Simplified Chinese",
-            "Traditional Chinese" if en_us_source else "English — US",
-        )
-        with self.assertRaises(broad_translation.BroadTranslationError):
-            broad_translation.validate_semantic_units(units, segments, config)
-
-    def _assert_accepts(self, source: str, translation: str, *, en_us_source: bool) -> None:
-        segments = self._segments(source)
-        units = _valid_units(segments, [translation])
-        config = _route_config(
-            "English — US" if en_us_source else "Simplified Chinese",
-            "Traditional Chinese" if en_us_source else "English — US",
-        )
-        broad_translation.validate_semantic_units(units, segments, config)
-
-    def test_blank_translation_rejected(self):
-        self._assert_rejects("Materials", "", en_us_source=True)
-
-    def test_penguin_r6_accepts_semantically_equivalent_surface_variants(self):
-        source = (
-            "R6: 11sc, *CC to white* BOB, *CC to dark gray* 3sc, "
-            "*CC to white*\nBOB, *CC to dark gray* 8sc (24)"
-        )
-        variants = (
-            (
-                "R6：11 短針，*換成白色* 棗形針，*換成深灰色* 3 短針，"
-                "*換成白色* 棗形針，*換成深灰色* 8 短針（24）"
-            ),
-            (
-                "第6圈：11 個短針；換配色至白色—棗形針；換配色至深灰色—"
-                "3 個短針；換配色至白色—棗形針；換配色至深灰色—8 個短針（共24針）"
-            ),
-            (
-                "R6（第6圈）：11 個短針，換成白色，棗形針，換成深灰色，"
-                "3 個短針，換成白色，棗形針，換成深灰色，8 個短針（共24針）"
-            ),
-        )
-        for translation in variants:
-            with self.subTest(translation=translation):
-                self._assert_accepts(source, translation, en_us_source=True)
-
-    def test_penguin_r6_material_semantic_changes_remain_rejected(self):
-        source = (
-            "R6: 11sc, *CC to white* BOB, *CC to dark gray* 3sc, "
-            "*CC to white*\nBOB, *CC to dark gray* 8sc (24)"
-        )
-        invalid_variants = {
-            "missing_bobble": (
-                "R6：11 短針，換成白色，換成深灰色，3 短針，換成白色，"
-                "棗形針，換成深灰色，8 短針（24）"
-            ),
-            "wrong_11_count": (
-                "R6：12 短針，換成白色，棗形針，換成深灰色，3 短針，"
-                "換成白色，棗形針，換成深灰色，8 短針（24）"
-            ),
-            "wrong_3_count": (
-                "R6：11 短針，換成白色，棗形針，換成深灰色，4 短針，"
-                "換成白色，棗形針，換成深灰色，8 短針（24）"
-            ),
-            "wrong_8_count": (
-                "R6：11 短針，換成白色，棗形針，換成深灰色，3 短針，"
-                "換成白色，棗形針，換成深灰色，9 短針（24）"
-            ),
-            "missing_total": (
-                "R6：11 短針，換成白色，棗形針，換成深灰色，3 短針，"
-                "換成白色，棗形針，換成深灰色，8 短針"
-            ),
-            "invented_count": (
-                "R6：11 短針，換成白色，棗形針，換成深灰色，3 短針，"
-                "換成白色，棗形針，換成深灰色，8 短針，另加 2 短針（24）"
-            ),
-            "dropped_colour_changes": (
-                "R6：11 短針，白色棗形針，3 短針，白色棗形針，8 短針（24）"
-            ),
-            "changed_stitch_identity": (
-                "R6：11 長針，換成白色，棗形針，換成深灰色，3 長針，"
-                "換成白色，棗形針，換成深灰色，8 長針（24）"
-            ),
-        }
-        for case, translation in invalid_variants.items():
-            with self.subTest(case=case):
-                self._assert_rejects(source, translation, en_us_source=True)
-
-    def test_identity_duplicate_allowance_is_equivalence_scoped(self):
-        source = "R6: 11sc (11)"
-        invalid_variants = (
-            "R6 R6：11 短針（11）",
-            "R6（第6行）：11 短針（11）",
-            "R6（第6圈）：11 短針（11），另加6短針",
-            "R6（第7圈）：11 短針（11）",
-        )
-        for translation in invalid_variants:
-            with self.subTest(translation=translation):
-                self._assert_rejects(source, translation, en_us_source=True)
-
-    def test_penguin_r6_full_broad_path_accepts_merged_valid_unit(self):
-        rows = pd.DataFrame(
-            [
-                _ocr_row(
-                    "R6: 11sc, *CC to white* BOB, *CC to dark gray* 3sc, "
-                    "*CC to white*",
-                    min_y=10,
-                    max_y=20,
-                ),
-                _ocr_row(
-                    "BOB, *CC to dark gray* 8sc (24)",
-                    min_y=21,
-                    max_y=30,
-                ),
-            ]
-        )
-        translated = (
-            "R6（第6圈）：11 個短針，換成白色，棗形針，換成深灰色，"
-            "3 個短針，換成白色，棗形針，換成深灰色，8 個短針（共24針）"
-        )
-
-        def fake_luna(prompt, api_key):
-            self.assertEqual("test-key", api_key)
-            payload = json.loads(prompt.split("INPUT: ", 1)[1])
-            concept_ids = {
-                entry["concept_id"]
-                for entry in payload["authoritative_crochet_glossary"]
-            }
-            self.assertIn("st_003_single_crochet", concept_ids)
-            self.assertIn("st_040_puff_stitch", concept_ids)
-            segment_ids = [
-                segment["source_segment_id"] for segment in payload["source_segments"]
-            ]
-            response = _keyed_response_from_units(
-                [{"source_segment_ids": segment_ids, "translation": translated}]
+def _translate(
+    sources: list[str],
+    translations: list[str],
+    *,
+    source_mode: str = "Simplified Chinese",
+    output_mode: str = "Japanese",
+    events: list[dict] | None = None,
+) -> tuple[pd.DataFrame, mock.Mock, list[str]]:
+    rows = pd.DataFrame(
+        [
+            _ocr_row(
+                source,
+                y=index * 30.0,
+                min_y=index * 30.0,
+                max_y=index * 30.0 + 20.0,
             )
-            return {
-                "output": [
-                    {
-                        "content": [
-                            {"type": "output_text", "text": json.dumps(response)}
-                        ]
-                    }
-                ]
-            }, 0.01
-
-        result = broad_translation.translate_merged_ocr_lines_broad(
-            rows,
-            source_mode="English — US",
-            output_mode="Traditional Chinese",
-            environ={"OPENAI_API_KEY": "test-key"},
-            luna_caller=fake_luna,
-        )
-        self.assertEqual(1, len(result))
-        self.assertEqual("validated", result.loc[0, "Validation Status"])
-        self.assertEqual(translated, result.loc[0, "Translation"])
-
-    def test_round_total_conflation_rejected(self):
-        self._assert_rejects("Rnd 2: 6 sc (12)", "第12圈：6短針", en_us_source=True)
-
-    def test_row_cannot_become_round(self):
-        self._assert_rejects("Row 2: 2 sc (2)", "第2圈", en_us_source=True)
-
-    def test_production_row_range_with_spaced_chinese_marker_accepted(self):
-        self._assert_accepts(
-            "Row 6-7: sc all around",
-            "第 6-7 行：整圈鉤短針",
-            en_us_source=True,
-        )
-
-    def test_english_row_identity_to_chinese_row_identity_accepted(self):
-        self._assert_accepts("Row 6", "第6行", en_us_source=True)
-
-    def test_plural_english_row_range_to_chinese_row_range_accepted(self):
-        self._assert_accepts("Rows 6-7", "第6-7行", en_us_source=True)
-
-    def test_english_round_identity_to_chinese_round_identity_accepted(self):
-        self._assert_accepts("Round 3", "第3圈", en_us_source=True)
-
-    def test_plural_english_round_range_to_chinese_round_range_accepted(self):
-        self._assert_accepts("Rounds 3-5", "第3-5圈", en_us_source=True)
-
-    def test_english_ranges_to_simplified_chinese_identity_forms_accepted(self):
-        for source, translation in (
-            ("Rows 6-7", "第 6-7 行"),
-            ("Rounds 3-5", "第 3-5 轮"),
-        ):
-            with self.subTest(source=source, translation=translation):
-                segments = self._segments(source)
-                broad_translation.validate_semantic_units(
-                    _valid_units(segments, [translation]),
-                    segments,
-                    _route_config("English — US", "Simplified Chinese"),
-                )
-
-    def test_simplified_chinese_ranges_to_plural_english_identities_accepted(self):
-        for source, translation in (
-            ("第6-7行", "Rows 6-7"),
-            ("第3-5轮", "Rounds 3-5"),
-        ):
-            with self.subTest(source=source, translation=translation):
-                self._assert_accepts(source, translation, en_us_source=False)
-
-    def test_row_range_missing_endpoint_rejected_by_identity_validator(self):
-        self.assertFalse(
-            broad_translation._validate_row_numbers(
-                "Row 6-7",
-                "第6行",
-                (broad_translation.ROW_EN_RE,),
-            )
-        )
-
-    def test_wrong_row_range_rejected_by_identity_validator(self):
-        self.assertFalse(
-            broad_translation._validate_row_numbers(
-                "Row 6-7",
-                "第6-8行",
-                (broad_translation.ROW_EN_RE,),
-            )
-        )
-
-    def test_stitch_count_range_does_not_satisfy_row_identity(self):
-        self.assertFalse(
-            broad_translation._validate_row_numbers(
-                "Row 6-7",
-                "6-7針",
-                (broad_translation.ROW_EN_RE,),
-            )
-        )
-
-    def test_row_and_round_identity_types_remain_distinct_for_ranges(self):
-        self.assertFalse(
-            broad_translation._validate_row_numbers(
-                "Row 6-7",
-                "第6-7圈",
-                (broad_translation.ROW_EN_RE,),
-            )
-        )
-
-    def test_separate_explicit_row_labels_preserve_existing_identity_semantics(self):
-        self._assert_accepts(
-            "Row 6-7",
-            "第6行，第7行",
-            en_us_source=True,
-        )
-
-    def test_suffix_repeat_forms_preserve_repetition_semantics(self):
-        cases = (
-            ("(sc, incr) 6x", "（短針，加針）×6"),
-            ("(2 sc, incr) 5x", "（2短針，加針）重複5次"),
-            ("(3 sc, incr) 6x", "（3短針，加針）重覆6次"),
-        )
-        for source, translation in cases:
-            with self.subTest(source=source, translation=translation):
-                self._assert_accepts(source, translation, en_us_source=True)
-
-    def test_suffix_repeat_cannot_be_recast_as_stitch_count(self):
-        cases = (
-            ("(sc, incr) 6x", "（短針，加針）短針6針"),
-            ("(2 sc, incr) 5x", "（2短針，加針）短針5針"),
-            ("(3 sc, incr) 6x", "（3短針，加針）短針6針"),
-        )
-        for source, translation in cases:
-            with self.subTest(source=source, translation=translation):
-                self._assert_rejects(source, translation, en_us_source=True)
-
-    def test_suffix_repeat_forms_preserve_semantics_for_simplified_chinese(self):
-        cases = (
-            ("(sc, incr) 6x", "（短针，加针）×6"),
-            ("(2 sc, incr) 5x", "（2短针，加针）重复5次"),
-        )
-        config = _route_config("English — US", "Simplified Chinese")
-        for source, translation in cases:
-            with self.subTest(source=source, translation=translation):
-                segments = self._segments(source)
-                broad_translation.validate_semantic_units(
-                    _valid_units(segments, [translation]),
-                    segments,
-                    config,
-                )
-
-    def test_suffix_repeat_corruption_rejected_for_simplified_chinese(self):
-        cases = (
-            ("(sc, incr) 6x", "（短针，加针）短针6针"),
-            ("(2 sc, incr) 5x", "（2短针，加针）短针5针"),
-        )
-        config = _route_config("English — US", "Simplified Chinese")
-        for source, translation in cases:
-            with self.subTest(source=source, translation=translation):
-                segments = self._segments(source)
-                with self.assertRaises(broad_translation.BroadTranslationError):
-                    broad_translation.validate_semantic_units(
-                        _valid_units(segments, [translation]),
-                        segments,
-                        config,
-                    )
-
-    def test_prefix_repeat_forms_also_require_repetition_semantics(self):
-        for source in ("(sc, incr) x6", "(sc, incr) x 6"):
-            with self.subTest(source=source):
-                self._assert_accepts(source, "（短針，加針）×6", en_us_source=True)
-                self._assert_rejects(source, "（短針，加針）短針6針", en_us_source=True)
-
-    def test_ordinary_stitch_counts_are_not_repeat_multipliers(self):
-        for source, translation in (("6 sc", "6短針"), ("2 sc", "2短針")):
-            with self.subTest(source=source):
-                self._assert_accepts(source, translation, en_us_source=True)
-
-    def test_ordinary_stitch_counts_remain_counts_for_simplified_chinese(self):
-        config = _route_config("English — US", "Simplified Chinese")
-        for source, translation in (("6 sc", "6短针"), ("2 sc", "2短针")):
-            with self.subTest(source=source):
-                segments = self._segments(source)
-                broad_translation.validate_semantic_units(
-                    _valid_units(segments, [translation]),
-                    segments,
-                    config,
-                )
-
-    def test_repeat_multiplier_multiplicity_is_enforced(self):
-        cases = (
-            ("Traditional Chinese", "（短針，加針）×6，共6針"),
-            ("Simplified Chinese", "（短针，加针）×6，共6针"),
-        )
-        source = "(sc, incr) 6x, then (sc, incr) 6x"
-        for output_mode, translation in cases:
-            with self.subTest(output_mode=output_mode):
-                segments = self._segments(source)
-                with self.assertRaises(broad_translation.BroadTranslationError):
-                    broad_translation.validate_semantic_units(
-                        _valid_units(segments, [translation]),
-                        segments,
-                        _route_config("English — US", output_mode),
-                    )
-
-    def test_repeat_safety_does_not_change_rows_or_measurements(self):
-        self._assert_accepts("Row 6", "第6行", en_us_source=True)
-        self._assert_accepts("20-30 cm", "20-30 cm", en_us_source=True)
-
-    def test_repeat_prompt_contract_is_scoped_to_both_english_source_routes(self):
-        traditional_prompt = broad_translation.build_prompt(
-            [],
-            [],
-            _route_config("English — US", "Traditional Chinese"),
-        )
-        english_target_prompt = broad_translation.build_prompt(
-            [],
-            [],
-            _route_config("Simplified Chinese", "English — US"),
-        )
-        simplified_target_prompt = broad_translation.build_prompt(
-            [],
-            [],
-            _route_config("English — US", "Simplified Chinese"),
-        )
-        contract_excerpt = "(sc, incr) 6x means repeat the grouped unit 6 times"
-        self.assertIn(contract_excerpt, traditional_prompt)
-        self.assertNotIn(contract_excerpt, english_target_prompt)
-        self.assertIn(contract_excerpt, simplified_target_prompt)
-
-    def test_measurement_unit_substitution_rejected(self):
-        self._assert_rejects("Cut a 5 cm tail", "剪下5英寸線尾", en_us_source=True)
-
-    def test_mm_ascii_preserved_for_traditional_chinese(self):
-        self._assert_accepts("Use a 2 mm hook", "使用 2 mm 鉤針", en_us_source=True)
-
-    def test_mm_to_traditional_chinese_millimetres(self):
-        self._assert_accepts("Use a 2 mm hook", "使用 2 毫米鉤針", en_us_source=True)
-
-    def test_mm_to_traditional_chinese_gongli(self):
-        self._assert_accepts("Use a 2 mm hook", "使用 2 公釐鉤針", en_us_source=True)
-
-    def test_simplified_chinese_mm_to_english_ascii(self):
-        self._assert_accepts("使用6毫米钩针", "Use a 6 mm hook", en_us_source=False)
-
-    def test_simplified_chinese_mm_to_english_spelling(self):
-        self._assert_accepts("使用6毫米钩针", "Use a 6 millimeters hook", en_us_source=False)
-
-    def test_simplified_chinese_mm_to_english_cm_rejected(self):
-        self._assert_rejects("使用6毫米钩针", "Use a 6 cm hook", en_us_source=False)
-
-    def test_english_measurement_to_simplified_chinese_preserves_unit(self):
-        segments = self._segments("Use a 2 mm hook")
-        units = _valid_units(segments, ["使用 2 毫米钩针"])
-        broad_translation.validate_semantic_units(
-            units,
-            segments,
-            _route_config("English — US", "Simplified Chinese"),
-        )
-
-    def test_mm_to_cm_rejected(self):
-        self._assert_rejects("Use a 2 mm hook", "使用 2 cm 鉤針", en_us_source=True)
-
-    def test_mm_to_inches_rejected(self):
-        self._assert_rejects("Use a 2 mm hook", "使用 2 inches 鉤針", en_us_source=True)
-
-    def test_mm_without_unit_rejected(self):
-        self._assert_rejects("Use a 2 mm hook", "使用 2 號鉤針", en_us_source=True)
-
-    def test_mm_numeric_value_change_rejected(self):
-        self._assert_rejects("Use a 2 mm hook", "使用 3 mm 鉤針", en_us_source=True)
-
-    def test_each_mm_value_must_keep_its_unit(self):
-        self._assert_rejects(
-            "Use 2 mm and 6 mm pieces",
-            "使用 2 cm 和 6 mm 配件",
-            en_us_source=True,
-        )
-
-    def test_chinese_identity_swap_rejected_for_sc_to_en(self):
-        self._assert_rejects(
-            "第1圈：6X，共6针",
-            "R6: 1 sc total 6",
-            en_us_source=False,
-        )
-
-    def test_valid_arabic_digit_traditional_chinese_accepted(self):
-        self._assert_accepts("Rnd 1: 6 sc", "第 1 圈：6 短針", en_us_source=True)
-
-    def test_english_ordinal_word_may_supply_matching_target_arabic_ordinal(self):
-        self._assert_accepts(
-            "Vines (6-7) ch length of vine (20-30 cm) "
-            "ch 10, slst back in first st",
-            "藤蔓（6-7條），鎖針編織藤蔓長度（20-30 cm）："
-            "鎖針10，在第1個針目上回引拔針",
-            en_us_source=True,
-        )
-
-    def test_ordinal_allowance_does_not_hide_missing_explicit_source_digit(self):
-        self._assert_rejects(
-            "Round 2: work in first st",
-            "在第1針鉤織",
-            en_us_source=True,
-        )
-
-    def test_ordinal_allowance_does_not_hide_unrelated_extra_digit(self):
-        self._assert_rejects(
-            "Round 2: work in first st",
-            "第2圈：在第1針鉤織，共30針",
-            en_us_source=True,
-        )
-
-    def test_one_ordinal_word_cannot_allow_two_extra_matching_digits(self):
-        self._assert_rejects(
-            "Work in first st",
-            "在第1針鉤織，再做1次",
-            en_us_source=True,
-        )
-
-    def test_two_ordinal_word_occurrences_allow_two_target_ordinals(self):
-        self._assert_accepts(
-            "Work in the first st and the first chain",
-            "在第1針和第1個鎖針鉤織",
-            en_us_source=True,
-        )
-
-    def test_bounded_english_ordinal_vocabulary_maps_first_through_tenth(self):
-        for word, digit in broad_translation.ENGLISH_ORDINAL_WORD_TO_DIGIT.items():
-            with self.subTest(word=word, digit=digit):
-                self._assert_accepts(
-                    f"Work in the {word} st",
-                    f"在第{digit}針鉤織",
-                    en_us_source=True,
-                )
-
-    def test_ordinal_word_boundaries_do_not_authorize_substrings_or_compounds(self):
-        for source in ("Work firstly", "Work in breakfastfirst st", "Work in twenty-first st"):
-            with self.subTest(source=source):
-                self._assert_rejects(source, "在第1針鉤織", en_us_source=True)
-
-    def test_ordinal_word_only_authorizes_target_ordinal_marker(self):
-        self._assert_rejects(
-            "Work in first st",
-            "鉤織短針並重複1次",
-            en_us_source=True,
-        )
-
-    def test_ordinal_allowance_applies_to_simplified_chinese_target(self):
-        segments = self._segments("Work in the second st")
-        units = _valid_units(segments, ["在第2针钩织"])
-        broad_translation.validate_semantic_units(
-            units,
-            segments,
-            _route_config("English — US", "Simplified Chinese"),
-        )
-
-    def test_cardinal_crochet_count_may_use_matching_arabic_digit(self):
-        self._assert_accepts(
-            "*Optional: sew on the nose between the middle of the eyes, one row "
-            "down (or do it at the end)",
-            "*可選：將鼻子縫在雙眼中間，向下 1 行（或最後再縫）",
-            en_us_source=True,
-        )
-
-    def test_cardinal_count_allowance_does_not_hide_unrelated_extra_digit(self):
-        self._assert_rejects(
-            "*Optional: sew on the nose between the middle of the eyes, one row "
-            "down (or do it at the end)",
-            "*可選：將鼻子縫在雙眼中間，向下 1 行，另加 99 針",
-            en_us_source=True,
-        )
-
-    def test_cardinal_word_without_crochet_count_context_cannot_add_digit(self):
-        self._assert_rejects(
-            "Sew one nose between the eyes",
-            "在雙眼中間縫上鼻子，再加 1 針",
-            en_us_source=True,
-        )
-
-    def test_trio_may_translate_to_one_arabic_three(self):
-        self._assert_accepts("Add a trio of peas", "放入 3 顆豌豆", en_us_source=True)
-
-    def test_trio_may_translate_to_simplified_chinese_three(self):
-        segments = self._segments("Add a trio of peas")
-        units = _valid_units(segments, ["放入 3 颗豌豆"])
-        broad_translation.validate_semantic_units(
-            units,
-            segments,
-            _route_config("English — US", "Simplified Chinese"),
-        )
-
-    def test_simplified_trio_counter_remains_invalid_for_traditional_target(self):
-        self._assert_rejects("Add a trio of peas", "放入 3 颗豌豆", en_us_source=True)
-
-    def test_peas_mixed_unit_accepts_trio_as_arabic_three(self):
-        self._assert_accepts(
-            "R4: (2SC, 1INC)x6 [24] R11: 6DEC [6] 4.Put the trio of peas into the pod!",
-            "R4：（2SC，1INC）×6 [24] R11：6DEC [6] 4. 將 3 顆豌豆放入豌豆莢中！",
-            en_us_source=True,
-        )
-
-    def test_extra_three_without_trio_rejected(self):
-        self._assert_rejects("Add the peas", "放入 3 顆豌豆", en_us_source=True)
-
-    def test_unrelated_extra_three_with_trio_rejected(self):
-        self._assert_rejects(
-            "Add a trio of peas",
-            "加入三顆豌豆並在第 3 圈縫合",
-            en_us_source=True,
-        )
-
-    def test_one_trio_cannot_allow_two_extra_threes(self):
-        self._assert_rejects(
-            "Add a trio of peas",
-            "放入 3 顆豌豆和 3 顆豆莢",
-            en_us_source=True,
-        )
-
-    def test_explicit_three_remains_required_when_source_also_has_trio(self):
-        self._assert_rejects(
-            "Prepare 3 peas and a trio of pods",
-            "準備 4 顆豌豆和三個豆莢",
-            en_us_source=True,
-        )
-
-    def test_trio_allowance_does_not_hide_other_missing_explicit_digit(self):
-        self._assert_rejects(
-            "Prepare 2 peas and a trio of pods",
-            "準備 3 顆豆莢",
-            en_us_source=True,
-        )
-
-    def test_trio_allowance_not_applied_to_simplified_chinese_route(self):
-        self._assert_rejects("trio", "3 顆", en_us_source=False)
-
-    def test_digit_multiplicity_preserved(self):
-        self._assert_rejects("Row 2: 2 sc (2)", "第2行：2短針", en_us_source=True)
-
-    def test_repeat_multiplier_preserved(self):
-        self._assert_rejects("Rnd 2: (sc, inc) x6 =12", "第2圈：(短針, 加針)", en_us_source=True)
-
-    def test_range_numbers_preserved(self):
-        self._assert_rejects("Rnd 2-4: sc around", "第2圈：短針", en_us_source=True)
-
-
-class BroadArabicDigitPromptContractTests(unittest.TestCase):
-    ROUTES = (
-        ("English — US", "Traditional Chinese"),
-        ("English — US", "Simplified Chinese"),
-        ("English — US", "Japanese"),
-        ("Simplified Chinese", "English — US"),
-        ("Traditional Chinese", "English — US"),
-        ("Traditional Chinese", "English — UK"),
+            for index, source in enumerate(sources)
+        ]
     )
+    segments, _ = broad_translation.build_source_segments(rows)
+    prompts: list[str] = []
 
-    def _mocked_translation(
-        self,
-        source_mode: str,
-        output_mode: str,
-        source: str,
-        translation: str,
-    ) -> tuple[object, str, list[dict]]:
-        rows = pd.DataFrame([_ocr_row(source)])
-        segments, _ = broad_translation.build_source_segments(rows)
-        response = _keyed_response_from_units(_valid_units(segments, [translation]))
-        prompts: list[str] = []
+    def call(prompt: str, api_key: str):
+        if api_key != "test-key":
+            raise AssertionError("unexpected API key")
+        prompts.append(prompt)
+        return _response_text(_keyed_response(segments, translations)), 0.01
+
+    caller = mock.Mock(side_effect=call)
+    result = broad_translation.translate_merged_ocr_lines_broad(
+        rows,
+        source_mode,
+        output_mode,
+        diagnostic_logger=(
+            None
+            if events is None
+            else lambda phase, **fields: events.append({"phase": phase, **fields})
+        ),
+        environ={"OPENAI_API_KEY": "test-key"},
+        luna_caller=caller,
+    )
+    return result, caller, prompts
+
+
+class LunaPrimaryAcceptanceTests(unittest.TestCase):
+    def test_former_false_rejection_classes_are_accepted_without_retry(self):
+        cases = (
+            ("倒二钩短针", "針から2目めに細編みを編む"),
+            ("R2:6v=12", "第2段：増し目を6回行い、合計12目"),
+            ("R3:(x,V)*6=18", "3段目は（細編み、増し目）を6回繰り返す"),
+            (
+                "R15:(2ch4F的泡芙针),x,(5F的泡芙针,x)*5=12",
+                "15段目：鎖2目と長編み4目のパフ、細編み、続いて長編み5目のパフと細編みを5回",
+            ),
+        )
+        for source, translation in cases:
+            with self.subTest(source=source):
+                events: list[dict] = []
+                result, caller, _ = _translate([source], [translation], events=events)
+                caller.assert_called_once()
+                self.assertEqual(translation, result.loc[0, "Translation"])
+                self.assertEqual("validated", result.loc[0, "Validation Status"])
+                self.assertEqual("", result.loc[0, "Validation Failure Reason"])
+                self.assertFalse(
+                    any(event["phase"] == "broad_retry_scheduled" for event in events)
+                )
+
+    def test_linguistically_suspicious_but_structurally_valid_output_is_accepted(self):
         events: list[dict] = []
-
-        def caller(prompt: str, api_key: str):
-            self.assertEqual("test-key", api_key)
-            prompts.append(prompt)
-            return {
-                "output": [
-                    {
-                        "content": [
-                            {"type": "output_text", "text": json.dumps(response)}
-                        ]
-                    }
-                ]
-            }, 0.01
-
-        try:
-            result = broad_translation.translate_merged_ocr_lines_broad(
-                rows,
-                source_mode,
-                output_mode,
-                diagnostic_logger=lambda phase, **fields: events.append(
-                    {"phase": phase, **fields}
-                ),
-                environ={"OPENAI_API_KEY": "test-key"},
-                luna_caller=caller,
+        result, caller, _ = _translate(
+            ["第4圈：5短针，长度10cm"],
+            ["自然な日本語の表現で数量を明示せず説明する"],
+            events=events,
+        )
+        caller.assert_called_once()
+        self.assertEqual("validated", result.loc[0, "Validation Status"])
+        self.assertFalse(
+            any(
+                event["phase"] == "unit_integrity_validation_failed"
+                for event in events
             )
-        except broad_translation.BroadTranslationError:
-            self.assertEqual(1, len(prompts))
-            return None, prompts[0], events
-        self.assertEqual(1, len(prompts))
-        return result, prompts[0], events
+        )
 
-    def _assert_mocked_passes(
-        self,
-        source_mode: str,
-        output_mode: str,
-        source: str,
-        translation: str,
-    ) -> str:
-        result, prompt, _events = self._mocked_translation(
-            source_mode,
-            output_mode,
-            source,
-            translation,
+    def test_normal_success_uses_one_whole_pattern_request(self):
+        sources = ["标题", "第1圈：6短针", "缝合部件"]
+        translations = ["タイトル", "第1段：細編み6目", "パーツを縫い付ける"]
+        result, caller, prompts = _translate(sources, translations)
+        caller.assert_called_once()
+        self.assertEqual(translations, result["Translation"].tolist())
+        payload = json.loads(prompts[0].split("INPUT: ", 1)[1])
+        self.assertEqual(
+            sources,
+            [segment["text"] for segment in payload["source_segments"]],
         )
-        self.assertIsNotNone(result)
-        self.assertEqual(translation, result.loc[0, "Translation"])
-        return prompt
 
-    def _assert_mocked_rejects(
-        self,
-        source_mode: str,
-        output_mode: str,
-        source: str,
-        translation: str,
-    ) -> None:
-        result, _prompt, events = self._mocked_translation(
-            source_mode,
-            output_mode,
-            source,
-            translation,
+    def test_new_route_families_accept_structurally_valid_output_once(self):
+        cases = (
+            ("English — US", "English — UK", "Rnd 1: 6 sc", "Round 1: 6 dc"),
+            ("English — UK", "English — US", "Round 1: 6 dc", "Rnd 1: 6 sc"),
+            ("English — UK", "Traditional Chinese", "Round 1: 6 dc", "第1圈：6短針"),
+            ("English — UK", "Simplified Chinese", "Round 1: 6 dc", "第1圈：6短针"),
+            ("English — UK", "Japanese", "Round 1: 6 dc", "第1段：細編み6目"),
+            ("Traditional Chinese", "Simplified Chinese", "第1圈：6短針", "第1圈：6短针"),
+            ("Simplified Chinese", "Traditional Chinese", "第1圈：6短针", "第1圈：6短針"),
+            ("Japanese", "English — US", "第1段：細編み6目", "Rnd 1: 6 sc"),
+            ("Japanese", "English — UK", "第1段：細編み6目", "Round 1: 6 dc"),
+            ("Japanese", "Traditional Chinese", "第1段：細編み6目", "第1圈：6短針"),
+            ("Japanese", "Simplified Chinese", "第1段：細編み6目", "第1圈：6短针"),
         )
-        self.assertIsNotNone(result)
-        self.assertEqual("unresolved", result.loc[0, "Validation Status"])
-        self.assertIn(source, result.loc[0, "Translation"])
-        self.assertTrue(result.attrs.get("request_warning"))
-        failure = next(
-            event for event in events if event["phase"] == "objective_validation_failed"
-        )
-        self.assertEqual("arabic_digit_multiset", failure["failed_rule"])
-
-    def test_one_explicit_digit_contract_is_shared_by_all_routes(self):
-        required_clauses = (
-            "Preserve every explicit Arabic digit from the assigned source segments as "
-            "the same Arabic digit in the translation.",
-            "Do not spell it out as a number word, ordinal word, or frequency word",
-            "do not replace it with language-specific numeric characters or words",
-            "source 1 must remain 1, not one, once, first, 一, or 第一",
-            "source 2 must remain 2, not two, twice, second, 二, or 兩",
-            "Do not infer or invent Arabic digits absent from the assigned source segments.",
-            "Natural fluency must never override explicit Arabic-digit preservation.",
-        )
-        for source_mode, output_mode in self.ROUTES:
-            with self.subTest(source_mode=source_mode, output_mode=output_mode):
-                prompt = broad_translation.build_prompt(
-                    [],
-                    [],
-                    _route_config(source_mode, output_mode),
+        for source_mode, output_mode, source, translation in cases:
+            with self.subTest(route=(source_mode, output_mode)):
+                result, caller, prompts = _translate(
+                    [source],
+                    [translation],
+                    source_mode=source_mode,
+                    output_mode=output_mode,
                 )
-                for clause in required_clauses:
-                    self.assertIn(clause, prompt)
+                caller.assert_called_once()
+                self.assertEqual("validated", result.loc[0, "Validation Status"])
+                self.assertEqual(translation, result.loc[0, "Translation"])
+                payload = json.loads(prompts[0].split("INPUT: ", 1)[1])
                 self.assertEqual(
-                    1,
-                    prompt.count(
-                        "Preserve every explicit Arabic digit from the assigned source "
-                        "segments"
-                    ),
+                    broad_translation._route_config(
+                        source_mode,
+                        output_mode,
+                    ).source_language,
+                    payload["source_language"],
                 )
-                self.assertNotIn("Keep Arabic numerals as Arabic digits", prompt)
-
-    def test_simplified_chinese_to_english_keeps_explicit_arabic_digits(self):
-        self._assert_mocked_passes(
-            "Simplified Chinese",
-            "English — US",
-            "第2圈：缠绕1圈，钩14长针",
-            "Round 2: wrap the yarn 1 time and work 14 double crochet stitches.",
-        )
-        rejected = (
-            ("缠绕1圈", "Wrap the yarn once."),
-            ("重复2次", "Repeat twice."),
-            ("钩14长针", "Work double crochet stitches."),
-            ("收紧", "Tighten and add 1 marker."),
-        )
-        for source, translation in rejected:
-            with self.subTest(translation=translation):
-                self._assert_mocked_rejects(
-                    "Simplified Chinese",
-                    "English — US",
-                    source,
-                    translation,
-                )
-
-    def test_english_to_traditional_chinese_keeps_explicit_arabic_digits(self):
-        self._assert_mocked_passes(
-            "English — US",
-            "Traditional Chinese",
-            "Round 1: work 2 sc and repeat 3 times.",
-            "第 1 圈：鉤 2 短針並重複 3 次。",
-        )
-        rejected = (
-            ("Round 1: work sc.", "第一圈：鉤短針。"),
-            ("Repeat 2 times.", "重複兩次。"),
-            ("Work 14 sc.", "鉤短針。"),
-            ("Work sc.", "鉤短針並加 1 個記號。"),
-        )
-        for source, translation in rejected:
-            with self.subTest(translation=translation):
-                self._assert_mocked_rejects(
-                    "English — US",
-                    "Traditional Chinese",
-                    source,
-                    translation,
-                )
-
-    def test_english_to_simplified_chinese_keeps_explicit_arabic_digits(self):
-        self._assert_mocked_passes(
-            "English — US",
-            "Simplified Chinese",
-            "Round 1: work 2 sc and repeat 3 times.",
-            "第 1 轮：钩 2 短针并重复 3 次。",
-        )
-        rejected = (
-            ("Round 1: work sc.", "第一轮：钩短针。"),
-            ("Repeat 2 times.", "重复两次。"),
-            ("Work 14 sc.", "钩短针。"),
-            ("Work sc.", "钩短针并加 1 个记号。"),
-        )
-        for source, translation in rejected:
-            with self.subTest(translation=translation):
-                self._assert_mocked_rejects(
-                    "English — US",
-                    "Simplified Chinese",
-                    source,
-                    translation,
+                self.assertEqual(
+                    broad_translation._route_config(
+                        source_mode,
+                        output_mode,
+                    ).target_language,
+                    payload["target_language"],
                 )
 
 
-class BroadTranslationCompletenessPromptContractTests(unittest.TestCase):
-    ROUTES = (
-        ("English — US", "Traditional Chinese"),
-        ("English — US", "Simplified Chinese"),
-        ("English — US", "Japanese"),
-        ("Simplified Chinese", "English — US"),
-        ("Traditional Chinese", "English — US"),
-        ("Traditional Chinese", "English — UK"),
-    )
-
-    def test_all_routes_require_complete_translation_without_glossary_gating(self):
-        required_clauses = (
-            "Translate all clear, legible source-language content into the target language",
-            "including ordinary prose and section headings",
-            "The glossary provides domain guidance and does not limit what may be translated",
-            "use normal language knowledge for clear ordinary words that are absent from it",
+class PromptAndGlossaryContractTests(unittest.TestCase):
+    def test_all_routes_receive_full_route_relevant_glossary_and_strict_schema(self):
+        source_fields = {
+            "English — US": {
+                "english_us",
+                "english_us_aliases",
+                "english_us_abbreviations",
+            },
+            "English — UK": {
+                "english_uk",
+                "english_uk_aliases",
+                "english_uk_abbreviations",
+            },
+            "Simplified Chinese": {
+                "simplified_chinese_authoritative_term",
+                "simplified_chinese_aliases",
+                "simplified_chinese_abbreviation",
+            },
+            "Traditional Chinese": {
+                "traditional_chinese",
+                "traditional_chinese_aliases",
+                "traditional_chinese_abbreviation",
+            },
+            "Japanese": {"japanese", "japanese_aliases"},
+        }
+        target_fields = {
+            "Traditional Chinese": source_fields["Traditional Chinese"],
+            "Simplified Chinese": source_fields["Simplified Chinese"],
+            "English — US": source_fields["English — US"],
+            "English — UK": source_fields["English — UK"],
+            "Japanese": source_fields["Japanese"],
+        }
+        all_language_fields = set().union(
+            *source_fields.values(),
+            *target_fields.values(),
         )
-        for source_mode, output_mode in self.ROUTES:
-            with self.subTest(source_mode=source_mode, output_mode=output_mode):
-                prompt = broad_translation.build_prompt(
-                    [{"source_segment_id": "segment-0000", "text": "Clear heading"}],
-                    [],
-                    _route_config(source_mode, output_mode),
+        segments = [
+            {"source_segment_id": "segment-0000", "text": "complete first segment"},
+            {"source_segment_id": "segment-0001", "text": "complete second segment"},
+        ]
+        for source_mode, output_mode in ROUTES:
+            with self.subTest(route=(source_mode, output_mode)):
+                config = broad_translation._route_config(source_mode, output_mode)
+                terms = broad_translation.build_glossary(source_mode, output_mode)
+                prompt = broad_translation.build_prompt(segments, terms, config)
+                payload = json.loads(prompt.split("INPUT: ", 1)[1])
+                self.assertEqual(config.source_language, payload["source_language"])
+                self.assertEqual(config.target_language, payload["target_language"])
+                self.assertEqual(segments, payload["source_segments"])
+                self.assertEqual(
+                    terms,
+                    payload["authoritative_crochet_glossary"],
                 )
-                for clause in required_clauses:
-                    self.assertIn(clause, prompt)
-
-    def test_ocr_ambiguity_protection_remains_explicit(self):
-        for source_mode, output_mode in self.ROUTES:
-            with self.subTest(source_mode=source_mode, output_mode=output_mode):
-                prompt = broad_translation.build_prompt(
-                    [],
-                    [],
-                    _route_config(source_mode, output_mode),
-                )
+                self.assertIn("specialist crochet-pattern translation agent", prompt)
+                self.assertIn("segment_assignments", prompt)
+                self.assertIn("semantic_units", prompt)
                 self.assertIn(
-                    "Preserve source wording only when the OCR or input itself is genuinely "
-                    "unclear or ambiguous",
+                    "Every input source_segment_id must appear exactly once",
                     prompt,
                 )
-                self.assertIn("do not hallucinate missing meaning", prompt)
-                self.assertIn("Do not repair or silently resolve ambiguous OCR", prompt)
-
-    def test_unknown_clear_prose_stays_in_payload_with_empty_scoped_glossary(self):
-        config = _route_config("English — US", "Traditional Chinese")
-        segments = [
-            {
-                "source_segment_id": "segment-0000",
-                "text": "Garden assembly notes",
-            }
-        ]
-        route_terms = broad_translation.build_glossary(
-            config.source_mode,
-            config.output_mode,
-        )
-        selected = broad_translation.select_request_glossary(
-            route_terms,
-            segments,
-            config,
-        )
-        self.assertEqual([], selected)
-        prompt = broad_translation.build_prompt(segments, selected, config)
-        self.assertIn('"text":"Garden assembly notes"', prompt)
-        self.assertIn('"authoritative_crochet_glossary":[]', prompt)
-        self.assertIn(
-            "use normal language knowledge for clear ordinary words that are absent from it",
-            prompt,
-        )
-
-
-class BroadIdCoverageDiagnosticsTests(unittest.TestCase):
-    def _reject_with_ids(self, returned_ids: list[list[str]]):
-        segments = [
-            {"source_segment_id": "segment-0000", "text": "FULL_PATTERN_SECRET_A"},
-            {"source_segment_id": "segment-0001", "text": "FULL_PROMPT_SECRET_B"},
-            {"source_segment_id": "segment-0002", "text": "API_KEY_SECRET_C"},
-        ]
-        units = [
-            {
-                "source_segment_ids": source_ids,
-                "translation": f"FULL_RESPONSE_SECRET_{index}",
-            }
-            for index, source_ids in enumerate(returned_ids)
-        ]
-        events: list[dict] = []
-
-        def logger(phase: str, **fields: object) -> None:
-            events.append({"phase": phase, **fields})
-
-        with self.assertRaises(broad_translation.BroadTranslationError) as ctx:
-            broad_translation.validate_semantic_units(
-                units,
-                segments,
-                _route_config("English — US", "Traditional Chinese"),
-                diagnostic_logger=logger,
-            )
-
-        failures = [
-            event for event in events if event["phase"] == "id_coverage_validation_failed"
-        ]
-        self.assertEqual(1, len(failures))
-        self.assertEqual(3, failures[0]["expected_segment_count"])
-        self.assertEqual(len(units), failures[0]["semantic_unit_count"])
-        return failures[0], ctx.exception, events
-
-    def test_missing_id_diagnostics_and_bare_public_error(self):
-        failure, exc, _events = self._reject_with_ids(
-            [["segment-0000"], ["segment-0002"]]
-        )
-        self.assertEqual(
-            ["segment-0000", "segment-0001", "segment-0002"],
-            failure["expected_source_segment_ids"],
-        )
-        self.assertEqual(
-            ["segment-0000", "segment-0002"], failure["returned_source_segment_ids"]
-        )
-        self.assertEqual(["segment-0001"], failure["missing_source_segment_ids"])
-        self.assertEqual([], failure["duplicate_source_segment_ids"])
-        self.assertEqual([], failure["unknown_source_segment_ids"])
-        self.assertEqual("", str(exc))
-
-    def test_duplicate_id_diagnostics(self):
-        failure, _exc, _events = self._reject_with_ids(
-            [["segment-0000"], ["segment-0000"], ["segment-0001", "segment-0002"]]
-        )
-        self.assertEqual(["segment-0000"], failure["duplicate_source_segment_ids"])
-        self.assertEqual([], failure["missing_source_segment_ids"])
-        self.assertEqual([], failure["unknown_source_segment_ids"])
-
-    def test_unknown_id_diagnostics_without_content(self):
-        failure, _exc, events = self._reject_with_ids(
-            [
-                ["segment-0000"],
-                ["segment-9999"],
-                ["segment-0001", "segment-0002"],
-            ]
-        )
-        self.assertEqual(["segment-9999"], failure["unknown_source_segment_ids"])
-        self.assertEqual([], failure["missing_source_segment_ids"])
-        self.assertEqual([], failure["duplicate_source_segment_ids"])
-        serialized = json.dumps(events, ensure_ascii=False)
-        self.assertNotIn("FULL_PATTERN_SECRET", serialized)
-        self.assertNotIn("FULL_PROMPT_SECRET", serialized)
-        self.assertNotIn("FULL_RESPONSE_SECRET", serialized)
-        self.assertNotIn("API_KEY_SECRET", serialized)
-        self.assertNotIn('"prompt"', serialized.lower())
-        self.assertNotIn('"response"', serialized.lower())
-        self.assertNotIn('"api_key"', serialized.lower())
-
-
-class BroadValidationDiagnosticsTests(unittest.TestCase):
-    def _reject_with_logger(
-        self,
-        source: str,
-        translation: str,
-        *,
-        en_us_source: bool = True,
-        segment_ids=None,
-    ) -> tuple[list[dict], broad_translation.BroadTranslationError]:
-        segment_ids = segment_ids or ["segment-0030"]
-        segments = [{"source_segment_id": segment_ids[0], "text": source}]
-        units = _valid_units(segments, [translation])
-        config = _route_config(
-            "English — US" if en_us_source else "Simplified Chinese",
-            "Traditional Chinese" if en_us_source else "English — US",
-        )
-        events: list[dict] = []
-
-        def logger(phase: str, **fields: object) -> None:
-            events.append({"phase": phase, **fields})
-
-        with self.assertRaises(broad_translation.BroadTranslationError) as ctx:
-            broad_translation.validate_semantic_units(
-                units,
-                segments,
-                config,
-                diagnostic_logger=logger,
-            )
-        return events, ctx.exception
-
-    def test_arabic_digit_multiset_logs_structured_differences(self):
-        source = "R1: 6SC in MR [6] R9: (2SC, 1DEC)x6 [18] 2.Put the blusher"
-        translation = "R1：環狀起針內鉤 6 短針 [6]　R9：（2 短針、1 減針）重複 6 次 [18]"
-        events, exc = self._reject_with_logger(source, translation)
-        failure = next(event for event in events if event.get("phase") == "objective_validation_failed")
-        self.assertEqual("arabic_digit_multiset", failure["failed_rule"])
-        self.assertEqual(["segment-0030"], failure["source_segment_ids"])
-        self.assertEqual(["2"], failure["missing_digits"])
-        self.assertEqual([], failure["extra_digits"])
-        self.assertIn("2", failure["source_digit_multiset"])
-        self.assertEqual(source, failure["failed_source_excerpt"])
-        self.assertEqual(translation.replace("\u3000", " "), failure["failed_translation_excerpt"])
-        self.assertFalse(failure["failed_source_excerpt_truncated"])
-        self.assertFalse(failure["failed_translation_excerpt_truncated"])
-        self.assertEqual("", str(exc))
-
-    def test_only_failing_unit_is_logged_and_public_error_stays_bare(self):
-        unrelated_source = "UNRELATED_SECRET FULL_PROMPT FULL_RESPONSE"
-        unrelated_translation = "無關內容"
-        failing_source = "R1: 2 sc"
-        failing_translation = "R1：3 短針"
-        segments = [
-            {"source_segment_id": "segment-0000", "text": unrelated_source},
-            {"source_segment_id": "segment-0001", "text": failing_source},
-        ]
-        units = _valid_units(segments, [unrelated_translation, failing_translation])
-        events: list[dict] = []
-
-        def logger(phase: str, **fields: object) -> None:
-            events.append({"phase": phase, **fields})
-
-        with self.assertRaises(broad_translation.BroadTranslationError) as ctx:
-            broad_translation.validate_semantic_units(
-                units,
-                segments,
-                _route_config("English — US", "Traditional Chinese"),
-                diagnostic_logger=logger,
-            )
-
-        failures = [event for event in events if event["phase"] == "objective_validation_failed"]
-        self.assertEqual(1, len(failures))
-        self.assertEqual(["segment-0001"], failures[0]["source_segment_ids"])
-        self.assertEqual(failing_source, failures[0]["failed_source_excerpt"])
-        self.assertEqual(failing_translation, failures[0]["failed_translation_excerpt"])
-        serialized = json.dumps(events, ensure_ascii=False)
-        self.assertNotIn(unrelated_source, serialized)
-        self.assertNotIn(unrelated_translation, serialized)
-        self.assertNotIn("api_key", serialized.lower())
-        self.assertNotIn('"prompt"', serialized.lower())
-        self.assertNotIn('"response"', serialized.lower())
-        self.assertEqual("", str(ctx.exception))
-
-    def test_failing_unit_diagnostic_text_is_capped(self):
-        source = "2 " + ("source-text " * 80)
-        translation = "3 " + ("translation-text " * 80)
-        events, exc = self._reject_with_logger(source, translation)
-        failure = next(event for event in events if event.get("phase") == "objective_validation_failed")
-        self.assertTrue(failure["failed_source_excerpt_truncated"])
-        self.assertTrue(failure["failed_translation_excerpt_truncated"])
-        self.assertLessEqual(len(failure["failed_source_excerpt"]), 401)
-        self.assertLessEqual(len(failure["failed_translation_excerpt"]), 401)
-        self.assertNotIn(source, json.dumps(events, ensure_ascii=False))
-        self.assertNotIn(translation, json.dumps(events, ensure_ascii=False))
-        self.assertEqual("", str(exc))
-
-    def test_round_identity_logs_missing_round_numbers(self):
-        events, exc = self._reject_with_logger("Rnd 2: 6 sc", "第6圈：2 短針")
-        failure = next(event for event in events if event.get("phase") == "objective_validation_failed")
-        self.assertEqual("round_identity", failure["failed_rule"])
-        self.assertIn("2", failure["required_round_identities"])
-        self.assertIn("2", failure["missing_round_identities"])
-        self.assertEqual("", str(exc))
-
-    def test_row_identity_logs_missing_row_numbers(self):
-        events, exc = self._reject_with_logger("Row 2: 2 sc", "第2圈：2短針")
-        failure = next(event for event in events if event.get("phase") == "objective_validation_failed")
-        self.assertEqual("row_identity", failure["failed_rule"])
-        self.assertIn("2", failure["required_row_identities"])
-        self.assertIn("2", failure["missing_row_identities"])
-        self.assertEqual("", str(exc))
-
-    def test_suffix_repeat_corruption_logs_missing_repeat_marker(self):
-        events, exc = self._reject_with_logger(
-            "(sc, incr) 6x",
-            "（短針，加針）短針6針",
-        )
-        failure = next(event for event in events if event.get("phase") == "objective_validation_failed")
-        self.assertEqual("repeat_multiplier", failure["failed_rule"])
-        self.assertEqual(["6"], failure["required_repeat_multipliers"])
-        self.assertEqual([], failure["present_repeat_multipliers"])
-        self.assertEqual(["6"], failure["missing_repeat_multipliers"])
-        self.assertEqual("", str(exc))
-
-    def test_measurement_units_logs_compact_measurement_facts(self):
-        events, exc = self._reject_with_logger("Cut a 5 cm tail", "剪下5英寸線尾")
-        failure = next(event for event in events if event.get("phase") == "objective_validation_failed")
-        self.assertEqual("measurement_units", failure["failed_rule"])
-        self.assertEqual("5", failure["failed_measurement_number"])
-        self.assertEqual("cm", failure["failed_measurement_unit"])
-        self.assertEqual("unit_substituted_to_inch", failure["measurement_failure"])
-        self.assertEqual("", str(exc))
-
-    def test_penguin_r6_logs_safe_stitch_and_colour_rejection_codes(self):
-        source = (
-            "R6: 11sc, *CC to white* BOB, *CC to dark gray* 3sc, "
-            "*CC to white* BOB, *CC to dark gray* 8sc (24)"
-        )
-        cases = (
-            (
-                "R6：11 短針，換成白色，換成深灰色，3 短針，換成白色，"
-                "棗形針，換成深灰色，8 短針（24）",
-                "stitch_terminology",
-            ),
-            (
-                "R6：11 短針，白色棗形針，深灰色3短針，白色棗形針，"
-                "深灰色8短針（24）",
-                "color_change_count",
-            ),
-        )
-        for translation, expected_rule in cases:
-            with self.subTest(expected_rule=expected_rule):
-                events, _ = self._reject_with_logger(source, translation)
-                failure = next(
-                    event
-                    for event in events
-                    if event.get("phase") == "objective_validation_failed"
+                self.assertIn("Do not invent missing instructions", prompt)
+                self.assertIn("silently repair genuinely ambiguous OCR", prompt)
+                if output_mode == "English — US":
+                    self.assertIn("Use US English crochet terminology", prompt)
+                if output_mode == "English — UK":
+                    self.assertIn("Use UK English crochet terminology", prompt)
+                allowed = (
+                    {"concept_id", "category"}
+                    | source_fields[source_mode]
+                    | target_fields[output_mode]
                 )
-                self.assertEqual(expected_rule, failure["failed_rule"])
-                self.assertNotIn("prompt", failure)
-                self.assertNotIn("response", failure)
-
-    def test_download_diagnostic_summarizes_reasons_without_provider_output(self):
-        line_df = pd.DataFrame(
-            [
-                {
-                    "Validation Status": "validated",
-                    "Validation Failure Reason": "",
-                    "Semantic Unit ID": "unit-0000",
-                },
-                {
-                    "Validation Status": "unresolved",
-                    "Validation Failure Reason": "stitch_terminology",
-                    "Semantic Unit ID": "unit-0001",
-                },
-            ]
-        )
-        rendered = diagnostic_report._format_broad_validation_diagnostics(line_df)
-        self.assertIn("Broad units accepted: 1", rendered)
-        self.assertIn("Broad units rejected: 1", rendered)
-        self.assertIn("stitch_terminology=1", rendered)
-        self.assertIn("unit-0001=stitch_terminology", rendered)
-        self.assertIn("Raw provider output retained: No", rendered)
-        report = diagnostic_report.build_debug_report_text(line_df)
-        self.assertIn("=== Broad Validation Diagnostics ===", report)
-        self.assertIn("unit-0001=stitch_terminology", report)
-
-    def test_translate_path_logs_validation_failure_before_request_end(self):
-        rows = pd.DataFrame([_ocr_row("R1: 6SC [6] 2.Put eyes")])
-        events: list[dict] = []
-
-        def logger(phase: str, **fields: object) -> None:
-            events.append({"phase": phase, **fields})
-
-        def fake_luna(prompt, api_key):
-            del prompt, api_key
-            return {
-                "output": [
-                    {
-                        "content": [
-                            {
-                                "type": "output_text",
-                                "text": json.dumps(
-                                    _keyed_response_from_units(
-                                        [
-                                            {
-                                                "source_segment_ids": ["segment-0000"],
-                                                "translation": "R1：6 短針 [6]",
-                                            }
-                                        ]
-                                    )
-                                ),
-                            }
-                        ]
-                    }
-                ]
-            }, 0.01
-
-        with mock.patch.dict(
-            os.environ,
-            {"PATTERN_BROAD_TRANSLATION_ENABLED": "1", "OPENAI_API_KEY": "test-key"},
-            clear=False,
-        ):
-            with mock.patch.object(broad_translation, "call_luna_once", side_effect=fake_luna):
-                result = broad_translation.translate_merged_ocr_lines_broad(
-                    rows,
-                    source_mode="English — US",
-                    output_mode="Traditional Chinese",
-                    diagnostic_logger=logger,
-                    environ={"OPENAI_API_KEY": "test-key"},
+                present_across_glossary = set().union(
+                    *(set(entry) for entry in terms)
                 )
-
-        failure = next(event for event in events if event.get("phase") == "objective_validation_failed")
-        end = next(event for event in events if event.get("phase") == "ai_request_end")
-        self.assertEqual("arabic_digit_multiset", failure["failed_rule"])
-        self.assertEqual(["2"], failure["missing_digits"])
-        self.assertEqual("unresolved", result.loc[0, "Validation Status"])
-        self.assertEqual("partial_success", end["outcome"])
-        self.assertTrue(end["all_units_validation_failed"])
-
-
-class BroadGlossaryTests(unittest.TestCase):
-    def test_equivalence_group_aliases_retained(self):
-        terms = broad_translation.build_glossary("English — US", "Traditional Chinese")
-        by_english = {
-            term["english_us"].lower(): term for term in terms
-        }
-        abbreviations = set()
-        for term in terms:
-            abbreviations.update(term.get("english_us_abbreviations", []))
-        self.assertIn("blo", abbreviations)
-        self.assertIn("flo", abbreviations)
-        self.assertIn("yoh", abbreviations)
-        bobble_terms = [
-            term
-            for term in terms
-            if term.get("english_us", "").lower() == "bobble"
-            or "bobble" in [alias.lower() for alias in term.get("english_us_aliases", [])]
-        ]
-        self.assertTrue(bobble_terms)
-        self.assertIn("back loop", by_english)
-
-    def test_simplified_chinese_source_uses_simplified_forms(self):
-        terms = broad_translation.build_glossary("Simplified Chinese", "English — US")
-        chain = next(term for term in terms if term["english_us"].lower() == "chain")
-        self.assertEqual(chain["simplified_chinese_authoritative_term"], "锁针")
-        self.assertIn("辫子针", chain.get("simplified_chinese_aliases", []))
-        back_loop = next(
-            term
-            for term in terms
-            if any(alias.lower() == "blo" for alias in term.get("english_us_abbreviations", []))
-        )
-        self.assertEqual(back_loop["simplified_chinese_authoritative_term"], "后半针")
-        self.assertIn("内半针", back_loop.get("simplified_chinese_aliases", []))
-
-    def test_simplified_chinese_target_uses_existing_conversion(self):
-        terms = broad_translation.build_glossary("English — US", "Simplified Chinese")
-        chain = next(term for term in terms if term["english_us"].lower() == "chain")
-        self.assertEqual(chain["simplified_chinese_authoritative_term"], "锁针")
-        self.assertIn("辫子针", chain.get("simplified_chinese_aliases", []))
-        self.assertNotIn("traditional_chinese", chain)
-
-
-class BroadRequestScopedGlossaryTests(unittest.TestCase):
-    def setUp(self):
-        self.config = _route_config("English — US", "Traditional Chinese")
-        self.route_terms = broad_translation.build_glossary(
-            self.config.source_mode, self.config.output_mode
-        )
-
-    def _select(self, *texts: str) -> list[dict]:
-        segments = [
-            {"source_segment_id": f"segment-{index:04d}", "text": text}
-            for index, text in enumerate(texts)
-        ]
-        return broad_translation.select_request_glossary(
-            self.route_terms, segments, self.config
-        )
-
-    def test_attached_count_abbreviations_select_required_stitch_concepts(self):
-        selected = self._select(
-            "R6: 11sc, *CC to white* BOB, *CC to dark gray* 3sc, "
-            "*CC to white* BOB, *CC to dark gray* 8sc (24)"
-        )
-        selected_ids = {entry["concept_id"] for entry in selected}
-        self.assertIn("st_003_single_crochet", selected_ids)
-        self.assertIn("st_040_puff_stitch", selected_ids)
-        self.assertIn("st_059_contrasting_color", selected_ids)
-
-    def test_peas_source_selects_direct_and_compound_concepts(self):
-        texts = [
-            "NOTES",
-            "This pattern is written in US terminology",
-            "You can sell the products made from this pattern and",
-            "by you in LIMITED quantity, but please clearly give CREDIT",
-            "amiwacrochet as the pattern designer!",
-            "Do not copy or modify this pattern and sell it as your own!",
-            "You can use any yarn and color you have!",
-            "TOOLS AND MATERIALS: ABBREVIATIONS",
-            "Milk cotton yarn 4ply in pea R = round",
-            "green and dark green CH = chain",
-            "Crochet hook 2mm ST = stitch",
-            "6mm black half pearl for SC = single crochet",
-            "the eyes INC = increase (2 SC in 1 ST)",
-            "Tapestry / yarn needle DEC = invisible decrease (1 SC in 2 ST)",
-            "Scissors DC = double crochet",
-            "Fiberfill for stuffing SLST = slip stitch",
-            "Glue (i used UHU) [_]= a total of ST on that R",
-            "Blusher",
-        ]
-        selected = self._select(*texts)
-        selected_ids = {entry["concept_id"] for entry in selected}
-        expected_ids = {
-            "st_001_chain",
-            "st_002_slip_stitch",
-            "st_003_single_crochet",
-            "st_005_double_crochet",
-            "st_009_increase",
-            "st_010_single_crochet_increase",
-            "st_015_decrease",
-            "st_016_single_crochet_decrease",
-            "st_036_round",
-            "st_078_pattern",
-            "st_086_stitch",
-            "st_104_hook",
-        }
-        self.assertEqual(expected_ids, selected_ids)
-        self.assertEqual(83, len(self.route_terms))
-        self.assertEqual(12, len(selected))
-        self.assertEqual(21855, broad_translation._glossary_char_count(self.route_terms))
-        self.assertEqual(3152, broad_translation._glossary_char_count(selected))
-        segments = [
-            {"source_segment_id": f"segment-{index:04d}", "text": text}
-            for index, text in enumerate(texts)
-        ]
-        self.assertEqual(
-            26321,
-            len(broad_translation.build_prompt(segments, self.route_terms, self.config)),
-        )
-        self.assertEqual(
-            7618,
-            len(broad_translation.build_prompt(segments, selected, self.config)),
-        )
-
-    def test_compounds_require_components_in_same_segment(self):
-        selected = self._select("SC and INC; SC and DEC")
-        selected_ids = {entry["concept_id"] for entry in selected}
-        self.assertIn("st_010_single_crochet_increase", selected_ids)
-        self.assertIn("st_016_single_crochet_decrease", selected_ids)
-
-        separated = self._select("SC only", "later INC")
-        separated_ids = {entry["concept_id"] for entry in separated}
-        self.assertNotIn("st_010_single_crochet_increase", separated_ids)
-
-    def test_explicit_r_definition_selects_round_not_row(self):
-        selected_ids = {entry["concept_id"] for entry in self._select("R = round")}
-        self.assertIn("st_036_round", selected_ids)
-        self.assertNotIn("st_094_row", selected_ids)
-
-    def test_standalone_r_does_not_match_inside_words(self):
-        selected_ids = {
-            entry["concept_id"]
-            for entry in self._select("CREDIT designer terminology products")
-        }
-        self.assertNotIn("st_036_round", selected_ids)
-        self.assertNotIn("st_094_row", selected_ids)
-
-    def test_ambiguous_r_without_definition_keeps_all_owners(self):
-        selected_ids = {entry["concept_id"] for entry in self._select("Work in R next.")}
-        self.assertIn("st_036_round", selected_ids)
-        self.assertIn("st_094_row", selected_ids)
-
-    def test_unrelated_concepts_are_excluded(self):
-        selected_ids = {
-            entry["concept_id"]
-            for entry in self._select("CH = chain; use a crochet hook")
-        }
-        self.assertNotIn("st_005_double_crochet", selected_ids)
-        self.assertNotIn("st_022_popcorn", selected_ids)
-        self.assertNotIn("st_076_marker", selected_ids)
-
-    def test_selected_entry_remains_complete_and_unmodified(self):
-        selected = self._select("CH = chain")
-        selected_chain = next(
-            entry for entry in selected if entry["concept_id"] == "st_001_chain"
-        )
-        route_chain = next(
-            entry for entry in self.route_terms if entry["concept_id"] == "st_001_chain"
-        )
-        self.assertIs(selected_chain, route_chain)
-        self.assertEqual(route_chain, selected_chain)
-        self.assertIn("english_us_aliases", selected_chain)
-        self.assertIn("traditional_chinese_aliases", selected_chain)
-
-    def test_ordinary_prose_can_produce_empty_glossary(self):
-        selected = self._select("Please credit the designer clearly.")
-        self.assertEqual([], selected)
-
-    def test_simplified_source_selects_authoritative_chinese_form(self):
-        config = _route_config("Simplified Chinese", "English — US")
-        route_terms = broad_translation.build_glossary(
-            config.source_mode, config.output_mode
-        )
-        selected = broad_translation.select_request_glossary(
-            route_terms,
-            [{"source_segment_id": "segment-0000", "text": "锁针"}],
-            config,
-        )
-        self.assertIn("st_001_chain", {entry["concept_id"] for entry in selected})
-
-    def test_english_to_simplified_selects_glossary_from_english_source(self):
-        config = _route_config("English — US", "Simplified Chinese")
-        route_terms = broad_translation.build_glossary(
-            config.source_mode,
-            config.output_mode,
-        )
-        selected = broad_translation.select_request_glossary(
-            route_terms,
-            [{"source_segment_id": "segment-0000", "text": "ch 6, then sc"}],
-            config,
-        )
-        selected_ids = {entry["concept_id"] for entry in selected}
-        self.assertIn("st_001_chain", selected_ids)
-        chain = next(
-            entry for entry in selected if entry["concept_id"] == "st_001_chain"
-        )
-        self.assertIn("english_us", chain)
-        self.assertLess(len(selected), len(route_terms))
-
-    def test_scope_metrics_are_logged_without_glossary_or_source_content(self):
-        rows = pd.DataFrame([_ocr_row("Rnd 1: 6 sc")])
-        segments, _ = broad_translation.build_source_segments(rows)
-        events = []
-
-        def logger(phase, **fields):
-            events.append({"phase": phase, **fields})
-
-        def fake_luna(prompt, api_key):
-            del prompt, api_key
-            return {
-                "output": [{"content": [{"type": "output_text", "text": json.dumps(
-                    _keyed_response_from_units(
-                        _valid_units(segments, ["第 1 圈：6 短針"])
+                self.assertTrue(
+                    source_fields[source_mode].issubset(
+                        present_across_glossary
                     )
-                )}]}]
-            }, 0.01
+                )
+                self.assertTrue(
+                    target_fields[output_mode].issubset(
+                        present_across_glossary
+                    )
+                )
+                for entry in terms:
+                    present_language_fields = set(entry) & all_language_fields
+                    self.assertTrue(present_language_fields)
+                    self.assertTrue(present_language_fields.issubset(allowed))
 
-        broad_translation.translate_merged_ocr_lines_broad(
-            rows,
-            self.config.source_mode,
-            self.config.output_mode,
-            diagnostic_logger=logger,
-            environ={"OPENAI_API_KEY": "test-key"},
-            luna_caller=fake_luna,
-        )
-        scope = next(event for event in events if event["phase"] == "broad_glossary_scope")
-        self.assertEqual(
-            {
-                "phase",
-                "route_glossary_entry_count",
-                "scoped_glossary_entry_count",
-                "route_glossary_char_count",
-                "scoped_glossary_char_count",
-            },
-            set(scope),
-        )
-        self.assertEqual(83, scope["route_glossary_entry_count"])
-        self.assertLess(scope["scoped_glossary_entry_count"], 83)
-        self.assertLess(scope["scoped_glossary_char_count"], 21842)
-
-
-class BroadAdapterTests(unittest.TestCase):
-    def test_multi_segment_joins_with_newline_and_minimum_confidence(self):
-        rows = pd.DataFrame(
-            [
-                _ocr_row("Rnd 1:", min_x=0, max_x=20, min_y=0, max_y=10, confidence=0.9),
-                _ocr_row(
-                    "6 sc",
-                    min_x=30,
-                    max_x=60,
-                    min_y=0,
-                    max_y=10,
-                    confidence=0.5,
-                ),
-            ]
-        )
-        segments, segment_rows = broad_translation.build_source_segments(rows)
-        units = [
-            {
-                "source_segment_ids": [
-                    segments[0]["source_segment_id"],
-                    segments[1]["source_segment_id"],
-                ],
-                "translation": "第 1 圈：6 短針",
-            }
-        ]
-        line_df = broad_translation.adapt_semantic_units_to_line_df(
-            units, segments, segment_rows
-        )
-        self.assertEqual(line_df.loc[0, "Original"], "Rnd 1:\n6 sc")
-        self.assertEqual(line_df.loc[0, "Confidence"], 0.5)
-        self.assertEqual(line_df.loc[0, "min_x"], 0.0)
-        self.assertEqual(line_df.loc[0, "max_x"], 60.0)
-
-    def test_readable_and_txt_output_remain_compatible(self):
-        rows = pd.DataFrame([_ocr_row("Rnd 1: 6 sc")])
-        segments, segment_rows = broad_translation.build_source_segments(rows)
-        units = [
-            {
-                "source_segment_ids": [segments[0]["source_segment_id"]],
-                "translation": "第 1 圈：6 短針",
-            }
-        ]
-        line_df = broad_translation.adapt_semantic_units_to_line_df(
-            units, segments, segment_rows
-        )
-        readable = line_translation.build_readable_line_translation(line_df)
-        txt = line_translation.build_overlay_export_text(line_df)
-        self.assertIn("第 1 圈：6 短針", readable)
-        self.assertIn("第 1 圈：6 短針", txt)
-        required = {"Original", "Translation", "Confidence", "Changed", "min_x", "max_x", "min_y", "max_y"}
-        self.assertTrue(required.issubset(set(line_df.columns)))
-
-
-class BroadPartialFailClosedTests(unittest.TestCase):
-    def setUp(self):
-        self.rows = pd.DataFrame(
-            [
-                _ocr_row(
-                    "R1: 6X",
-                    min_x=10,
-                    max_x=70,
-                    min_y=10,
-                    max_y=30,
-                    confidence=0.99,
-                ),
-                _ocr_row(
-                    "R616X",
-                    min_x=20,
-                    max_x=80,
-                    min_y=50,
-                    max_y=70,
-                    confidence=0.81,
-                ),
-                _ocr_row(
-                    "R7: 16X",
-                    min_x=30,
-                    max_x=100,
-                    min_y=90,
-                    max_y=115,
-                    confidence=0.97,
-                ),
-            ]
-        )
-        self.segments, _ = broad_translation.build_source_segments(self.rows)
-
-    @staticmethod
-    def _provider_payload(response: dict) -> dict:
-        return {
-            "output": [
-                {
-                    "content": [
-                        {"type": "output_text", "text": json.dumps(response)}
-                    ]
-                }
-            ]
+    def test_measured_full_glossaries_remain_bounded(self):
+        expected = {
+            ("English — US", "English — UK"): (82, 23986),
+            ("English — US", "Traditional Chinese"): (83, 21855),
+            ("Simplified Chinese", "English — US"): (83, 23209),
+            ("Simplified Chinese", "English — UK"): (82, 22972),
+            ("Simplified Chinese", "Traditional Chinese"): (83, 20882),
+            ("Simplified Chinese", "Japanese"): (43, 9414),
+            ("English — US", "Simplified Chinese"): (83, 23209),
+            ("English — US", "Japanese"): (43, 9536),
+            ("English — UK", "English — US"): (82, 23986),
+            ("English — UK", "Traditional Chinese"): (82, 21634),
+            ("English — UK", "Simplified Chinese"): (82, 22972),
+            ("English — UK", "Japanese"): (42, 9326),
+            ("Traditional Chinese", "English — US"): (83, 21855),
+            ("Traditional Chinese", "English — UK"): (82, 21634),
+            ("Traditional Chinese", "Simplified Chinese"): (83, 20882),
+            ("Traditional Chinese", "Japanese"): (43, 8722),
+            ("Japanese", "English — US"): (43, 9536),
+            ("Japanese", "English — UK"): (42, 9326),
+            ("Japanese", "Traditional Chinese"): (43, 8722),
+            ("Japanese", "Simplified Chinese"): (43, 9414),
         }
+        self.assertEqual(set(ROUTES), set(expected))
+        for route, measured in expected.items():
+            with self.subTest(route=route):
+                terms = broad_translation.build_glossary(*route)
+                self.assertEqual(
+                    measured,
+                    (len(terms), broad_translation._glossary_char_count(terms)),
+                )
 
-    def _translate(self, response: dict):
-        events: list[dict] = []
-        caller = mock.Mock(return_value=(self._provider_payload(response), 0.01))
-        result = broad_translation.translate_merged_ocr_lines_broad(
-            self.rows,
-            source_mode="Simplified Chinese",
-            output_mode="English — US",
-            diagnostic_logger=lambda phase, **fields: events.append(
-                {"phase": phase, **fields}
-            ),
-            environ={"OPENAI_API_KEY": "test-key"},
-            luna_caller=caller,
+
+class StructuralSchemaTests(unittest.TestCase):
+    IDS = ["segment-0000", "segment-0001", "segment-0002"]
+
+    def _assert_schema_failure(self, response: object, reason: str) -> None:
+        with self.assertRaises(
+            broad_translation._BroadResponseParsingError
+        ) as caught:
+            broad_translation._parse_semantic_units(response, self.IDS)
+        self.assertEqual(reason, caught.exception.reason)
+
+    def test_malformed_json_and_duplicate_json_keys_fail(self):
+        with self.assertRaises(
+            broad_translation._BroadResponseParsingError
+        ) as malformed:
+            broad_translation._parse_model_json("{not json")
+        self.assertEqual("model_output_not_valid_json", malformed.exception.reason)
+
+        duplicate = (
+            '{"segment_assignments":{"segment-0000":"unit-0",'
+            '"segment-0000":"unit-1"},"semantic_units":{}}'
         )
-        return result, events, caller
+        with self.assertRaises(
+            broad_translation._BroadResponseParsingError
+        ) as caught:
+            broad_translation._parse_model_json(duplicate)
+        self.assertEqual("duplicate_json_object_key", caught.exception.reason)
 
-    def _three_unit_response(self) -> dict:
-        return _keyed_response_from_units(
-            _valid_units(
-                self.segments,
-                ["R1: 6 sc", "R6: 16 sc", "R7: 16 sc"],
+    def test_wrong_top_level_schema_and_field_types_fail(self):
+        self._assert_schema_failure([], "decoded_json_not_object")
+        self._assert_schema_failure(
+            {"semantic_units": {}},
+            "unexpected_top_level_keys",
+        )
+        self._assert_schema_failure(
+            {"segment_assignments": [], "semantic_units": {}},
+            "segment_assignments_not_object",
+        )
+        self._assert_schema_failure(
+            {"segment_assignments": {}, "semantic_units": []},
+            "semantic_units_not_object",
+        )
+
+    def test_missing_and_unknown_segments_fail_exact_coverage(self):
+        missing = {
+            "segment_assignments": {
+                "segment-0000": "unit-0",
+                "segment-0001": "unit-1",
+            },
+            "semantic_units": {
+                "unit-0": {"translated_text": "a"},
+                "unit-1": {"translated_text": "b"},
+            },
+        }
+        self._assert_schema_failure(missing, "source_segment_coverage_invalid")
+        unknown = {
+            "segment_assignments": {
+                "segment-0000": "unit-0",
+                "segment-0001": "unit-1",
+                "unknown": "unit-2",
+            },
+            "semantic_units": {
+                "unit-0": {"translated_text": "a"},
+                "unit-1": {"translated_text": "b"},
+                "unit-2": {"translated_text": "c"},
+            },
+        }
+        self._assert_schema_failure(unknown, "source_segment_coverage_invalid")
+
+    def test_undefined_orphan_and_noncontiguous_units_fail(self):
+        undefined = {
+            "segment_assignments": {item: "missing" for item in self.IDS},
+            "semantic_units": {},
+        }
+        self._assert_schema_failure(
+            undefined,
+            "assignment_references_unknown_semantic_unit",
+        )
+        orphan = {
+            "segment_assignments": {item: "unit-0" for item in self.IDS},
+            "semantic_units": {
+                "unit-0": {"translated_text": "ok"},
+                "orphan": {"translated_text": "unused"},
+            },
+        }
+        self._assert_schema_failure(orphan, "orphan_semantic_unit")
+        noncontiguous = {
+            "segment_assignments": {
+                "segment-0000": "unit-a",
+                "segment-0001": "unit-b",
+                "segment-0002": "unit-a",
+            },
+            "semantic_units": {
+                "unit-a": {"translated_text": "a"},
+                "unit-b": {"translated_text": "b"},
+            },
+        }
+        self._assert_schema_failure(
+            noncontiguous,
+            "semantic_unit_assignments_not_contiguous",
+        )
+
+    def test_duplicate_ownership_in_normalized_units_fails(self):
+        units = [
+            {
+                "source_segment_ids": ["segment-0000", "segment-0001"],
+                "translation": "a",
+            },
+            {
+                "source_segment_ids": ["segment-0001", "segment-0002"],
+                "translation": "b",
+            },
+        ]
+        segments = [
+            {"source_segment_id": item, "text": item}
+            for item in self.IDS
+        ]
+        with self.assertRaises(broad_translation._BroadResponseParsingError):
+            broad_translation.validate_semantic_units(
+                units,
+                segments,
+                broad_translation._route_config("English — US", "Japanese"),
             )
-        )
 
-    def test_one_invalid_unit_fails_closed_while_valid_units_are_delivered(self):
-        result, events, caller = self._translate(self._three_unit_response())
 
-        self.assertEqual(
-            [
-                "R1: 6 sc",
-                "⚠ Could not translate reliably: R616X",
-                "R7: 16 sc",
-            ],
-            result["Translation"].tolist(),
+class UnitIntegrityTests(unittest.TestCase):
+    def test_one_blank_unit_preserves_source_without_suppressing_sibling(self):
+        result, caller, _ = _translate(
+            ["第1圈：6短针", "缝合部件"],
+            ["第1段：細編み6目", "   "],
         )
+        caller.assert_called_once()
+        self.assertEqual("第1段：細編み6目", result.loc[0, "Translation"])
+        self.assertEqual("validated", result.loc[0, "Validation Status"])
+        self.assertEqual("缝合部件", result.loc[1, "Translation"])
+        self.assertEqual("unresolved", result.loc[1, "Validation Status"])
         self.assertEqual(
-            ["validated", "unresolved", "validated"],
-            result["Validation Status"].tolist(),
-        )
-        self.assertEqual(
-            "arabic_digit_multiset",
+            "blank_translation",
             result.loc[1, "Validation Failure Reason"],
         )
-        self.assertEqual(
-            (self.segments[1]["source_segment_id"],),
-            result.loc[1, "Source Segment IDs"],
-        )
-        self.assertNotIn("R6: 16 sc", result.loc[1, "Translation"])
-        caller.assert_called_once()
-        partial = [
-            event for event in events if event["phase"] == "partial_validation_failure"
-        ]
-        self.assertEqual(1, len(partial))
-        self.assertEqual("arabic_digit_multiset", partial[0]["failed_rule"])
-        self.assertEqual(
-            [self.segments[1]["source_segment_id"]],
-            partial[0]["source_segment_ids"],
-        )
-        self.assertEqual("R616X", partial[0]["failed_source_excerpt"])
-        self.assertEqual("R6: 16 sc", partial[0]["failed_translation_excerpt"])
-        end = next(event for event in events if event["phase"] == "ai_request_end")
-        self.assertEqual("partial_success", end["outcome"])
-        self.assertEqual(1, end["partial_validation_failure_count"])
 
-    def test_production_digit_conflict_remains_strict_before_partial_fallback(self):
-        segment = [{"source_segment_id": "segment-0000", "text": "R616X"}]
-        units = _valid_units(segment, ["R6: 16 sc"])
-        with self.assertRaises(broad_translation.BroadTranslationError):
-            broad_translation.validate_semantic_units(
-                units,
-                segment,
-                _route_config("Simplified Chinese", "English — US"),
-            )
-
-        result, _events, _caller = self._translate(self._three_unit_response())
-        self.assertEqual("R616X", result.loc[1, "Original"])
-        self.assertEqual(
-            "⚠ Could not translate reliably: R616X",
-            result.loc[1, "Translation"],
-        )
-
-    def test_all_objective_failures_return_unresolved_with_request_warning(self):
-        response = _keyed_response_from_units(
-            _valid_units(
-                self.segments,
-                ["R1: 5 sc", "R6: 16 sc", "R7: 15 sc"],
-            )
-        )
-        events: list[dict] = []
-        caller = mock.Mock(return_value=(self._provider_payload(response), 0.01))
-        result = broad_translation.translate_merged_ocr_lines_broad(
-            self.rows,
-            source_mode="Simplified Chinese",
-            output_mode="English — US",
-            diagnostic_logger=lambda phase, **fields: events.append(
-                {"phase": phase, **fields}
-            ),
-            environ={"OPENAI_API_KEY": "test-key"},
-            luna_caller=caller,
-        )
-        caller.assert_called_once()
-        self.assertEqual(["unresolved"] * 3, result["Validation Status"].tolist())
-        self.assertEqual(
-            broad_translation.request_warning_for_target("English — US"),
-            result.attrs["request_warning"],
-        )
-        self.assertEqual(
-            3,
-            len(
-                [
-                    event
-                    for event in events
-                    if event["phase"] == "objective_validation_failed"
-                ]
-            ),
-        )
-        self.assertEqual(
-            3,
-            len(
-                [
-                    event
-                    for event in events
-                    if event["phase"] == "all_units_validation_failed"
-                ]
-            ),
-        )
-        end = next(event for event in events if event["phase"] == "ai_request_end")
-        self.assertEqual("partial_success", end["outcome"])
-        self.assertTrue(end["all_units_validation_failed"])
-
-    def test_structural_and_ownership_failures_remain_request_fatal(self):
-        cases = []
-        malformed = self._three_unit_response()
-        malformed["unexpected"] = {}
-        cases.append(malformed)
-        missing_assignment = self._three_unit_response()
-        del missing_assignment["segment_assignments"][
-            self.segments[1]["source_segment_id"]
-        ]
-        cases.append(missing_assignment)
-
-        for response in cases:
-            with self.subTest(response_keys=tuple(response)):
-                caller = mock.Mock(
-                    return_value=(self._provider_payload(response), 0.01)
-                )
-                with self.assertRaises(broad_translation.BroadTranslationError):
-                    broad_translation.translate_merged_ocr_lines_broad(
-                        self.rows,
-                        source_mode="Simplified Chinese",
-                        output_mode="English — US",
-                        environ={"OPENAI_API_KEY": "test-key"},
-                        luna_caller=caller,
-                    )
-                self.assertEqual(2, caller.call_count)
-
-    def test_invalid_multi_segment_unit_falls_back_together_with_geometry(self):
-        response = {
-            "segment_assignments": {
-                self.segments[0]["source_segment_id"]: "unit-0000",
-                self.segments[1]["source_segment_id"]: "unit-0000",
-                self.segments[2]["source_segment_id"]: "unit-0001",
-            },
-            "semantic_units": {
-                "unit-0000": {"translated_text": "R1: 6 sc; R6: 16 sc"},
-                "unit-0001": {"translated_text": "R7: 16 sc"},
-            },
-        }
-        result, _events, _caller = self._translate(response)
-
-        exact_source = "R1: 6X\nR616X"
-        self.assertEqual(2, len(result))
-        self.assertEqual(exact_source, result.loc[0, "Original"])
-        self.assertEqual(
-            "⚠ Could not translate reliably: " + exact_source,
-            result.loc[0, "Translation"],
-        )
-        self.assertEqual("unresolved", result.loc[0, "Validation Status"])
-        self.assertEqual(
-            tuple(segment["source_segment_id"] for segment in self.segments[:2]),
-            result.loc[0, "Source Segment IDs"],
-        )
-        self.assertEqual("unit-0000", result.loc[0, "Semantic Unit ID"])
-        self.assertEqual(0.81, result.loc[0, "Confidence"])
-        self.assertEqual(10.0, result.loc[0, "min_x"])
-        self.assertEqual(80.0, result.loc[0, "max_x"])
-        self.assertEqual(10.0, result.loc[0, "min_y"])
-        self.assertEqual(70.0, result.loc[0, "max_y"])
-        self.assertEqual("R7: 16 sc", result.loc[1, "Translation"])
-
-    def test_unresolved_warning_is_visible_in_readable_txt_and_overlay(self):
-        from PIL import Image
-
-        result, _events, _caller = self._translate(self._three_unit_response())
-        warning = "⚠ Could not translate reliably: R616X"
-        readable = line_translation.build_readable_line_translation(result)
-        translation_txt = line_translation.build_overlay_export_text(result)
-        report = diagnostic_report.build_debug_report_text(
-            result,
-            output_mode="English — US",
-        )
-        overlay_image, legend, legend_df = overlay.make_line_translation_overlay(
-            Image.new("RGB", (300, 150), color="white"),
-            result,
-            "English — US",
-        )
-
-        self.assertIn(warning, readable)
-        self.assertIn(warning, translation_txt)
-        self.assertIn(warning, report)
-        self.assertIsNotNone(overlay_image)
-        self.assertIn(warning, legend)
-        self.assertIn(warning, legend_df["Translation"].tolist())
-        self.assertNotIn("UNRESOLVED OCR", readable)
-        self.assertNotIn("validation_failed", readable)
-        self.assertNotIn("arabic_digit_multiset", readable)
-
-    def test_unresolved_warning_is_localized_by_broad_target(self):
-        cases = (
-            (
-                "English — US",
-                "Traditional Chinese",
-                "⚠ 未能可靠翻譯：source",
-            ),
-            (
-                "English — US",
-                "Simplified Chinese",
-                "⚠ 无法可靠翻译：source",
-            ),
-            (
-                "Simplified Chinese",
-                "English — US",
-                "⚠ Could not translate reliably: source",
-            ),
-        )
-        for source_mode, output_mode, expected in cases:
-            with self.subTest(output_mode=output_mode):
-                self.assertEqual(
-                    expected,
-                    broad_translation._unresolved_translation(
-                        "source",
-                        _route_config(source_mode, output_mode),
-                    ),
-                )
-
-
-class BroadRoutingTests(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        cls.df = pd.read_csv("knowledge_base/data/master_stitches.csv")
-        cls.english_index = terminology.build_term_index(cls.df, "English — US")
-        cls.simplified_index = terminology.build_term_index(cls.df, "Simplified Chinese")
-        cls.traditional_index = terminology.build_term_index(cls.df, "Traditional Chinese")
-
-    def _fake_luna(self, segments, translations):
-        def caller(prompt, api_key):
-            del prompt, api_key
-            payload = {
-                "output": [
-                    {
-                        "content": [
-                            {
-                                "type": "output_text",
-                                "text": json.dumps(
-                                    _keyed_response_from_units(
-                                        _valid_units(segments, translations)
-                                    )
-                                ),
-                            }
-                        ]
-                    }
-                ]
-            }
-            return payload, 0.01
-
-        return caller
-
-    def test_translated_clear_ordinary_headings_are_accepted_without_glossary_entries(self):
-        sources = ["Vines (6-7)", "Pot", "Dirt", "Garden notes"]
-        translations = ["藤蔓（6-7）", "花盆", "泥土", "花園說明"]
+    def test_protected_placeholder_corruption_preserves_only_affected_unit(self):
         rows = pd.DataFrame(
-            [_ocr_row(source, y=index * 30) for index, source in enumerate(sources)]
+            [
+                _ocr_row("第1圈：6短针"),
+                _ocr_row(
+                    "访问 example.com 获取图样",
+                    y=30,
+                    min_y=30,
+                    max_y=50,
+                ),
+            ]
         )
-        segments, _ = broad_translation.build_source_segments(rows)
-        config = _route_config("English — US", "Traditional Chinese")
-        route_terms = broad_translation.build_glossary(
-            config.source_mode,
-            config.output_mode,
-        )
-        self.assertEqual(
-            [],
-            broad_translation.select_request_glossary(route_terms, segments, config),
-        )
-        caller = mock.Mock(side_effect=self._fake_luna(segments, translations))
+        prompts: list[str] = []
+
+        def caller(prompt: str, _api_key: str):
+            prompts.append(prompt)
+            payload = json.loads(prompt.split("INPUT: ", 1)[1])
+            segments = payload["source_segments"]
+            self.assertIn("__ciurl", segments[1]["text"])
+            response = _keyed_response(
+                segments,
+                ["第1段：細編み6目", "パターンを見る"],
+            )
+            return _response_text(response), 0.01
 
         result = broad_translation.translate_merged_ocr_lines_broad(
             rows,
-            config.source_mode,
-            config.output_mode,
+            "Simplified Chinese",
+            "Japanese",
             environ={"OPENAI_API_KEY": "test-key"},
             luna_caller=caller,
         )
-
-        self.assertEqual(translations, result["Translation"].tolist())
-        caller.assert_called_once()
-
-    @mock.patch.dict(os.environ, {"PATTERN_BROAD_TRANSLATION_ENABLED": "0"}, clear=False)
-    def test_broad_flag_off_uses_legacy_path(self):
-        routes = (
-            ("English — US", "Traditional Chinese", self.english_index),
-            ("Traditional Chinese", "English — US", self.traditional_index),
-            ("English — US", "Simplified Chinese", self.english_index),
-            ("Simplified Chinese", "English — US", self.simplified_index),
-        )
-        for source_mode, output_mode, index in routes:
-            with self.subTest(source_mode=source_mode, output_mode=output_mode):
-                rows = pd.DataFrame([_ocr_row("Materials")])
-                with mock.patch.object(
-                    broad_translation,
-                    "translate_merged_ocr_lines_broad",
-                    side_effect=AssertionError("broad path executed"),
-                ) as broad_mock, mock.patch.object(
-                    line_translation, "translate_ocr_line", return_value="legacy"
-                ) as legacy_mock:
-                    result = ocr_lines.build_ocr_line_translations(
-                        rows,
-                        index,
-                        self.df,
-                        output_mode,
-                        source_mode,
-                    )
-                broad_mock.assert_not_called()
-                legacy_mock.assert_called()
-                self.assertEqual(result.loc[0, "Translation"], "legacy")
-
-    def test_supported_core_route_matrix_is_exact(self):
-        expected = {
-            ("English — US", "Traditional Chinese"),
-            ("English — US", "Simplified Chinese"),
-            ("English — US", "Japanese"),
-            ("Simplified Chinese", "English — US"),
-            ("Traditional Chinese", "English — US"),
-            ("Traditional Chinese", "English — UK"),
-        }
-        self.assertEqual(expected, set(broad_translation._ROUTE_CONFIGS))
-
-    @mock.patch.dict(
-        os.environ,
-        {
-            "PATTERN_BROAD_TRANSLATION_ENABLED": "1",
-            "OPENAI_API_KEY": "test-key",
-        },
-        clear=False,
-    )
-    def test_supported_routes_use_exactly_one_broad_call(self):
-        cases = (
-            (
-                "English — US",
-                "Traditional Chinese",
-                self.english_index,
-                "Rnd 1: (6 sc, 1 inc) x2 =14.",
-                "第 1 圈：(6 短針，1 加針)×2，共 14 針。",
-                "into natural Traditional Chinese",
-                '"traditional_chinese":"短針"',
-            ),
-            (
-                "Simplified Chinese",
-                "English — US",
-                self.simplified_index,
-                "第1圈：(6短针，1加针)×2，共14针。",
-                "Rnd 1: (6 sc, 1 inc) x2, 14 stitches total.",
-                "from a Simplified Chinese crochet pattern",
-                '"simplified_chinese_authoritative_term":"短针"',
-            ),
-            (
-                "English — US",
-                "Simplified Chinese",
-                self.english_index,
-                "Rnd 1: (6 sc, 1 inc) x2 =14. Sew the two pieces together.",
-                "第 1 轮：(6 短针，1 加针)×2，共 14 针。将两片缝合在一起。",
-                "into natural Simplified Chinese",
-                '"simplified_chinese_authoritative_term":"短针"',
-            ),
-        )
-        for (
-            source_mode,
-            output_mode,
-            index,
-            source_text,
-            translated_text,
-            prompt_route,
-            prompt_glossary,
-        ) in cases:
-            with self.subTest(source_mode=source_mode, output_mode=output_mode):
-                rows = pd.DataFrame([_ocr_row(source_text)])
-                segments, _ = broad_translation.build_source_segments(rows)
-                prompts = []
-
-                def caller(prompt, api_key):
-                    self.assertEqual("test-key", api_key)
-                    prompts.append(prompt)
-                    return self._fake_luna(segments, [translated_text])(prompt, api_key)
-
-                with mock.patch.object(
-                    broad_translation, "call_luna_once", side_effect=caller
-                ) as luna_mock, mock.patch.object(
-                    line_translation,
-                    "translate_ocr_line",
-                    side_effect=AssertionError("legacy fallback executed"),
-                ) as legacy_mock:
-                    result = ocr_lines.build_ocr_line_translations(
-                        rows,
-                        index,
-                        self.df,
-                        output_mode,
-                        source_mode,
-                    )
-                self.assertEqual(1, luna_mock.call_count)
-                legacy_mock.assert_not_called()
-                self.assertEqual(translated_text, result.loc[0, "Translation"])
-                self.assertIn(prompt_route, prompts[0])
-                self.assertIn(prompt_glossary, prompts[0])
-                self.assertIn("segment_assignments", prompts[0])
-
-    def test_new_routes_keep_keyed_ownership_and_objective_validation(self):
-        cases = (
-            (
-                "English — US",
-                "Simplified Chinese",
-                ["Rnd 1:", "6 sc", "Sew the two pieces."],
-                ["第 1 轮：6 短针", "将两片缝合。"],
-                "Rnd 1:\n6 sc",
-                "第 1 轮：5 短针",
-            ),
-        )
-        for (
-            source_mode,
-            output_mode,
-            source_lines,
-            translations,
-            expected_original,
-            invalid_translation,
-        ) in cases:
-            with self.subTest(source_mode=source_mode, output_mode=output_mode):
-                rows = pd.DataFrame([_ocr_row(text) for text in source_lines])
-                segments, _ = broad_translation.build_source_segments(rows)
-                units = [
-                    {
-                        "source_segment_ids": [
-                            segments[0]["source_segment_id"],
-                            segments[1]["source_segment_id"],
-                        ],
-                        "translation": translations[0],
-                    },
-                    {
-                        "source_segment_ids": [segments[2]["source_segment_id"]],
-                        "translation": translations[1],
-                    },
-                ]
-                response = _keyed_response_from_units(units)
-                calls = 0
-
-                def caller(_prompt, _api_key):
-                    nonlocal calls
-                    calls += 1
-                    return {
-                        "output": [{"content": [{"type": "output_text", "text": json.dumps(response)}]}]
-                    }, 0.01
-
-                result = broad_translation.translate_merged_ocr_lines_broad(
-                    rows,
-                    source_mode,
-                    output_mode,
-                    environ={"OPENAI_API_KEY": "test-key"},
-                    luna_caller=caller,
-                )
-                self.assertEqual(1, calls)
-                self.assertEqual(2, len(result))
-                self.assertEqual(expected_original, result.loc[0, "Original"])
-
-                response["semantic_units"]["unit-0000"]["translated_text"] = invalid_translation
-                events = []
-                partial_result = broad_translation.translate_merged_ocr_lines_broad(
-                    rows,
-                    source_mode,
-                    output_mode,
-                    diagnostic_logger=lambda phase, **fields: events.append(
-                        {"phase": phase, **fields}
-                    ),
-                    environ={"OPENAI_API_KEY": "test-key"},
-                    luna_caller=caller,
-                )
-                failure = next(
-                    event for event in events if event["phase"] == "objective_validation_failed"
-                )
-                self.assertEqual("arabic_digit_multiset", failure["failed_rule"])
-                self.assertEqual("unresolved", partial_result.loc[0, "Validation Status"])
-                self.assertEqual("validated", partial_result.loc[1, "Validation Status"])
-                self.assertEqual(
-                    "⚠ 无法可靠翻译：" + expected_original,
-                    partial_result.loc[0, "Translation"],
-                )
-                self.assertEqual(2, calls)
-
-    @mock.patch.dict(
-        os.environ,
-        {
-            "PATTERN_BROAD_TRANSLATION_ENABLED": "1",
-            "OPENAI_API_KEY": "test-key",
-        },
-        clear=False,
-    )
-    def test_new_route_malformed_responses_use_deterministic_legacy(self):
-        cases = (
-            ("English — US", "Simplified Chinese", self.english_index, "Rnd 1: 6 sc"),
-        )
-        malformed = {
-            "output": [{"content": [{"type": "output_text", "text": "{not-json"}]}]
-        }
-        for source_mode, output_mode, index, source_text in cases:
-            with self.subTest(source_mode=source_mode, output_mode=output_mode):
-                rows = pd.DataFrame([_ocr_row(source_text)])
-                with mock.patch.object(
-                    broad_translation, "call_luna_once", return_value=(malformed, 0.01)
-                ) as luna_mock, mock.patch.object(
-                    line_translation,
-                    "translate_ocr_line",
-                    return_value="deterministic",
-                ) as legacy_mock:
-                    result = ocr_lines.build_ocr_line_translations(
-                        rows,
-                        index,
-                        self.df,
-                        output_mode,
-                        source_mode,
-                    )
-                self.assertEqual(2, luna_mock.call_count)
-                legacy_mock.assert_called()
-                self.assertEqual("deterministic", result.loc[0, "Translation"])
-                self.assertTrue(result.attrs.get("request_warning"))
-
-    @mock.patch.dict(
-        os.environ,
-        {
-            "PATTERN_BROAD_TRANSLATION_ENABLED": "1",
-            "OPENAI_API_KEY": "test-key",
-        },
-        clear=False,
-    )
-    def test_broad_flag_on_en_us_to_tc_uses_broad(self):
-        rows = pd.DataFrame([_ocr_row("Rnd 1: 6 sc")])
-        segments, _ = broad_translation.build_source_segments(rows)
-        with mock.patch.object(
-            broad_translation,
-            "call_luna_once",
-            side_effect=self._fake_luna(segments, ["第 1 圈：6 短針"]),
-        ) as luna_mock:
-            result = ocr_lines.build_ocr_line_translations(
-                rows,
-                self.english_index,
-                self.df,
-                "Traditional Chinese",
-                "English — US",
-            )
-        self.assertEqual(luna_mock.call_count, 1)
-        self.assertEqual(result.loc[0, "Translation"], "第 1 圈：6 短針")
-
-    @mock.patch.dict(
-        os.environ,
-        {
-            "PATTERN_BROAD_TRANSLATION_ENABLED": "1",
-            "OPENAI_API_KEY": "test-key",
-        },
-        clear=False,
-    )
-    def test_broad_success_skips_legacy_paths(self):
-        rows = pd.DataFrame([_ocr_row("Rnd 1: 6 sc")])
-        segments, _ = broad_translation.build_source_segments(rows)
-        with mock.patch.object(
-            broad_translation,
-            "call_luna_once",
-            side_effect=self._fake_luna(segments, ["第 1 圈：6 短針"]),
-        ):
-            with mock.patch.object(
-                line_translation, "translate_ocr_line", side_effect=AssertionError("legacy")
-            ):
-                ocr_lines.build_ocr_line_translations(
-                    rows,
-                    self.english_index,
-                    self.df,
-                    "Traditional Chinese",
-                    "English — US",
-                )
-
-    @mock.patch.dict(
-        os.environ,
-        {
-            "PATTERN_BROAD_TRANSLATION_ENABLED": "1",
-            "OPENAI_API_KEY": "test-key",
-        },
-        clear=False,
-    )
-    def test_supported_route_broad_timeouts_use_deterministic_legacy_without_retry(self):
-        cases = (
-            (
-                "English — US",
-                "Traditional Chinese",
-                self.english_index,
-                "Rnd 1: 6 sc",
-            ),
-            (
-                "Simplified Chinese",
-                "English — US",
-                self.simplified_index,
-                "第1圈：6短针",
-            ),
-            (
-                "English — US",
-                "Simplified Chinese",
-                self.english_index,
-                "Rnd 1: 6 sc",
-            ),
-        )
-        for source_mode, output_mode, index, source_text in cases:
-            with self.subTest(source_mode=source_mode, output_mode=output_mode):
-                rows = pd.DataFrame([_ocr_row(source_text)])
-                with mock.patch.object(
-                    broad_translation,
-                    "call_luna_once",
-                    side_effect=TimeoutError("timeout"),
-                ) as luna_mock, mock.patch.object(
-                    line_translation,
-                    "translate_ocr_line",
-                    return_value="deterministic",
-                ) as legacy_mock:
-                    result = ocr_lines.build_ocr_line_translations(
-                        rows,
-                        index,
-                        self.df,
-                        output_mode,
-                        source_mode,
-                    )
-                self.assertEqual(1, luna_mock.call_count)
-                legacy_mock.assert_called()
-                self.assertEqual("deterministic", result.loc[0, "Translation"])
-                self.assertTrue(result.attrs.get("request_warning"))
-
-    def test_traditional_chinese_to_english_routes_use_broad(self):
-        self.assertTrue(
-            broad_translation.is_broad_translation_route(
-                "Traditional Chinese",
-                "English — US",
-            )
-        )
-        self.assertTrue(
-            broad_translation.is_broad_translation_route(
-                "Traditional Chinese",
-                "English — UK",
-            )
-        )
-
-    def test_unsupported_pair_uses_legacy(self):
-        rows = pd.DataFrame([_ocr_row("R1: 6X")])
-        with mock.patch.object(
-            line_translation, "translate_ocr_line", return_value="legacy"
-        ) as legacy_mock:
-            result = ocr_lines.build_ocr_line_translations(
-                rows,
-                self.traditional_index,
-                self.df,
-                "Simplified Chinese",
-                "Traditional Chinese",
-            )
-        legacy_mock.assert_called()
-        self.assertEqual(result.loc[0, "Translation"], "legacy")
-
-
-class BroadKeyedOwnershipTests(unittest.TestCase):
-    def setUp(self):
-        self.rows = pd.DataFrame(
-            [
-                _ocr_row("Rnd 1:", min_x=0, max_x=20, min_y=0, max_y=10, confidence=0.9),
-                _ocr_row("6 sc", min_x=30, max_x=60, min_y=0, max_y=10, confidence=0.5),
-                _ocr_row("Rnd 2: 6 sc", min_x=0, max_x=70, min_y=40, max_y=60),
-            ]
-        )
-        self.segments, self.segment_rows = broad_translation.build_source_segments(self.rows)
-        self.expected_ids = [segment["source_segment_id"] for segment in self.segments]
-
-    def _grouped_response(self) -> dict:
-        return {
-            "segment_assignments": {
-                self.expected_ids[0]: "unit-0000",
-                self.expected_ids[1]: "unit-0000",
-                self.expected_ids[2]: "unit-0001",
-            },
-            "semantic_units": {
-                "unit-0000": {"translated_text": "第 1 圈：6 短針"},
-                "unit-0001": {"translated_text": "第 2 圈：6 短針"},
-            },
-        }
-
-    def _provider_payload(self, response: dict) -> dict:
-        return {
-            "output": [
-                {
-                    "content": [
-                        {"type": "output_text", "text": json.dumps(response)}
-                    ]
-                }
-            ]
-        }
-
-    def test_multiple_segments_map_to_one_semantic_unit(self):
-        units = broad_translation._parse_semantic_units(
-            self._grouped_response(), self.expected_ids
-        )
-        self.assertEqual(2, len(units))
-        self.assertEqual(self.expected_ids[:2], units[0]["source_segment_ids"])
-        self.assertEqual("第 1 圈：6 短針", units[0]["translation"])
-
-    def test_prompt_requires_keyed_ownership_without_independent_translation(self):
-        prompt = broad_translation.build_prompt(
-            self.segments,
-            [],
-            _route_config("English — US", "Traditional Chinese"),
-        )
-        self.assertIn("segment_assignments", prompt)
-        self.assertIn("Every input source_segment_id must appear exactly once as a key", prompt)
-        self.assertIn("Multiple adjacent source segments may map to the same semantic unit", prompt)
-        self.assertIn('"translated_text":"..."', prompt)
-        self.assertNotIn("array of objects each with source_segment_ids", prompt)
-
-    def test_missing_segment_key_fails_with_coverage_diagnostics(self):
-        response = self._grouped_response()
-        del response["segment_assignments"][self.expected_ids[1]]
-        events: list[dict] = []
-        with self.assertRaises(broad_translation.BroadTranslationError):
-            broad_translation._parse_semantic_units(
-                response,
-                self.expected_ids,
-                diagnostic_logger=lambda phase, **fields: events.append(
-                    {"phase": phase, **fields}
-                ),
-            )
-        failure = next(event for event in events if event["phase"] == "id_coverage_validation_failed")
-        self.assertEqual([self.expected_ids[1]], failure["missing_source_segment_ids"])
-        self.assertEqual([], failure["duplicate_source_segment_ids"])
-
-    def test_unknown_segment_key_fails_with_coverage_diagnostics(self):
-        response = self._grouped_response()
-        response["segment_assignments"]["segment-9999"] = "unit-0000"
-        events: list[dict] = []
-        with self.assertRaises(broad_translation.BroadTranslationError):
-            broad_translation._parse_semantic_units(
-                response,
-                self.expected_ids,
-                diagnostic_logger=lambda phase, **fields: events.append(
-                    {"phase": phase, **fields}
-                ),
-            )
-        failure = next(event for event in events if event["phase"] == "id_coverage_validation_failed")
-        self.assertEqual(["segment-9999"], failure["unknown_source_segment_ids"])
-
-    def test_assignment_to_nonexistent_semantic_unit_fails(self):
-        response = self._grouped_response()
-        response["segment_assignments"][self.expected_ids[2]] = "unit-9999"
-        with self.assertRaises(broad_translation._BroadResponseParsingError) as ctx:
-            broad_translation._parse_semantic_units(response, self.expected_ids)
+        self.assertEqual(1, len(prompts))
+        self.assertEqual("validated", result.loc[0, "Validation Status"])
+        self.assertEqual("访问 example.com 获取图样", result.loc[1, "Translation"])
         self.assertEqual(
-            "assignment_references_unknown_semantic_unit", ctx.exception.reason
+            "protected_url_or_domain",
+            result.loc[1, "Validation Failure Reason"],
         )
 
-    def test_orphan_semantic_unit_fails(self):
-        response = self._grouped_response()
-        response["semantic_units"]["unit-orphan"] = {"translated_text": "孤立"}
-        with self.assertRaises(broad_translation._BroadResponseParsingError) as ctx:
-            broad_translation._parse_semantic_units(response, self.expected_ids)
-        self.assertEqual("orphan_semantic_unit", ctx.exception.reason)
+    def test_correct_protected_placeholder_round_trips(self):
+        rows = pd.DataFrame([_ocr_row("访问 example.com 获取图样")])
 
-    def test_duplicate_ownership_is_unrepresentable_after_json_decode(self):
-        raw = (
-            '{"segment_assignments":{"segment-0000":"unit-0000",'
-            '"segment-0000":"unit-0000"},"semantic_units":'
-            '{"unit-0000":{"translated_text":"第 1 圈：6 短針"}}}'
-        )
-        with self.assertRaises(broad_translation._BroadResponseParsingError) as ctx:
-            broad_translation._parse_model_json(raw)
-        self.assertEqual("semantic_unit_schema", ctx.exception.stage)
-        self.assertEqual("duplicate_json_object_key", ctx.exception.reason)
-
-    def test_grouping_reconstructs_existing_line_df_geometry(self):
-        units = broad_translation._parse_semantic_units(
-            self._grouped_response(), self.expected_ids
-        )
-        line_df = broad_translation.adapt_semantic_units_to_line_df(
-            units, self.segments, self.segment_rows
-        )
-        self.assertEqual(2, len(line_df))
-        self.assertEqual("Rnd 1:\n6 sc", line_df.loc[0, "Original"])
-        self.assertEqual(0.5, line_df.loc[0, "Confidence"])
-        self.assertEqual(0.0, line_df.loc[0, "min_x"])
-        self.assertEqual(60.0, line_df.loc[0, "max_x"])
-
-    def test_objective_validators_run_after_keyed_reconstruction(self):
-        response = self._grouped_response()
-        response["semantic_units"]["unit-0000"]["translated_text"] = "第 1 圈：5 短針"
-        calls = 0
-        events: list[dict] = []
-
-        def caller(_prompt: str, _api_key: str):
-            nonlocal calls
-            calls += 1
-            return self._provider_payload(response), 0.01
+        def caller(prompt: str, _api_key: str):
+            payload = json.loads(prompt.split("INPUT: ", 1)[1])
+            protected = payload["source_segments"][0]["text"]
+            response = _keyed_response(
+                payload["source_segments"],
+                [f"{protected} を見る"],
+            )
+            return _response_text(response), 0.01
 
         result = broad_translation.translate_merged_ocr_lines_broad(
-            self.rows,
-            source_mode="English — US",
-            output_mode="Traditional Chinese",
-            diagnostic_logger=lambda phase, **fields: events.append(
-                {"phase": phase, **fields}
-            ),
+            rows,
+            "Simplified Chinese",
+            "Japanese",
             environ={"OPENAI_API_KEY": "test-key"},
             luna_caller=caller,
         )
-        self.assertEqual(1, calls)
-        failure = next(event for event in events if event["phase"] == "objective_validation_failed")
-        self.assertEqual("arabic_digit_multiset", failure["failed_rule"])
-        self.assertEqual("unresolved", result.loc[0, "Validation Status"])
-        self.assertEqual("validated", result.loc[1, "Validation Status"])
-        self.assertEqual(
-            "⚠ 未能可靠翻譯：Rnd 1:\n6 sc",
-            result.loc[0, "Translation"],
-        )
-
-    def test_normal_broad_path_uses_one_call_and_no_retry_events(self):
-        calls = 0
-        events: list[dict] = []
-
-        def caller(_prompt: str, _api_key: str):
-            nonlocal calls
-            calls += 1
-            return self._provider_payload(self._grouped_response()), 0.01
-
-        result = broad_translation.translate_merged_ocr_lines_broad(
-            self.rows,
-            source_mode="English — US",
-            output_mode="Traditional Chinese",
-            diagnostic_logger=lambda phase, **fields: events.append(
-                {"phase": phase, **fields}
-            ),
-            environ={"OPENAI_API_KEY": "test-key"},
-            luna_caller=caller,
-        )
-        self.assertEqual(1, calls)
-        self.assertEqual(2, len(result))
-        self.assertFalse(any(event["phase"].startswith("broad_retry") for event in events))
-        self.assertFalse(
-            hasattr(broad_translation, "_build_duplicate_ownership_correction_prompt")
-        )
-
-    @mock.patch.dict(
-        os.environ,
-        {"PATTERN_BROAD_TRANSLATION_ENABLED": "1", "OPENAI_API_KEY": "test-key"},
-        clear=False,
-    )
-    def test_keyed_broad_path_never_enters_legacy_fallback(self):
-        rows = pd.DataFrame([_ocr_row("Rnd 1: 6 sc")])
-        segments, _ = broad_translation.build_source_segments(rows)
-        response = _keyed_response_from_units(
-            _valid_units(segments, ["第 1 圈：6 短針"])
-        )
-        with mock.patch.object(
-            broad_translation,
-            "call_luna_once",
-            return_value=(self._provider_payload(response), 0.01),
-        ) as luna:
-            with mock.patch.object(
-                line_translation,
-                "translate_ocr_line",
-                side_effect=AssertionError("legacy fallback executed"),
-            ):
-                result = ocr_lines.build_ocr_line_translations(
-                    rows,
-                    {},
-                    pd.DataFrame(),
-                    "Traditional Chinese",
-                    "English — US",
-                )
-        self.assertEqual(1, luna.call_count)
-        self.assertEqual(1, len(result))
+        self.assertIn("example.com", result.loc[0, "Translation"])
+        self.assertEqual("validated", result.loc[0, "Validation Status"])
 
 
-class BroadProviderTests(unittest.TestCase):
-    def _response_parsing_failure_events(self, payload: object) -> tuple[list[dict], Exception]:
-        rows = pd.DataFrame([_ocr_row("SECRET_OCR_SOURCE_Rnd_1: 6 sc")])
-        events: list[dict] = []
-
-        def logger(phase: str, **fields: object) -> None:
-            events.append({"phase": phase, **fields})
-
-        def fake_luna(prompt: str, api_key: str):
-            self.assertIn("SECRET_OCR_SOURCE", prompt)
-            self.assertEqual("sk-secret-test-key", api_key)
-            return payload, 0.01
-
-        with self.assertRaises(broad_translation.BroadTranslationError) as ctx:
-            broad_translation.translate_merged_ocr_lines_broad(
-                rows,
-                source_mode="English — US",
-                output_mode="Traditional Chinese",
-                diagnostic_logger=logger,
-                environ={"OPENAI_API_KEY": "sk-secret-test-key"},
-                luna_caller=fake_luna,
-            )
-        return events, ctx.exception
-
-    def _parse_failure_event(self, events: list[dict]) -> dict:
-        failures = [
-            event for event in events if event.get("phase") == "broad_response_parse_failed"
-        ]
-        self.assertEqual(2, len(failures))
-        return failures[0]
-
-    def _assert_safe_parse_events(self, events: list[dict]) -> None:
-        blob = json.dumps(events, ensure_ascii=False)
-        for forbidden in (
-            "SECRET_OCR_SOURCE",
-            "SECRET_MODEL_TEXT",
-            "sk-secret-test-key",
-            "authoritative_crochet_glossary",
-            "source_segments",
-        ):
-            self.assertNotIn(forbidden, blob)
-
-    def test_provider_envelope_failure_has_safe_stage_diagnostics(self):
-        events, exc = self._response_parsing_failure_events({"output": "SECRET_MODEL_TEXT"})
-        failure = self._parse_failure_event(events)
-        self.assertEqual("provider_envelope", failure["stage"])
-        self.assertEqual("_BroadResponseParsingError", failure["exception_type"])
-        self.assertEqual("provider_output_not_array", failure["reason"])
-        self.assertEqual("object_with_output_array", failure["expected_top_level_shape"])
-        self.assertEqual("broad", failure["route"])
-        self.assertEqual(broad_translation.BROAD_MODEL, failure["model"])
-        self.assertEqual(1, failure["call_ordinal"])
-        self.assertGreaterEqual(failure["elapsed_seconds"], 0)
-        self.assertIsInstance(exc, broad_translation.BroadRecoverableError)
-        self.assertEqual((), exc.args)
-        self._assert_safe_parse_events(events)
-
-    def test_json_decode_failure_has_safe_stage_diagnostics(self):
-        payload = {
-            "output": [
-                {
-                    "content": [
-                        {"type": "output_text", "text": "{SECRET_MODEL_TEXT invalid json"}
-                    ]
-                }
-            ]
-        }
-        events, exc = self._response_parsing_failure_events(payload)
-        failure = self._parse_failure_event(events)
-        self.assertEqual("json_decode", failure["stage"])
-        self.assertEqual("JSONDecodeError", failure["exception_type"])
-        self.assertEqual("model_output_not_valid_json", failure["reason"])
-        self.assertEqual("json_object", failure["expected_top_level_shape"])
-        self.assertIsInstance(exc, broad_translation.BroadRecoverableError)
-        self.assertEqual((), exc.args)
-        self._assert_safe_parse_events(events)
-
-    def test_semantic_unit_schema_failure_has_safe_stage_diagnostics(self):
-        payload = {
-            "output": [
-                {
-                    "content": [
-                        {
-                            "type": "output_text",
-                            "text": json.dumps(
-                                {
-                                    "segment_assignments": {
-                                        "segment-0000": "unit-0000"
-                                    },
-                                    "semantic_units": {
-                                        "unit-0000": {
-                                            "translated_text": "SECRET_MODEL_TEXT",
-                                            "unexpected": True,
-                                        }
-                                    },
-                                }
-                            ),
-                        }
-                    ]
-                }
-            ]
-        }
-        events, exc = self._response_parsing_failure_events(payload)
-        failure = self._parse_failure_event(events)
-        self.assertEqual("semantic_unit_schema", failure["stage"])
-        self.assertEqual("_BroadResponseParsingError", failure["exception_type"])
-        self.assertEqual("semantic_unit_shape_invalid", failure["reason"])
-        self.assertEqual(
-            "object_with_segment_assignments_and_semantic_units_objects",
-            failure["expected_top_level_shape"],
-        )
-        self.assertEqual("object", failure["actual_top_level_json_type"])
-        self.assertEqual(1, failure["semantic_unit_count"])
-        self.assertIsInstance(exc, broad_translation.BroadRecoverableError)
-        self.assertEqual((), exc.args)
-        self._assert_safe_parse_events(events)
-
-    def test_decoded_non_object_is_semantic_unit_schema_failure(self):
-        payload = {
-            "output": [
-                {"content": [{"type": "output_text", "text": '["SECRET_MODEL_TEXT"]'}]}
-            ]
-        }
-        events, exc = self._response_parsing_failure_events(payload)
-        failure = self._parse_failure_event(events)
-        self.assertEqual("semantic_unit_schema", failure["stage"])
-        self.assertEqual("decoded_json_not_object", failure["reason"])
-        self.assertEqual("array", failure["actual_top_level_json_type"])
-        self.assertIsInstance(exc, broad_translation.BroadRecoverableError)
-        self.assertEqual((), exc.args)
-        self._assert_safe_parse_events(events)
-
-    def test_malformed_response_shapes_raise_controlled_error(self):
-        segments = [{"source_segment_id": "segment-0000", "text": "Rnd 1: 6 sc"}]
-        config = _route_config("English — US", "Traditional Chinese")
-        with self.assertRaises(broad_translation.BroadTranslationError):
-            broad_translation._parse_response_payload({"output": "bad"})
-        with self.assertRaises(broad_translation.BroadTranslationError):
-            broad_translation._parse_response_payload(
-                {"output": [{"content": [{"type": "other", "text": "{}"}]}]}
-            )
-        with self.assertRaises(broad_translation.BroadTranslationError):
-            broad_translation._parse_semantic_units(
-                {"segment_assignments": {}, "semantic_units": "bad"},
-                ["segment-0000"],
-            )
-
-    def test_malformed_json_raises_controlled_error(self):
-        with self.assertRaises(broad_translation.BroadTranslationError):
-            broad_translation._parse_model_json("{bad json")
-
-    @mock.patch.dict(
-        os.environ,
-        {"PATTERN_BROAD_TRANSLATION_ENABLED": "1", "OPENAI_API_KEY": ""},
-        clear=False,
-    )
-    def test_missing_api_key_when_broad_invoked(self):
-        rows = pd.DataFrame([_ocr_row("Rnd 1: 6 sc")])
-        with self.assertRaises(broad_translation.BroadTranslationError):
-            broad_translation.translate_merged_ocr_lines_broad(
-                rows,
-                source_mode="English — US",
-                output_mode="Traditional Chinese",
-            )
-
-    def _provider_failure_events(self, error: Exception) -> tuple[list[dict], broad_translation.BroadTranslationError]:
-        rows = pd.DataFrame([_ocr_row("SECRET_OCR_SOURCE_Rnd_1: 6 sc")])
-        events: list[dict] = []
-
-        def logger(phase: str, **fields: object) -> None:
-            events.append({"phase": phase, **fields})
-
-        with mock.patch.object(broad_translation, "call_luna_once", side_effect=error):
-            with self.assertRaises(broad_translation.BroadTranslationError) as ctx:
-                broad_translation.translate_merged_ocr_lines_broad(
-                    rows,
-                    source_mode="English — US",
-                    output_mode="Traditional Chinese",
-                    diagnostic_logger=logger,
-                    environ={
-                        "OPENAI_API_KEY": "sk-secret-test-key",
-                        "PATTERN_BROAD_TRANSLATION_ENABLED": "1",
-                    },
-                )
-        return events, ctx.exception
-
-    def _provider_end_event(self, events: list[dict]) -> dict:
-        end_events = [event for event in events if event.get("phase") == "ai_request_end"]
-        self.assertGreaterEqual(len(end_events), 1)
-        return end_events[0]
-
-    def _assert_no_sensitive_diagnostics(self, events: list[dict]) -> None:
-        blob = json.dumps(events, ensure_ascii=False)
-        for forbidden in (
-            "SECRET_OCR_SOURCE",
-            "sk-secret-test-key",
-            "Authorization",
-            "authoritative_crochet_glossary",
-            "source_segments",
-        ):
-            self.assertNotIn(forbidden, blob)
-
-    def test_http_error_records_classification_and_raises_controlled_error(self):
-        error = urllib.error.HTTPError(
-            url="https://api.openai.com/v1/responses",
-            code=429,
-            msg="Too Many Requests",
-            hdrs=None,
-            fp=io.BytesIO(b""),
-        )
-        events, exc = self._provider_failure_events(error)
-        end_event = self._provider_end_event(events)
-        self.assertEqual("provider_error", end_event["outcome"])
-        self.assertEqual("http_error", end_event["provider_failure_type"])
-        self.assertEqual("HTTPError", end_event["exception_type"])
-        self.assertEqual("http_non_retryable", end_event["failure_classification"])
-        self.assertEqual("429", end_event["http_status"])
-        self.assertEqual("Too_Many_Requests", end_event["http_reason"])
-        self.assertEqual("", str(exc))
-        self.assertEqual((), exc.args)
-        self._assert_no_sensitive_diagnostics(events)
-
-    def test_url_error_records_classification_and_raises_controlled_error(self):
-        events, exc = self._provider_failure_events(urllib.error.URLError("network unreachable"))
-        end_event = self._provider_end_event(events)
-        self.assertEqual("url_error", end_event["provider_failure_type"])
-        self.assertEqual("URLError", end_event["exception_type"])
-        self.assertEqual("transport_non_retryable", end_event["failure_classification"])
-        self.assertEqual("network_unreachable", end_event["url_error_reason"])
-        self.assertEqual("", str(exc))
-        self._assert_no_sensitive_diagnostics(events)
-
-    def test_timeout_error_records_classification_and_raises_controlled_error(self):
-        events, exc = self._provider_failure_events(TimeoutError())
-        end_event = self._provider_end_event(events)
-        self.assertEqual("timeout", end_event["provider_failure_type"])
-        self.assertEqual("TimeoutError", end_event["exception_type"])
-        self.assertEqual("request_timeout", end_event["failure_classification"])
-        self.assertEqual("", str(exc))
-        self._assert_no_sensitive_diagnostics(events)
-
-    def test_json_decode_error_records_classification_and_raises_controlled_error(self):
-        events, exc = self._provider_failure_events(
-            json.JSONDecodeError("Expecting value", "not-json", 0)
-        )
-        end_event = self._provider_end_event(events)
-        self.assertEqual("json_decode", end_event["provider_failure_type"])
-        self.assertEqual("JSONDecodeError", end_event["exception_type"])
-        self.assertEqual("malformed_response", end_event["failure_classification"])
-        self.assertEqual("", str(exc))
-        self._assert_no_sensitive_diagnostics(events)
-
-    def test_unexpected_value_error_remains_fatal_and_unclassified(self):
-        rows = pd.DataFrame([_ocr_row("Rnd 1: 6 sc")])
-        events: list[dict] = []
-        with mock.patch.object(
-            broad_translation,
-            "call_luna_once",
-            side_effect=ValueError("internal invariant"),
-        ):
-            with self.assertRaisesRegex(ValueError, "internal invariant"):
-                broad_translation.translate_merged_ocr_lines_broad(
-                    rows,
-                    source_mode="English — US",
-                    output_mode="Traditional Chinese",
-                    diagnostic_logger=lambda phase, **fields: events.append(
-                        {"phase": phase, **fields}
-                    ),
-                    environ={"OPENAI_API_KEY": "test-key"},
-                )
-        self.assertFalse(any(event["phase"] == "broad_retry_scheduled" for event in events))
-
-
-class BroadRetryAndEmergencyFallbackTests(unittest.TestCase):
+class ProviderAndFallbackTests(unittest.TestCase):
     def setUp(self):
         self.rows = pd.DataFrame([_ocr_row("Rnd 1: 6 sc")])
         self.segments, _ = broad_translation.build_source_segments(self.rows)
-        self.valid_response = _keyed_response_from_units(
-            _valid_units(self.segments, ["第 1 圈：6 短針"])
+        self.valid = _response_text(
+            _keyed_response(self.segments, ["第1圈：短针六针"])
         )
 
-    @staticmethod
-    def _payload(response):
-        return {
-            "output": [
-                {
-                    "content": [
-                        {"type": "output_text", "text": json.dumps(response)}
-                    ]
-                }
-            ]
-        }
-
-    def _translate(self, caller, events=None):
+    def _direct(self, caller):
         return broad_translation.translate_merged_ocr_lines_broad(
             self.rows,
-            source_mode="English — US",
-            output_mode="Traditional Chinese",
-            diagnostic_logger=(
-                None
-                if events is None
-                else lambda phase, **fields: events.append(
-                    {"phase": phase, **fields}
-                )
-            ),
+            "English — US",
+            "Traditional Chinese",
             environ={"OPENAI_API_KEY": "test-key"},
             luna_caller=caller,
         )
 
-    def test_malformed_first_response_retries_exact_prompt_then_succeeds(self):
-        malformed = {
-            "output": [
-                {
-                    "content": [
-                        {"type": "output_text", "text": "{SECRET_FIRST_ATTEMPT"}
-                    ]
-                }
-            ]
-        }
-        prompts = []
-        events = []
+    def test_malformed_first_response_retries_once_then_succeeds(self):
+        caller = mock.Mock(
+            side_effect=[({"output": []}, 0.01), (self.valid, 0.01)]
+        )
+        result = self._direct(caller)
+        self.assertEqual(2, caller.call_count)
+        self.assertEqual("第1圈：短针六针", result.loc[0, "Translation"])
 
-        def caller(prompt, api_key):
-            self.assertEqual("test-key", api_key)
-            prompts.append(prompt)
-            if len(prompts) == 1:
-                return malformed, 0.01
-            return self._payload(self.valid_response), 0.01
+    def test_fully_blank_response_retries_once_then_falls_back(self):
+        blank = _response_text(_keyed_response(self.segments, ["  "]))
+        caller = mock.Mock(return_value=(blank, 0.01))
+        with self.assertRaises(broad_translation.BroadRecoverableError) as caught:
+            self._direct(caller)
+        self.assertEqual(2, caller.call_count)
+        self.assertEqual("all_translations_blank", caught.exception.reason)
 
-        result = self._translate(caller, events)
-        self.assertEqual(2, len(prompts))
-        self.assertEqual(prompts[0], prompts[1])
-        self.assertEqual("第 1 圈：6 短針", result.loc[0, "Translation"])
-        self.assertNotIn("SECRET_FIRST_ATTEMPT", result.to_string())
+    def test_new_route_malformed_response_keeps_existing_retry_contract(self):
+        rows = pd.DataFrame([_ocr_row("第1段：細編み6目")])
+        caller = mock.Mock(return_value=({"output": []}, 0.01))
+
+        with self.assertRaises(broad_translation.BroadRecoverableError) as caught:
+            broad_translation.translate_merged_ocr_lines_broad(
+                rows,
+                "Japanese",
+                "English — UK",
+                environ={"OPENAI_API_KEY": "test-key"},
+                luna_caller=caller,
+            )
+
+        self.assertEqual(2, caller.call_count)
+        self.assertEqual("output_text_not_found", caught.exception.reason)
+
+    def test_nonretryable_provider_failure_is_single_call(self):
+        caller = mock.Mock(side_effect=TimeoutError("timeout"))
+        with self.assertRaises(broad_translation.BroadRecoverableError):
+            self._direct(caller)
+        caller.assert_called_once()
+
+    def test_retryable_http_failure_keeps_two_call_ceiling(self):
+        error = urllib.error.HTTPError(
+            "https://api.openai.com/v1/responses",
+            503,
+            "transient",
+            None,
+            io.BytesIO(b""),
+        )
+        caller = mock.Mock(side_effect=[error, (self.valid, 0.01)])
+        self._direct(caller)
+        self.assertEqual(2, caller.call_count)
+
+    @mock.patch.dict(
+        os.environ,
+        {"PATTERN_BROAD_TRANSLATION_ENABLED": "1", "OPENAI_API_KEY": "test-key"},
+        clear=False,
+    )
+    def test_structurally_valid_linguistic_variation_skips_all_legacy_paths(self):
+        supplied_legacy_provider = mock.Mock(
+            side_effect=AssertionError("legacy LLM provider")
+        )
+        with mock.patch.object(
+            broad_translation,
+            "call_luna_once",
+            return_value=(self.valid, 0.01),
+        ) as provider, mock.patch.object(
+            line_translation,
+            "translate_ocr_line",
+            side_effect=AssertionError("legacy deterministic path"),
+        ) as deterministic:
+            result = ocr_lines.build_ocr_line_translations(
+                self.rows,
+                {},
+                pd.DataFrame(),
+                "Traditional Chinese",
+                "English — US",
+                llm_provider=supplied_legacy_provider,
+            )
+        provider.assert_called_once()
+        deterministic.assert_not_called()
+        supplied_legacy_provider.assert_not_called()
+        self.assertEqual("validated", result.loc[0, "Validation Status"])
+
+    @mock.patch.dict(
+        os.environ,
+        {"PATTERN_BROAD_TRANSLATION_ENABLED": "1", "OPENAI_API_KEY": "test-key"},
+        clear=False,
+    )
+    def test_malformed_response_uses_deterministic_fallback_after_two_calls(self):
+        with mock.patch.object(
+            broad_translation,
+            "call_luna_once",
+            return_value=({"output": []}, 0.01),
+        ) as provider, mock.patch.object(
+            line_translation,
+            "translate_ocr_line",
+            return_value="deterministic fallback",
+        ) as deterministic:
+            result = ocr_lines.build_ocr_line_translations(
+                self.rows,
+                {},
+                pd.DataFrame(),
+                "Traditional Chinese",
+                "English — US",
+            )
+        self.assertEqual(2, provider.call_count)
+        deterministic.assert_called()
         self.assertEqual(
-            [1, 2],
-            [
-                event["call_ordinal"]
-                for event in events
-                if event["phase"] == "ai_request_begin"
-            ],
+            "deterministic fallback",
+            result.loc[0, "Translation"],
+        )
+        self.assertEqual(
+            "deterministic_legacy",
+            result.attrs["broad_fallback_mode"],
         )
 
     @mock.patch.dict(
@@ -2808,19 +677,48 @@ class BroadRetryAndEmergencyFallbackTests(unittest.TestCase):
         {"PATTERN_BROAD_TRANSLATION_ENABLED": "1", "OPENAI_API_KEY": "test-key"},
         clear=False,
     )
-    def test_all_invalid_units_do_not_retry_or_enter_legacy(self):
-        invalid_response = _keyed_response_from_units(
-            _valid_units(self.segments, ["第 1 圈：5 短針"])
-        )
+    def test_new_route_malformed_response_uses_deterministic_fallback(self):
+        rows = pd.DataFrame([_ocr_row("第1段：細編み6目")])
         with mock.patch.object(
             broad_translation,
             "call_luna_once",
-            return_value=(self._payload(invalid_response), 0.01),
+            return_value=({"output": []}, 0.01),
         ) as provider, mock.patch.object(
             line_translation,
             "translate_ocr_line",
-            side_effect=AssertionError("legacy fallback"),
-        ) as legacy:
+            return_value="deterministic fallback",
+        ) as deterministic:
+            result = ocr_lines.build_ocr_line_translations(
+                rows,
+                {},
+                pd.DataFrame(),
+                "English — UK",
+                "Japanese",
+            )
+
+        self.assertEqual(2, provider.call_count)
+        deterministic.assert_called()
+        self.assertEqual("deterministic fallback", result.loc[0, "Translation"])
+        self.assertEqual(
+            "deterministic_legacy",
+            result.attrs["broad_fallback_mode"],
+        )
+
+    @mock.patch.dict(
+        os.environ,
+        {"PATTERN_BROAD_TRANSLATION_ENABLED": "1", "OPENAI_API_KEY": "test-key"},
+        clear=False,
+    )
+    def test_provider_timeout_uses_deterministic_fallback_after_one_call(self):
+        with mock.patch.object(
+            broad_translation,
+            "call_luna_once",
+            side_effect=TimeoutError("timeout"),
+        ) as provider, mock.patch.object(
+            line_translation,
+            "translate_ocr_line",
+            return_value="deterministic fallback",
+        ) as deterministic:
             result = ocr_lines.build_ocr_line_translations(
                 self.rows,
                 {},
@@ -2829,114 +727,11 @@ class BroadRetryAndEmergencyFallbackTests(unittest.TestCase):
                 "English — US",
             )
         provider.assert_called_once()
-        legacy.assert_not_called()
-        self.assertEqual("unresolved", result.loc[0, "Validation Status"])
-        self.assertTrue(result.attrs.get("request_warning"))
-
-    def test_retryable_http_statuses_get_exactly_one_retry(self):
-        for status in (500, 502, 503, 504):
-            with self.subTest(status=status):
-                calls = 0
-
-                def caller(_prompt, _api_key):
-                    nonlocal calls
-                    calls += 1
-                    if calls == 1:
-                        raise urllib.error.HTTPError(
-                            "https://api.openai.com/v1/responses",
-                            status,
-                            "transient",
-                            None,
-                            io.BytesIO(b""),
-                        )
-                    return self._payload(self.valid_response), 0.01
-
-                result = self._translate(caller)
-                self.assertEqual(2, calls)
-                self.assertEqual("第 1 圈：6 短針", result.loc[0, "Translation"])
-
-    def test_timeout_and_nonretryable_http_errors_never_retry(self):
-        errors = (
-            TimeoutError(),
-            urllib.error.URLError(TimeoutError()),
-            urllib.error.HTTPError("https://example.invalid", 429, "rate", None, None),
-            urllib.error.HTTPError("https://example.invalid", 400, "bad", None, None),
+        deterministic.assert_called()
+        self.assertEqual(
+            "deterministic_legacy",
+            result.attrs["broad_fallback_mode"],
         )
-        for error in errors:
-            with self.subTest(error=type(error).__name__, status=getattr(error, "code", None)):
-                caller = mock.Mock(side_effect=error)
-                with self.assertRaises(broad_translation.BroadRecoverableError):
-                    self._translate(caller)
-                caller.assert_called_once()
-
-    def test_fast_connection_reset_retries_but_connection_refusal_does_not(self):
-        reset_caller = mock.Mock(
-            side_effect=[
-                urllib.error.URLError(ConnectionResetError()),
-                (self._payload(self.valid_response), 0.01),
-            ]
-        )
-        result = self._translate(reset_caller)
-        self.assertEqual(2, reset_caller.call_count)
-        self.assertEqual("第 1 圈：6 短針", result.loc[0, "Translation"])
-
-        refused_caller = mock.Mock(
-            side_effect=urllib.error.URLError(ConnectionRefusedError())
-        )
-        with self.assertRaises(broad_translation.BroadRecoverableError):
-            self._translate(refused_caller)
-        refused_caller.assert_called_once()
-
-    def test_two_attempts_share_budget_and_no_retry_starts_without_one_second(self):
-        now = [0.0]
-        observed_timeouts = []
-        calls = 0
-
-        def clock():
-            return now[0]
-
-        def caller(_prompt, _api_key):
-            nonlocal calls
-            calls += 1
-            observed_timeouts.append(
-                broad_translation._BROAD_CALL_TIMEOUT_SECONDS.get()
-            )
-            if calls == 1:
-                now[0] = 10.0
-                return {"output": []}, 10.0
-            return self._payload(self.valid_response), 0.01
-
-        with mock.patch.object(broad_translation.time, "perf_counter", side_effect=clock):
-            self._translate(caller)
-        self.assertEqual([90.0, 80.0], observed_timeouts)
-
-        now[0] = 0.0
-        calls = 0
-
-        def budget_exhausting_caller(_prompt, _api_key):
-            nonlocal calls
-            calls += 1
-            now[0] = 89.5
-            return {"output": []}, 89.5
-
-        with mock.patch.object(broad_translation.time, "perf_counter", side_effect=clock):
-            with self.assertRaises(broad_translation.BroadRecoverableError):
-                self._translate(budget_exhausting_caller)
-        self.assertEqual(1, calls)
-
-        now[0] = 0.0
-        calls = 0
-
-        def late_malformed_caller(_prompt, _api_key):
-            nonlocal calls
-            calls += 1
-            now[0] = 20.0
-            return {"output": []}, 20.0
-
-        with mock.patch.object(broad_translation.time, "perf_counter", side_effect=clock):
-            with self.assertRaises(broad_translation.BroadRecoverableError):
-                self._translate(late_malformed_caller)
-        self.assertEqual(1, calls)
 
     @mock.patch.dict(
         os.environ,
@@ -2946,12 +741,25 @@ class BroadRetryAndEmergencyFallbackTests(unittest.TestCase):
     def test_emergency_legacy_reuses_original_rows_and_disables_all_providers(self):
         rows = pd.DataFrame(
             [
-                _ocr_row("第1圈：", min_x=0, max_x=35, min_y=0, max_y=20),
-                _ocr_row("6短针", min_x=40, max_x=80, min_y=0, max_y=20),
+                _ocr_row(
+                    "第1圈：",
+                    min_x=0,
+                    max_x=35,
+                    min_y=0,
+                    max_y=20,
+                ),
+                _ocr_row(
+                    "6短针",
+                    min_x=40,
+                    max_x=80,
+                    min_y=0,
+                    max_y=20,
+                ),
             ]
         )
-        malformed = {"output": []}
-        supplied_legacy_provider = mock.Mock(side_effect=AssertionError("legacy provider"))
+        supplied_legacy_provider = mock.Mock(
+            side_effect=AssertionError("legacy provider")
+        )
         real_merge = ocr_lines.merge_ocr_boxes_into_visual_lines
         merge_calls = []
 
@@ -2962,14 +770,14 @@ class BroadRetryAndEmergencyFallbackTests(unittest.TestCase):
         with mock.patch.object(
             broad_translation,
             "call_luna_once",
-            return_value=(malformed, 0.01),
+            return_value=({"output": []}, 0.01),
         ) as broad_provider, mock.patch.object(
             ocr_lines,
             "merge_ocr_boxes_into_visual_lines",
             side_effect=merge_wrapper,
         ), mock.patch.object(
             shadow_title_classifier,
-            "record_shadow_comparison_if_enabled",
+            "resolve_title_route_indices",
             side_effect=AssertionError("title provider path"),
         ) as title_route:
             result = ocr_lines.build_ocr_line_translations(
@@ -2986,523 +794,16 @@ class BroadRetryAndEmergencyFallbackTests(unittest.TestCase):
         title_route.assert_not_called()
         self.assertEqual(2, len(merge_calls))
         self.assertTrue(all(used_original for used_original, _ in merge_calls))
-        self.assertFalse(merge_calls[0][1]["correct_chinese_legacy_layout"])
-        self.assertTrue(merge_calls[1][1]["correct_chinese_legacy_layout"])
-        self.assertEqual(0.0, result.loc[0, "min_x"])
-        self.assertEqual(80.0, result.loc[0, "max_x"])
-        self.assertEqual("deterministic_legacy", result.attrs["broad_fallback_mode"])
-        self.assertTrue(result.attrs.get("request_warning"))
-
-    @mock.patch.dict(
-        os.environ,
-        {"PATTERN_BROAD_TRANSLATION_ENABLED": "1", "OPENAI_API_KEY": "test-key"},
-        clear=False,
-    )
-    def test_deterministic_failure_preserves_trusted_source_but_invariant_stays_fatal(self):
-        malformed = {"output": []}
-        with mock.patch.object(
-            broad_translation,
-            "call_luna_once",
-            return_value=(malformed, 0.01),
-        ), mock.patch.object(
-            line_translation,
-            "translate_ocr_line",
-            side_effect=ValueError("deterministic lookup failed"),
-        ):
-            result = ocr_lines.build_ocr_line_translations(
-                self.rows,
-                {},
-                pd.DataFrame(),
-                "Traditional Chinese",
-                "English — US",
-            )
-        self.assertEqual("Rnd 1: 6 sc", result.loc[0, "Original"])
-        self.assertEqual("Rnd 1: 6 sc", result.loc[0, "Translation"])
-        self.assertEqual("source_preserved", result.attrs["broad_fallback_mode"])
-
-        with mock.patch.object(
-            broad_translation,
-            "call_luna_once",
-            return_value=(malformed, 0.01),
-        ), mock.patch.object(
-            line_translation,
-            "translate_ocr_line",
-            side_effect=AssertionError("unexpected invariant"),
-        ):
-            with self.assertRaisesRegex(AssertionError, "unexpected invariant"):
-                ocr_lines.build_ocr_line_translations(
-                    self.rows,
-                    {},
-                    pd.DataFrame(),
-                    "Traditional Chinese",
-                    "English — US",
-                )
-
-
-class CompactChineseStitchValidationTests(unittest.TestCase):
-    def setUp(self):
-        self.config = _route_config("Simplified Chinese", "English — US")
-        self.route_terms = broad_translation.build_glossary(
-            self.config.source_mode,
-            self.config.output_mode,
+        self.assertFalse(
+            merge_calls[0][1]["correct_chinese_legacy_layout"]
         )
-
-    def _segments(self, source: str) -> list[dict[str, str]]:
-        return [{"source_segment_id": "segment-0000", "text": source}]
-
-    def _validate(self, source: str, target: str) -> None:
-        segments = self._segments(source)
-        broad_translation.validate_semantic_units(
-            _valid_units(segments, [target]),
-            segments,
-            self.config,
-        )
-
-    def _failure_reason(self, source: str, target: str) -> str:
-        segments = self._segments(source)
-        events = []
-        with self.assertRaises(broad_translation.BroadTranslationError):
-            broad_translation.validate_semantic_units(
-                _valid_units(segments, [target]),
-                segments,
-                self.config,
-                diagnostic_logger=lambda phase, **fields: events.append(
-                    {"phase": phase, **fields}
-                ),
-            )
-        failure = next(
-            event for event in events if event["phase"] == "objective_validation_failed"
-        )
-        return failure["failed_rule"]
-
-    def test_kerry_compact_x_v_a_rows_are_valid_semantic_equivalents(self):
-        cases = (
-            ("R2:6V", "R2: 6 inc"),
-            ("R3:(X,V)*6", "R3: (sc, inc) * 6"),
-            ("R5:(X,V,X)*6", "R5: (sc, inc, sc) * 6"),
-            ("R8:(3X,V)*2,(X,V)*4,(3X,V)*2", "R8: (3 sc, inc) * 2, (sc, inc) * 4, (3 sc, inc) * 2"),
-            ("R9:10X,(X,V,X)*4,10X", "R9: 10 sc, (sc, inc, sc) * 4, 10 sc"),
-            ("R10:10X,(3X,V)*4,10X", "R10: 10 sc, (3 sc, inc) * 4, 10 sc"),
-            ("R11:10X,(2X,V,2X)*4,10X", "R11: 10 sc, (2 sc, inc, 2 sc) * 4, 10 sc"),
-            ("R14:16X,A,8X,A,16X", "R14: 16 sc, dec, 8 sc, dec, 16 sc"),
-            ("R17:(5X,A)*6", "R17: (5 sc, dec) * 6"),
-            ("R18:(2X,A,2X)*6", "R18: (2 sc, dec, 2 sc) * 6"),
-            ("R19:(3X,A)*6", "R19: (3 sc, dec) * 6"),
-            ("R20:(X,A,X)*6", "R20: (sc, dec, sc) * 6"),
-            ("R21:(X,A)*6", "R21: (sc, dec) * 6"),
-            ("R22:6A", "R22: 6 dec"),
-        )
-        for source, target in cases:
-            with self.subTest(source=source):
-                self._validate(source, target)
-
-    def test_compact_glossary_selects_atomic_not_duplicate_compound_concepts(self):
-        cases = (
-            ("R2:6V", {"st_009_increase"}, {"st_010_single_crochet_increase"}),
-            ("R17:(5X,A)*6", {"st_003_single_crochet", "st_015_decrease"}, {"st_016_single_crochet_decrease"}),
-            ("R22:6A", {"st_015_decrease"}, {"st_016_single_crochet_decrease"}),
-        )
-        for source, required_ids, forbidden_ids in cases:
-            with self.subTest(source=source):
-                selected = broad_translation.select_request_glossary(
-                    self.route_terms,
-                    self._segments(source),
-                    self.config,
-                )
-                selected_ids = {entry["concept_id"] for entry in selected}
-                self.assertTrue(required_ids.issubset(selected_ids))
-                self.assertTrue(forbidden_ids.isdisjoint(selected_ids))
-
-    def test_invalid_substitutions_omissions_and_extra_stitches_remain_rejected(self):
-        cases = (
-            ("R1:6X", "R1: 6 dc"),
-            ("R2:6V", "R2: 6 dec"),
-            ("R22:6A", "R22: 6 inc"),
-            ("R3:(X,V)*6", "R3: (sc) * 6"),
-            ("R2:6V", "R2: 6 inc, dec"),
-        )
-        for source, target in cases:
-            with self.subTest(source=source, target=target):
-                self.assertEqual("stitch_terminology", self._failure_reason(source, target))
-
-    def test_count_and_repeat_changes_still_fail_before_stitch_acceptance(self):
-        cases = (
-            ("R2:6V", "R2: 5 inc"),
-            ("R3:(X,V)*6", "R3: (sc, inc) * 5"),
-        )
-        for source, target in cases:
-            with self.subTest(source=source, target=target):
-                self.assertEqual("arabic_digit_multiset", self._failure_reason(source, target))
-
-
-class BroadServiceIntegrationTests(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        cls.full_df = pd.read_csv("knowledge_base/data/master_stitches.csv").fillna("")
-        cls.df_en, cls.index_en = prepare_translation_dataframe(cls.full_df, "English — US")
-        cls.df_sc, cls.index_sc = prepare_translation_dataframe(
-            cls.full_df, "Simplified Chinese"
-        )
-
-    def _request(self, source_mode, output_mode, index, df, area_mode="Whole Pattern"):
-        from PIL import Image
-
-        image = Image.new("RGB", (120, 80), color=(255, 255, 255))
-        crop_box = (0, 0, image.size[0], image.size[1])
-        return TranslateImageRequest(
-            image=image,
-            selected_image=image,
-            working_image=image,
-            source_mode=source_mode,
-            output_mode=output_mode,
-            area_mode=area_mode,
-            crop_box=crop_box,
-            df=df,
-            index=index,
-            diagnostic_request_id="broad-integration",
-            diagnostic_session_generation="broad-integration",
-            action_started=None,
-            image_load_seconds=0.01,
-            crop_extraction_seconds=0.02,
-            quality_metrics={"width_px": 120, "height_px": 80},
-            quality_errors=[],
-            quality_warnings=[],
-            quality_label="Good",
-            experimental_downscale=False,
-            downscale_max_height_option="Original / no resize",
-            ocr_resize_test="1000 px",
-            session_diagnostics={"ocr_started_at": "2026-01-01 00:00:00"},
-            diagnostic_events=[],
-            diagnostic_platform="unit-test",
-            interface_language="English",
-            ocr_execution_start=__import__("time").perf_counter() - 0.1,
-        )
-
-    @mock.patch("pattern_translator.translation_service.run_primary_ocr")
-    @mock.patch.dict(
-        os.environ,
-        {"PATTERN_BROAD_TRANSLATION_ENABLED": "1", "OPENAI_API_KEY": "test-key"},
-        clear=False,
-    )
-    def test_whole_pattern_compatible(self, mock_run_primary_ocr):
-        ocr_rows = pd.DataFrame([_ocr_row("Rnd 1: 6 sc")])
-        mock_run_primary_ocr.return_value = {
-            "selected_name": "PaddleOCR",
-            "selected_text": "Rnd 1: 6 sc",
-            "selected_rows": ocr_rows,
-            "paddle_inference_seconds": 0.1,
-        }
-        segments, _ = broad_translation.build_source_segments(ocr_rows)
-
-        def fake_luna(prompt, api_key):
-            del prompt, api_key
-            return {
-                "output": [
-                    {
-                        "content": [
-                            {
-                                "type": "output_text",
-                                "text": json.dumps(
-                                    _keyed_response_from_units(
-                                        _valid_units(
-                                            segments, ["第 1 圈：6 短針"]
-                                        )
-                                    )
-                                ),
-                            }
-                        ]
-                    }
-                ]
-            }, 0.01
-
-        with mock.patch.object(broad_translation, "call_luna_once", side_effect=fake_luna):
-            result = translate_image(
-                self._request(
-                    "English — US",
-                    "Traditional Chinese",
-                    self.index_en,
-                    self.df_en,
-                )
-            )
-        primary = result.primary_result
-        self.assertEqual(primary["line_df"].loc[0, "Translation"], "第 1 圈：6 短針")
-        self.assertIn("overlay_png", primary)
-
-    @mock.patch("pattern_translator.translation_service.run_primary_ocr")
-    @mock.patch.dict(
-        os.environ,
-        {"PATTERN_BROAD_TRANSLATION_ENABLED": "1", "OPENAI_API_KEY": "test-key"},
-        clear=False,
-    )
-    def test_attached_row_separator_uses_clean_semantics_and_raw_geometry(
-        self, mock_run_primary_ocr
-    ):
-        ocr_rows = pd.DataFrame(
-            [
-                _ocr_row("2.6 inc (12)", min_y=10, max_y=30),
-                _ocr_row("5.24 sc (24)", min_y=40, max_y=60),
-            ]
-        )
-        mock_run_primary_ocr.return_value = {
-            "selected_name": "PaddleOCR",
-            "selected_text": "2.6 inc (12)\n5.24 sc (24)",
-            "selected_rows": ocr_rows,
-            "paddle_inference_seconds": 0.1,
-        }
-        expected_translations = ["R2: 加針6次 (12)", "R5: 短針24針 (24)"]
-
-        def fake_luna(prompt, api_key):
-            del api_key
-            self.assertIn('"text":"R2: 6 inc (12)"', prompt)
-            self.assertIn('"text":"R5: 24 sc (24)"', prompt)
-            self.assertNotIn('"text":"2.6 inc (12)"', prompt)
-            self.assertNotIn('"text":"5.24 sc (24)"', prompt)
-            semantic_rows = ocr_rows.copy()
-            semantic_rows["semantic_text"] = semantic_rows["text"].map(
-                line_translation.clean_single_ocr_line
-            )
-            segments, _ = broad_translation.build_source_segments(semantic_rows)
-            response = _keyed_response_from_units(
-                _valid_units(segments, expected_translations)
-            )
-            return {
-                "output": [
-                    {
-                        "content": [
-                            {"type": "output_text", "text": json.dumps(response)}
-                        ]
-                    }
-                ]
-            }, 0.01
-
-        with mock.patch.object(
-            broad_translation, "call_luna_once", side_effect=fake_luna
-        ):
-            result = translate_image(
-                self._request(
-                    "English — US",
-                    "Traditional Chinese",
-                    self.index_en,
-                    self.df_en,
-                )
-            )
-
-        primary = result.primary_result
-        self.assertEqual("R2: 6inc (12)\nR5: 24sc (24)", primary["clean_text"])
-        self.assertEqual(
-            ["2.6 inc (12)", "5.24 sc (24)"],
-            primary["line_df"]["Original"].tolist(),
+        self.assertTrue(
+            merge_calls[1][1]["correct_chinese_legacy_layout"]
         )
         self.assertEqual(
-            expected_translations,
-            primary["line_df"]["Translation"].tolist(),
+            "deterministic_legacy",
+            result.attrs["broad_fallback_mode"],
         )
-        self.assertEqual([10.0, 40.0], primary["line_df"]["min_y"].tolist())
-        for translation in expected_translations:
-            self.assertIn(translation, primary["readable_translation"])
-            self.assertIn(translation, primary["translation_txt"])
-
-    @mock.patch("pattern_translator.translation_service.run_primary_ocr")
-    @mock.patch.dict(
-        os.environ,
-        {"PATTERN_BROAD_TRANSLATION_ENABLED": "1", "OPENAI_API_KEY": "test-key"},
-        clear=False,
-    )
-    def test_multiline_prose_accepts_optional_row_offset_and_preserves_notation(
-        self, mock_run_primary_ocr
-    ):
-        ocr_rows = pd.DataFrame(
-            [
-                _ocr_row(
-                    "Insert the safety eyes into the middle of the white BOBs (I like to",
-                    min_y=10,
-                    max_y=20,
-                ),
-                _ocr_row(
-                    "glue them on so that they aren't indented into the plushie)",
-                    min_y=21,
-                    max_y=30,
-                ),
-                _ocr_row(
-                    "*Optional: sew on the nose between the middle of the eyes, one row",
-                    min_y=35,
-                    max_y=45,
-                ),
-                _ocr_row("down (or do it at the end)", min_y=46, max_y=55),
-                _ocr_row("R6: 11 sc (24)", min_y=60, max_y=75),
-            ]
-        )
-        mock_run_primary_ocr.return_value = {
-            "selected_name": "PaddleOCR",
-            "selected_text": "\n".join(ocr_rows["text"].tolist()),
-            "selected_rows": ocr_rows,
-            "paddle_inference_seconds": 0.1,
-        }
-
-        def fake_luna(prompt, api_key):
-            del api_key
-            self.assertIn("*Optional: sew on the nose", prompt)
-            self.assertIn("Insert the safety eyes", prompt)
-            semantic_rows = ocr_rows.copy()
-            semantic_rows["semantic_text"] = semantic_rows["text"].map(
-                line_translation.clean_single_ocr_line
-            )
-            segments, _ = broad_translation.build_source_segments(semantic_rows)
-            response = _keyed_response_from_units(
-                [
-                    {
-                        "source_segment_ids": [
-                            segments[0]["source_segment_id"],
-                            segments[1]["source_segment_id"],
-                        ],
-                        "translation": "將安全眼安裝在白色棗形針的中間（黏上後不會凹進玩偶裡）",
-                    },
-                    {
-                        "source_segment_ids": [
-                            segments[2]["source_segment_id"],
-                            segments[3]["source_segment_id"],
-                        ],
-                        "translation": "*可選：將鼻子縫在雙眼中間，向下 1 行（或最後再縫）",
-                    },
-                    {
-                        "source_segment_ids": [segments[4]["source_segment_id"]],
-                        "translation": "R6：11 短針（24）",
-                    },
-                ]
-            )
-            return {
-                "output": [
-                    {
-                        "content": [
-                            {"type": "output_text", "text": json.dumps(response)}
-                        ]
-                    }
-                ]
-            }, 0.01
-
-        with mock.patch.object(
-            broad_translation, "call_luna_once", side_effect=fake_luna
-        ):
-            result = translate_image(
-                self._request(
-                    "English — US",
-                    "Traditional Chinese",
-                    self.index_en,
-                    self.df_en,
-                )
-            )
-
-        line_df = result.primary_result["line_df"]
-        self.assertEqual(3, len(line_df))
-        self.assertEqual(
-            ["validated", "validated", "validated"],
-            line_df["Validation Status"].tolist(),
-        )
-        self.assertIn("向下 1 行", line_df.loc[1, "Translation"])
-        self.assertEqual("R6：11 短針（24）", line_df.loc[2, "Translation"])
-        self.assertIn("one row\ndown", line_df.loc[1, "Original"])
-
-    @mock.patch("pattern_translator.translation_service.run_primary_ocr")
-    @mock.patch.dict(
-        os.environ,
-        {"PATTERN_BROAD_TRANSLATION_ENABLED": "1", "OPENAI_API_KEY": "test-key"},
-        clear=False,
-    )
-    def test_partial_validation_failure_delivers_service_outputs(
-        self, mock_run_primary_ocr
-    ):
-        ocr_rows = pd.DataFrame(
-            [
-                _ocr_row("R1: 6X", min_y=0, max_y=20),
-                _ocr_row("R616X", min_y=30, max_y=50),
-                _ocr_row("R7: 16X", min_y=60, max_y=80),
-            ]
-        )
-        mock_run_primary_ocr.return_value = {
-            "selected_name": "PaddleOCR",
-            "selected_text": "R1: 6X\nR616X\nR7: 16X",
-            "selected_rows": ocr_rows,
-            "paddle_inference_seconds": 0.1,
-        }
-        segments, _ = broad_translation.build_source_segments(ocr_rows)
-        response = _keyed_response_from_units(
-            _valid_units(segments, ["R1: 6 sc", "R6: 16 sc", "R7: 16 sc"])
-        )
-
-        def fake_luna(prompt, api_key):
-            del prompt, api_key
-            return {
-                "output": [
-                    {
-                        "content": [
-                            {"type": "output_text", "text": json.dumps(response)}
-                        ]
-                    }
-                ]
-            }, 0.01
-
-        with mock.patch.object(broad_translation, "call_luna_once", side_effect=fake_luna):
-            result = translate_image(
-                self._request(
-                    "Simplified Chinese",
-                    "English — US",
-                    self.index_sc,
-                    self.df_sc,
-                )
-            )
-
-        primary = result.primary_result
-        warning = "⚠ Could not translate reliably: R616X"
-        self.assertEqual(
-            ["validated", "unresolved", "validated"],
-            primary["line_df"]["Validation Status"].tolist(),
-        )
-        self.assertIn(warning, primary["readable_translation"])
-        self.assertIn(warning, primary["translation_txt"])
-        self.assertIn(warning, primary["overlay_legend"])
-        self.assertIsNotNone(primary["overlay_png"])
-
-    @mock.patch("pattern_translator.translation_service.run_primary_ocr")
-    @mock.patch.dict(
-        os.environ,
-        {"PATTERN_BROAD_TRANSLATION_ENABLED": "1", "OPENAI_API_KEY": "test-key"},
-        clear=False,
-    )
-    def test_terminal_broad_failure_delivers_warned_service_artifacts(
-        self, mock_run_primary_ocr
-    ):
-        ocr_rows = pd.DataFrame([_ocr_row("Rnd 1: 6 sc")])
-        mock_run_primary_ocr.return_value = {
-            "selected_name": "PaddleOCR",
-            "selected_text": "Rnd 1: 6 sc",
-            "selected_rows": ocr_rows,
-            "paddle_inference_seconds": 0.1,
-        }
-        with mock.patch.object(
-            broad_translation,
-            "call_luna_once",
-            return_value=({"output": []}, 0.01),
-        ) as broad_provider:
-            result = translate_image(
-                self._request(
-                    "English — US",
-                    "Traditional Chinese",
-                    self.index_en,
-                    self.df_en,
-                )
-            )
-
-        primary = result.primary_result
-        warning = broad_translation.request_warning_for_target(
-            "Traditional Chinese"
-        )
-        self.assertEqual(2, broad_provider.call_count)
-        self.assertEqual(warning, primary["request_warning"])
-        self.assertTrue(primary["readable_translation"].startswith(warning + "\n\n"))
-        self.assertTrue(primary["translation_txt"].startswith(warning + "\n\n"))
-        self.assertIn(warning, primary["overlay_legend"])
-        self.assertFalse(primary["line_df"].loc[0, "Translation"].startswith("⚠"))
-        self.assertIsNotNone(primary["overlay_png"])
 
 
 if __name__ == "__main__":

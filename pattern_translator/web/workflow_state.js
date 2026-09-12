@@ -82,6 +82,19 @@ export function forceRunForCurrentQuality(state) {
   );
 }
 
+export function sameLanguageSelection(state) {
+  return MODE_VALUES.includes(state.source)
+    && state.source === state.target;
+}
+
+export function languageSelectionMessage(state, strings) {
+  return sameLanguageSelection(state) ? strings.errorSameLanguage : "";
+}
+
+export function japaneseSourceBetaNotice(state, strings) {
+  return state.source === "Japanese" ? strings.japaneseSourceBeta : "";
+}
+
 export function canTranslate(state) {
   const qualityAllowsTranslation = hasCurrentQuality(state)
     && (
@@ -92,6 +105,7 @@ export function canTranslate(state) {
     state.file
     && MODE_VALUES.includes(state.source)
     && MODE_VALUES.includes(state.target)
+    && !sameLanguageSelection(state)
     && (state.area === "Whole Pattern" || state.crop)
     && !state.qualityLoading
     && qualityAllowsTranslation
@@ -229,6 +243,7 @@ export function adaptApiError(status, body, strings) {
     if (detail === "Image too large") return strings.errorLarge;
     if (detail === "Unsupported image format") return strings.errorUnsupported;
     if (detail === "Invalid image") return strings.errorUnreadable;
+    if (detail === "Source and target languages must differ") return strings.errorSameLanguage;
     if (detail.includes("crop")) return strings.errorCrop;
     return strings.errorValidation;
   }

@@ -24,12 +24,14 @@ const english = {
   errorCrop: "Please select an area before translating, or switch to Whole Pattern.",
   errorNetwork: "The translation service could not be reached. Please try again.",
   errorGeneric: "Translation failed. Please try again.", errorValidation: "Please check the selected image and translation settings.",
+  errorSameLanguage: "The source and target languages are the same. Please choose a different target language.",
   errorRequest: "Translation failed. Reference: ", success: "Translation complete.",
   imageAlt: "Crochet pattern image for area selection", selection: "Selected translation area",
   resizeTop: "Resize top edge", resizeRight: "Resize right edge", resizeBottom: "Resize bottom edge", resizeLeft: "Resize left edge",
   moveControls: "Move precision controls", moveUp: "Move selected edge upward", moveDown: "Move selected edge downward",
   moveLeft: "Move selected edge left", moveRight: "Move selected edge right",
   sourceHintUs: "💡 Most crochet patterns use US terminology.\nIf the stitch names don’t look right, try switching to English (UK).", sourceHintUk: "💡 UK terminology is less common.\nIf the stitch names don’t look right, try switching to English (US), as most crochet patterns use US terminology.", targetHintUs: "💡 US terminology is the standard used by most crochet patterns.", targetHintUk: "💡 Choose UK terminology only if you specifically need UK stitch names.",
+  japaneseSourceBeta: "🧪 Japanese translation is currently in Beta. We aim for accurate results, but Japanese crochet patterns often contain dense symbols and specialised layouts, so some content may not translate perfectly.",
 };
 
 const translations = {
@@ -51,10 +53,11 @@ const translations = {
     errorEmpty: "這個檔案是空的，請選擇其他圖片。", errorUnsupported: "這個檔案無法使用。請選擇 JPG、JPEG、PNG 或 WebP 圖片。",
     errorLarge: "圖片過大，請選擇小於 25 MB 的圖片。", errorUnreadable: "無法讀取這個檔案，請選擇其他圖片。",
     errorCrop: "請先選取範圍再翻譯，或切換回整個圖樣。", errorNetwork: "無法連線到翻譯服務，請再試一次。",
-    errorGeneric: "翻譯失敗，請再試一次。", errorValidation: "請檢查所選圖片與翻譯設定。", errorRequest: "翻譯失敗。參考編號：", success: "翻譯完成。",
+    errorGeneric: "翻譯失敗，請再試一次。", errorValidation: "請檢查所選圖片與翻譯設定。", errorSameLanguage: "來源語言與翻譯語言相同，請選擇另一個翻譯語言。", errorRequest: "翻譯失敗。參考編號：", success: "翻譯完成。",
     resizeTop: "調整上方邊緣", resizeRight: "調整右方邊緣", resizeBottom: "調整下方邊緣", resizeLeft: "調整左方邊緣",
     moveControls: "移動精細調整控制器", moveUp: "向上移動選取邊緣", moveDown: "向下移動選取邊緣", moveLeft: "向左移動選取邊緣", moveRight: "向右移動選取邊緣",
     sourceHintUs: "💡 大部分鈎織圖樣使用美式術語。\n如果針法名稱看起來不對，可以試試切換到英文（英式）。", sourceHintUk: "💡 英式術語較少見。\n如果針法名稱看起來不對，可以試試切換到英文（美式），因為大部分鈎織圖樣使用美式術語。", targetHintUs: "💡 美式術語是大部分鈎織圖樣使用的標準。", targetHintUk: "💡 只有在你特別需要英式針法名稱時，才建議選擇英式術語。",
+    japaneseSourceBeta: "🧪 日文翻譯目前為 Beta 版本。系統會盡力準確翻譯，但日文鈎織圖樣常包含較多符號及特殊排版，結果可能未能完全準確，敬請留意。",
   },
   "zh-Hans": {
     ...english, title: "钩织翻译器", subtitle: "图样文字识别翻译器（测试版）",
@@ -73,10 +76,11 @@ const translations = {
     errorEmpty: "这个文件是空的，请选择其他图片。", errorUnsupported: "这个文件无法使用。请选择 JPG、JPEG、PNG 或 WebP 图片。",
     errorLarge: "图片过大，请选择小于 25 MB 的图片。", errorUnreadable: "无法读取这个文件，请选择其他图片。",
     errorCrop: "请先选择范围再翻译，或切换回整个图样。", errorNetwork: "无法连接到翻译服务，请再试一次。",
-    errorGeneric: "翻译失败，请再试一次。", errorValidation: "请检查所选图片与翻译设置。", errorRequest: "翻译失败。参考编号：", success: "翻译完成。",
+    errorGeneric: "翻译失败，请再试一次。", errorValidation: "请检查所选图片与翻译设置。", errorSameLanguage: "来源语言与翻译语言相同，请选择另一个翻译语言。", errorRequest: "翻译失败。参考编号：", success: "翻译完成。",
     resizeTop: "调整上方边缘", resizeRight: "调整右方边缘", resizeBottom: "调整下方边缘", resizeLeft: "调整左方边缘",
     moveControls: "移动精细调整控制器", moveUp: "向上移动选定边缘", moveDown: "向下移动选定边缘", moveLeft: "向左移动选定边缘", moveRight: "向右移动选定边缘",
     sourceHintUs: "💡 大部分钩织图样使用美式术语。\n如果针法名称看起来不对，可以试试切换到英文（英式）。", sourceHintUk: "💡 英式术语较少见。\n如果针法名称看起来不对，可以试试切换到英文（美式），因为大部分钩织图样使用美式术语。", targetHintUs: "💡 美式术语是大部分钩织图样使用的标准。", targetHintUk: "💡 只有在你特别需要英式针法名称时，才建议选择英式术语。",
+    japaneseSourceBeta: "🧪 日文翻译目前为 Beta 版本。系统会尽力准确翻译，但日文钩织图样常包含较多符号及特殊排版，结果可能无法完全准确，敬请留意。",
   },
   ja: {
     ...english, title: "かぎ針編み翻訳", subtitle: "パターンOCR翻訳（ベータ版）",
@@ -95,10 +99,11 @@ const translations = {
     errorEmpty: "このファイルは空です。別の画像を選んでください。", errorUnsupported: "このファイルは使用できません。JPG、JPEG、PNG、または WebP 画像を選んでください。",
     errorLarge: "画像が大きすぎます。25 MB 未満の画像を選んでください。", errorUnreadable: "このファイルを読み取れませんでした。別の画像を選んでください。",
     errorCrop: "翻訳前に範囲を選択するか、パターン全体に戻してください。", errorNetwork: "翻訳サービスに接続できません。もう一度お試しください。",
-    errorGeneric: "翻訳に失敗しました。もう一度お試しください。", errorValidation: "選択した画像と翻訳設定を確認してください。", errorRequest: "翻訳に失敗しました。参照番号：", success: "翻訳が完了しました。",
+    errorGeneric: "翻訳に失敗しました。もう一度お試しください。", errorValidation: "選択した画像と翻訳設定を確認してください。", errorSameLanguage: "翻訳元と翻訳先の言語が同じです。別の翻訳先言語を選択してください。", errorRequest: "翻訳に失敗しました。参照番号：", success: "翻訳が完了しました。",
     resizeTop: "上辺を調整", resizeRight: "右辺を調整", resizeBottom: "下辺を調整", resizeLeft: "左辺を調整",
     moveControls: "微調整コントローラーを移動", moveUp: "選択した辺を上へ移動", moveDown: "選択した辺を下へ移動", moveLeft: "選択した辺を左へ移動", moveRight: "選択した辺を右へ移動",
     sourceHintUs: "💡 ほとんどのかぎ針編みパターンは米式用語を使っています。\n針目名が合わない場合は、英語（英国式）に切り替えてみてください。", sourceHintUk: "💡 英国式用語は比較的少数派です。\n針目名が合わない場合は、ほとんどのパターンで使われる英語（米国式）に切り替えてみてください。", targetHintUs: "💡 米式用語は、ほとんどのかぎ針編みパターンで使われる標準的な用語です。", targetHintUk: "💡 英国式の針目名が特に必要な場合だけ、英国式用語を選んでください。",
+    japaneseSourceBeta: "🧪 日本語パターンの翻訳機能は現在ベータ版です。できる限り正確に翻訳しますが、日本の編み図には記号や特殊なレイアウトが多く含まれるため、一部の内容を正確に翻訳できない場合があります。",
   },
 };
 

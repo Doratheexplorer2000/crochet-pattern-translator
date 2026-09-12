@@ -84,26 +84,19 @@ class HumanUatDeterministicFollowupTests(unittest.TestCase):
             "vitamin K3",
         )
 
-    def test_broad_route_scopes_skip_dictionary_entry_for_both_cases(self):
+    def test_broad_route_full_glossary_includes_skip_dictionary_entry(self):
         config = broad_translation._route_config(
             "Simplified Chinese", "English — US"
         )
         route_terms = broad_translation.build_glossary(
             config.source_mode, config.output_mode
         )
-        for token in ("K3", "k3"):
-            with self.subTest(token=token):
-                selected = broad_translation.select_request_glossary(
-                    route_terms,
-                    [{"source_segment_id": "segment-0000", "text": token}],
-                    config,
-                )
-                skip = next(
-                    term
-                    for term in selected
-                    if term["concept_id"] == "st_037_skip"
-                )
-                self.assertIn("sk", skip["english_us_abbreviations"])
+        skip = next(
+            term
+            for term in route_terms
+            if term["concept_id"] == "st_037_skip"
+        )
+        self.assertIn("sk", skip["english_us_abbreviations"])
 
 
 class HumanUatLlmDiagnosisTests(unittest.TestCase):

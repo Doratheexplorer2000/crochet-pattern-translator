@@ -10,7 +10,6 @@ import re
 import socket
 import ssl
 import time
-import unicodedata
 import urllib.error
 import urllib.request
 from collections import Counter
@@ -48,16 +47,11 @@ TRADITIONAL_CHINESE_SOURCE = TRADITIONAL_CHINESE_TARGET
 SIMPLIFIED_CHINESE_SOURCE = "Simplified Chinese"
 EN_US_TARGET = "English — US"
 EN_UK_TARGET = "English — UK"
+EN_UK_SOURCE = EN_UK_TARGET
 SIMPLIFIED_CHINESE_TARGET = SIMPLIFIED_CHINESE_SOURCE
 JAPANESE_TARGET = "Japanese"
+JAPANESE_SOURCE = JAPANESE_TARGET
 
-_UNRESOLVED_WARNING_PREFIX_BY_TARGET = {
-    TRADITIONAL_CHINESE_TARGET: "⚠ 未能可靠翻譯：",
-    SIMPLIFIED_CHINESE_TARGET: "⚠ 无法可靠翻译：",
-    EN_US_TARGET: "⚠ Could not translate reliably: ",
-    EN_UK_TARGET: "⚠ Could not translate reliably: ",
-    JAPANESE_TARGET: "⚠ 確実に翻訳できませんでした：",
-}
 _REQUEST_WARNING_BY_TARGET = {
     TRADITIONAL_CHINESE_TARGET: "⚠ 自動翻譯未能可靠完成；部分內容可能保留原文。",
     SIMPLIFIED_CHINESE_TARGET: "⚠ 自动翻译未能可靠完成；部分内容可能保留原文。",
@@ -79,28 +73,6 @@ _BROAD_CALL_TIMEOUT_SECONDS: ContextVar[float] = ContextVar(
 
 _TRUE_VALUES = {"1", "true", "yes", "on"}
 KEYED_RESPONSE_SHAPE = "object_with_segment_assignments_and_semantic_units_objects"
-SHARED_ARABIC_DIGIT_PROMPT_CONTRACT = (
-    "Preserve every explicit Arabic digit from the assigned source segments as the "
-    "same Arabic digit in the translation. Do not spell it out as a number word, "
-    "ordinal word, or frequency word, and do not replace it with language-specific "
-    "numeric characters or words. For example, source 1 must remain 1, not one, once, "
-    "first, 一, or 第一; source 2 must remain 2, not two, twice, second, 二, or 兩. Do "
-    "not infer or invent Arabic digits absent from the assigned source segments. Natural "
-    "fluency must never override explicit Arabic-digit preservation.\n"
-)
-SHARED_TRANSLATION_COMPLETENESS_PROMPT_CONTRACT = (
-    "Translate all clear, legible source-language content into the target language, "
-    "including ordinary prose and section headings. The glossary provides domain guidance "
-    "and does not limit what may be translated; use normal language knowledge for clear "
-    "ordinary words that are absent from it. Preserve source wording only when the OCR or "
-    "input itself is genuinely unclear or ambiguous, and do not hallucinate missing meaning.\n"
-)
-ENGLISH_CROCHET_REPEAT_PROMPT_CONTRACT = (
-    "Treat an explicit x multiplier before or after a crochet unit as repetition, not "
-    "as a stitch count. For example, (sc, incr) 6x means repeat the grouped unit 6 "
-    "times; it does not mean work 6 single crochet stitches. Preserve x6, x 6, 6x, "
-    "and equivalent multiplication-sign forms as an explicit repetition fact.\n"
-)
 
 DOMAIN_CRITICAL_PATTERN_INSTRUCTION_IDS = frozenset(
     {
@@ -138,257 +110,7 @@ DOMAIN_CRITICAL_PATTERN_INSTRUCTION_IDS = frozenset(
         "st_108_close_opening",
     }
 )
-ARABIC_TOKEN_RE = re.compile(r"(?<!\d)\d+(?:\.\d+)?(?!\d)")
-TRIO_EN_RE = re.compile(r"\btrio\b", re.IGNORECASE)
-TRIO_TRADITIONAL_DIGIT_RE = re.compile(r"(?<!\d)3(?!\d)\s*顆")
-TRIO_SIMPLIFIED_DIGIT_RE = re.compile(r"(?<!\d)3(?!\d)\s*颗")
-ENGLISH_ORDINAL_WORD_TO_DIGIT = {
-    "first": "1",
-    "second": "2",
-    "third": "3",
-    "fourth": "4",
-    "fifth": "5",
-    "sixth": "6",
-    "seventh": "7",
-    "eighth": "8",
-    "ninth": "9",
-    "tenth": "10",
-}
-ENGLISH_ORDINAL_ID_TO_DIGIT = {
-    **ENGLISH_ORDINAL_WORD_TO_DIGIT,
-    "1st": "1",
-    "2nd": "2",
-    "3rd": "3",
-    "4th": "4",
-    "5th": "5",
-    "6th": "6",
-    "7th": "7",
-    "8th": "8",
-    "9th": "9",
-    "10th": "10",
-}
-ENGLISH_CARDINAL_WORD_TO_DIGIT = {
-    "one": "1",
-    "two": "2",
-    "three": "3",
-    "four": "4",
-    "five": "5",
-    "six": "6",
-    "seven": "7",
-    "eight": "8",
-    "nine": "9",
-    "ten": "10",
-}
-ENGLISH_ORDINAL_WORD_PATTERNS = {
-    word: re.compile(
-        rf"(?<![A-Za-z0-9_-]){re.escape(word)}(?![A-Za-z0-9_-])",
-        re.IGNORECASE,
-    )
-    for word in ENGLISH_ORDINAL_WORD_TO_DIGIT
-}
-ENGLISH_COUNTED_CROCHET_UNIT = (
-    r"(?:rows?|rounds?|stitches?|chains?|times?|pieces?)"
-)
-ENGLISH_CARDINAL_CROCHET_COUNT_PATTERNS = {
-    word: re.compile(
-        rf"(?<![A-Za-z0-9_-]){re.escape(word)}\s+{ENGLISH_COUNTED_CROCHET_UNIT}"
-        rf"(?![A-Za-z0-9_-])",
-        re.IGNORECASE,
-    )
-    for word in ENGLISH_CARDINAL_WORD_TO_DIGIT
-}
-CHINESE_ARABIC_CROCHET_COUNT_PATTERNS = {
-    digit: re.compile(
-        rf"(?<!\d){re.escape(digit)}(?!\d)\s*(?:行|排|圈|輪|轮|針|针|次|個|个|片)"
-    )
-    for digit in ENGLISH_CARDINAL_WORD_TO_DIGIT.values()
-}
-JAPANESE_ARABIC_CROCHET_COUNT_PATTERNS = {
-    digit: re.compile(
-        rf"(?<!\d){re.escape(digit)}(?!\d)\s*(?:段|目|回|個)"
-    )
-    for digit in ENGLISH_CARDINAL_WORD_TO_DIGIT.values()
-}
-CHINESE_ARABIC_ORDINAL_PATTERNS = {
-    digit: re.compile(rf"第\s*{re.escape(digit)}(?!\d)")
-    for digit in ENGLISH_ORDINAL_WORD_TO_DIGIT.values()
-}
-ROUND_EN_RE = re.compile(
-    r"\b(?:rnds?|rounds?|r)\s*(\d+)(?:\s*[-–—]\s*(?:r\s*)?(\d+))?",
-    re.IGNORECASE,
-)
-ROW_EN_RE = re.compile(
-    r"\brows?\s*(\d+)(?:\s*[-–—]\s*(\d+))?",
-    re.IGNORECASE,
-)
-ROUND_CN_RE = re.compile(r"第\s*(\d+)(?:\s*[-–—]\s*(\d+))?\s*[圈輪]")
-ROUND_SIMPLIFIED_CN_RE = re.compile(r"第\s*(\d+)(?:\s*[-–—]\s*(\d+))?\s*[圈轮]")
-ROW_CN_RE = re.compile(r"第\s*(\d+)(?:\s*[-–—]\s*(\d+))?\s*行")
-ROUND_SC_RE = re.compile(
-    r"\bR(?:ND)?\s*(\d+)(?:\s*[-–—]\s*R?\s*(\d+))?",
-    re.IGNORECASE,
-)
-TOTAL_PAREN_END_RE = re.compile(r"\((\d+)\)\s*$")
-TOTAL_EQUALS_RE = re.compile(r"=(\d+)")
-TOTAL_CN_RE = re.compile(r"共\s*(\d+)")
-REPEAT_PREFIX_RE = re.compile(
-    r"(?<![A-Za-z0-9])(?:x|×|\*)\s*(\d+)(?!\d)",
-    re.IGNORECASE,
-)
-REPEAT_SUFFIX_RE = re.compile(
-    r"(?<!\d)(\d+)\s*(?:x|×)(?![A-Za-z0-9])",
-    re.IGNORECASE,
-)
-REPEAT_CHINESE_RE = re.compile(r"重[複覆复]\s*(\d+)\s*次")
-MEASURE_RE = re.compile(
-    r"(?<!\d)(\d+(?:\.\d+)?)(?!\d)\s*"
-    r"(mm|cm|in(?:ch(?:es)?)?|英寸|厘米|毫米)(?![A-Za-z])",
-    re.IGNORECASE,
-)
-ROUND_ID_EN_RE = re.compile(
-    r"\b(?:rnds?|rounds?)\s*(\d+)(?:\s*[-–—]\s*(\d+))?",
-    re.IGNORECASE,
-)
-ROUND_ID_R_RE = re.compile(
-    r"\bR\s*(\d+)(?:\s*[-–—]\s*R?\s*(\d+))?",
-    re.IGNORECASE,
-)
-ROUND_ID_CN_RE = re.compile(r"第\s*(\d+)(?:\s*[-–—]\s*(\d+))?\s*[圈輪]")
-ROUND_ID_SIMPLIFIED_CN_RE = re.compile(
-    r"第\s*(\d+)(?:\s*[-–—]\s*(\d+))?\s*[圈轮]"
-)
-ROW_ID_EN_RE = re.compile(
-    r"\brows?\s*(\d+)(?:\s*[-–—]\s*(\d+))?",
-    re.IGNORECASE,
-)
-ROW_ID_CN_RE = re.compile(r"第\s*(\d+)(?:\s*[-–—]\s*(\d+))?\s*行")
-ROUND_ID_JA_RE = re.compile(r"第?\s*(\d+)(?:\s*[-–—]\s*(\d+))?\s*段")
-ROW_ID_JA_RE = re.compile(r"第?\s*(\d+)(?:\s*[-–—]\s*(\d+))?\s*行")
-ENGLISH_ORDINAL_IDENTITY_RE = re.compile(
-    rf"\b(?P<ordinal>{'|'.join(map(re.escape, ENGLISH_ORDINAL_ID_TO_DIGIT))})\s+"
-    r"(?P<identity>rounds?|rows?)\b",
-    re.IGNORECASE,
-)
 HANDLE_RE = re.compile(r"(?<![A-Za-z0-9_])@[A-Za-z0-9_.-]+")
-
-STRICT_GLOSSARY_SEMANTIC_CATEGORIES = frozenset(
-    {"basic_stitch", "textured_stitch", "increase", "decrease"}
-)
-COMPACT_CHINESE_STITCH_CONCEPTS = {
-    "x": "st_003_single_crochet",
-    "v": "st_009_increase",
-    "a": "st_015_decrease",
-}
-ENGLISH_COLOR_CHANGE_RE = re.compile(
-    r"(?<![A-Za-z0-9])(?:CC|change\s+(?:colou?r|yarn))(?![A-Za-z0-9])",
-    re.IGNORECASE,
-)
-CHINESE_COLOR_CHANGE_RE = re.compile(
-    r"(?:換(?:成|至|用|配色)?|换(?:成|至|用|配色)?|轉(?:成|至|用|色)?|"
-    r"转(?:成|至|用|色)?|改用|變更為|变更为|更換(?:成|至|為)?|更换(?:成|至|为)?)"
-)
-JAPANESE_COLOR_CHANGE_RE = re.compile(
-    r"(?:色を(?:替|変)える|色替え|色変更|配色変更|配色を(?:替|変)える)"
-)
-_COLOR_ID_ALIASES = {
-    "white": ("white", "白", "白色"),
-    "dark_gray": (
-        "dark gray",
-        "dark grey",
-        "濃いグレー",
-        "ダークグレー",
-        "濃い灰色",
-        "濃灰色",
-    ),
-    "blue": ("blue", "青", "青色", "ブルー"),
-    "purple": ("purple", "紫", "紫色", "パープル"),
-}
-
-
-def _alternation(values: Sequence[str]) -> str:
-    return "|".join(re.escape(value) for value in sorted(values, key=len, reverse=True))
-
-
-_ENGLISH_COLOR_TO_ID = {
-    alias.casefold(): color_id
-    for color_id, aliases in _COLOR_ID_ALIASES.items()
-    for alias in aliases
-    if alias.isascii()
-}
-_JAPANESE_COLOR_TO_ID = {
-    alias: color_id
-    for color_id, aliases in _COLOR_ID_ALIASES.items()
-    for alias in aliases
-    if not alias.isascii()
-}
-ENGLISH_COLOR_CHANGE_OPERATION_RE = re.compile(
-    rf"(?<![A-Za-z0-9])(?:CC|change\s+(?:colou?r|yarn))\s+to\s+"
-    rf"(?P<color>{_alternation(tuple(_ENGLISH_COLOR_TO_ID))})(?![A-Za-z])",
-    re.IGNORECASE,
-)
-JAPANESE_COLOR_CHANGE_OPERATION_RE = re.compile(
-    rf"(?P<color>{_alternation(tuple(_JAPANESE_COLOR_TO_ID))})\s*に\s*"
-    r"(?:色(?:を)?(?:替|変)え(?:る|ます)|色替え(?:する)?|"
-    r"配色変更(?:する)?|替える|変える)"
-)
-JAPANESE_PREFIX_COLOR_CHANGE_OPERATION_RE = re.compile(
-    r"(?:色(?:を)?(?:替|変)え(?:る|ます)|色替え(?:する)?)\s*"
-    rf"(?P<color>{_alternation(tuple(_JAPANESE_COLOR_TO_ID))})"
-)
-JAPANESE_RESIDUAL_LATIN_TOKEN_RE = re.compile(
-    r"(?<![A-Za-z0-9@])([A-Za-z][A-Za-z'’-]{1,})(?![A-Za-z0-9])"
-)
-JAPANESE_ALLOWED_LATIN_TOKENS = frozenset(
-    {
-        "r", "rnd", "ch", "sc", "dc", "hdc", "tr",
-        "inc", "incr", "dec", "decr", "mr", "sl", "st", "slst", "sts",
-        "blo", "flo", "fo", "bob", "cc", "mm", "cm", "x",
-    }
-)
-
-_CHAIN_CONCEPT_ID = "st_001_chain"
-_SLIP_STITCH_CONCEPT_ID = "st_002_slip_stitch"
-_TURNING_CHAIN_CONCEPT_ID = "st_047_turning_chain"
-_CHINESE_NUMBERED_CHAIN_RE = re.compile(r"立\s*\d+\s*(?:鎖)?針")
-_CHINESE_SHORT_SLIP_STITCH_RE = re.compile(r"引拔(?:針)?")
-
-MEASUREMENT_UNIT_CANONICAL = {
-    "mm": "mm",
-    "毫米": "mm",
-    "cm": "cm",
-    "厘米": "cm",
-    "in": "inch",
-    "inch": "inch",
-    "inches": "inch",
-    "英寸": "inch",
-}
-MEASUREMENT_TARGET_ALIASES = {
-    TRADITIONAL_CHINESE_TARGET: {
-        "mm": ("mm", "毫米", "公釐"),
-        "cm": ("cm", "厘米"),
-        "inch": ("inch", "inches", "英寸"),
-    },
-    SIMPLIFIED_CHINESE_TARGET: {
-        "mm": ("mm", "毫米"),
-        "cm": ("cm", "厘米"),
-        "inch": ("inch", "inches", "英寸"),
-    },
-    EN_US_TARGET: {
-        "mm": ("mm", "millimeter", "millimeters"),
-        "cm": ("cm",),
-        "inch": ("inch", "inches"),
-    },
-    EN_UK_TARGET: {
-        "mm": ("mm", "millimetre", "millimetres"),
-        "cm": ("cm",),
-        "inch": ("inch", "inches"),
-    },
-    JAPANESE_TARGET: {
-        "mm": ("mm", "ミリ", "ミリメートル"),
-        "cm": ("cm", "センチ", "センチメートル"),
-        "inch": ("inch", "inches", "インチ"),
-    },
-}
 
 
 class BroadTranslationError(RuntimeError):
@@ -412,8 +134,8 @@ class BroadRecoverableError(BroadTranslationError):
         self.retry_attempted = attempt_count > 1
 
 
-class _ObjectiveValidationError(BroadTranslationError):
-    """One trusted semantic unit failed an objective translation rule."""
+class _UnitIntegrityError(BroadTranslationError):
+    """One mapped semantic unit failed an objectively provable integrity rule."""
 
     def __init__(self, failed_rule: str, diagnostic_fields: Mapping[str, object]) -> None:
         super().__init__()
@@ -456,49 +178,25 @@ class _RouteConfig:
     en_us_source: bool
 
 
+_LANGUAGE_LABELS = {
+    EN_US_SOURCE: "English US",
+    EN_UK_SOURCE: "English UK",
+    TRADITIONAL_CHINESE_SOURCE: "Traditional Chinese",
+    SIMPLIFIED_CHINESE_SOURCE: "Simplified Chinese",
+    JAPANESE_SOURCE: "Japanese",
+}
+
 _ROUTE_CONFIGS: Dict[Tuple[str, str], _RouteConfig] = {
-    (EN_US_SOURCE, TRADITIONAL_CHINESE_TARGET): _RouteConfig(
-        EN_US_SOURCE,
-        TRADITIONAL_CHINESE_TARGET,
-        "English US",
-        "Traditional Chinese",
-        True,
-    ),
-    (SIMPLIFIED_CHINESE_SOURCE, EN_US_TARGET): _RouteConfig(
-        SIMPLIFIED_CHINESE_SOURCE,
-        EN_US_TARGET,
-        "Simplified Chinese",
-        "English US",
-        False,
-    ),
-    (EN_US_SOURCE, SIMPLIFIED_CHINESE_TARGET): _RouteConfig(
-        EN_US_SOURCE,
-        SIMPLIFIED_CHINESE_TARGET,
-        "English US",
-        "Simplified Chinese",
-        True,
-    ),
-    (EN_US_SOURCE, JAPANESE_TARGET): _RouteConfig(
-        EN_US_SOURCE,
-        JAPANESE_TARGET,
-        "English US",
-        "Japanese",
-        True,
-    ),
-    (TRADITIONAL_CHINESE_SOURCE, EN_US_TARGET): _RouteConfig(
-        TRADITIONAL_CHINESE_SOURCE,
-        EN_US_TARGET,
-        "Traditional Chinese",
-        "English US",
-        False,
-    ),
-    (TRADITIONAL_CHINESE_SOURCE, EN_UK_TARGET): _RouteConfig(
-        TRADITIONAL_CHINESE_SOURCE,
-        EN_UK_TARGET,
-        "Traditional Chinese",
-        "English UK",
-        False,
-    ),
+    (source_mode, output_mode): _RouteConfig(
+        source_mode,
+        output_mode,
+        source_language,
+        target_language,
+        source_mode == EN_US_SOURCE,
+    )
+    for source_mode, source_language in _LANGUAGE_LABELS.items()
+    for output_mode, target_language in _LANGUAGE_LABELS.items()
+    if source_mode != output_mode
 }
 
 
@@ -657,7 +355,7 @@ def build_glossary(source_mode: str, output_mode: str) -> List[Dict[str, Any]]:
             entry["english_us"] = english_aliases[0]
             entry["english_us_aliases"] = english_aliases[1:]
             entry["english_us_abbreviations"] = english_abbreviations
-        if config.output_mode == EN_UK_TARGET:
+        if config.source_mode == EN_UK_SOURCE or config.output_mode == EN_UK_TARGET:
             if not english_uk_aliases:
                 continue
             entry["english_uk"] = english_uk_aliases[0]
@@ -679,7 +377,7 @@ def build_glossary(source_mode: str, output_mode: str) -> List[Dict[str, Any]]:
             entry["simplified_chinese_aliases"] = simplified_terms[1:]
             if simplified_abbreviations:
                 entry["simplified_chinese_abbreviation"] = simplified_abbreviations[0]
-        if config.output_mode == JAPANESE_TARGET:
+        if config.source_mode == JAPANESE_SOURCE or config.output_mode == JAPANESE_TARGET:
             if not japanese_terms:
                 continue
             entry["japanese"] = japanese_terms[0]
@@ -689,293 +387,6 @@ def build_glossary(source_mode: str, output_mode: str) -> List[Dict[str, Any]]:
     if not terms:
         raise BroadTranslationError()
     return terms
-
-
-def _glossary_values(value: object) -> List[str]:
-    values = value if isinstance(value, list) else [value]
-    out: List[str] = []
-    for raw in values:
-        for candidate in terminology.split_aliases(raw):
-            if candidate and candidate not in out:
-                out.append(candidate)
-    return out
-
-
-def _source_glossary_forms(
-    entry: Mapping[str, Any], config: _RouteConfig
-) -> Tuple[List[str], List[str]]:
-    if config.source_mode == EN_US_SOURCE:
-        primary = _glossary_values(entry.get("english_us", ""))
-        secondary = _glossary_values(entry.get("english_us_aliases", []))
-        secondary.extend(_glossary_values(entry.get("english_us_abbreviations", [])))
-    elif config.source_mode == SIMPLIFIED_CHINESE_SOURCE:
-        primary = _glossary_values(
-            entry.get("simplified_chinese_authoritative_term", "")
-        )
-        secondary = _glossary_values(entry.get("simplified_chinese_aliases", []))
-        secondary.extend(
-            _glossary_values(entry.get("simplified_chinese_abbreviation", ""))
-        )
-    else:
-        primary = _glossary_values(entry.get("traditional_chinese", ""))
-        secondary = _glossary_values(entry.get("traditional_chinese_aliases", []))
-        secondary.extend(
-            _glossary_values(entry.get("traditional_chinese_abbreviation", ""))
-        )
-    return list(dict.fromkeys(primary)), list(dict.fromkeys(secondary))
-
-
-def _target_glossary_forms(
-    entry: Mapping[str, Any], config: _RouteConfig
-) -> List[str]:
-    if config.output_mode == TRADITIONAL_CHINESE_TARGET:
-        values = _glossary_values(entry.get("traditional_chinese", ""))
-        values.extend(_glossary_values(entry.get("traditional_chinese_aliases", [])))
-        values.extend(
-            _glossary_values(entry.get("traditional_chinese_abbreviation", ""))
-        )
-    elif config.output_mode == SIMPLIFIED_CHINESE_TARGET:
-        values = _glossary_values(
-            entry.get("simplified_chinese_authoritative_term", "")
-        )
-        values.extend(_glossary_values(entry.get("simplified_chinese_aliases", [])))
-        values.extend(
-            _glossary_values(entry.get("simplified_chinese_abbreviation", ""))
-        )
-    elif config.output_mode == EN_US_TARGET:
-        values = _glossary_values(entry.get("english_us", ""))
-        values.extend(_glossary_values(entry.get("english_us_aliases", [])))
-        values.extend(_glossary_values(entry.get("english_us_abbreviations", [])))
-    elif config.output_mode == EN_UK_TARGET:
-        values = _glossary_values(entry.get("english_uk", ""))
-        values.extend(_glossary_values(entry.get("english_uk_aliases", [])))
-        values.extend(_glossary_values(entry.get("english_uk_abbreviations", [])))
-    else:
-        values = _glossary_values(entry.get("japanese", ""))
-        values.extend(_glossary_values(entry.get("japanese_aliases", [])))
-    if config.en_us_source:
-        # Protected source abbreviations are also valid in translated crochet notation.
-        values.extend(_glossary_values(entry.get("english_us_abbreviations", [])))
-    return list(dict.fromkeys(value for value in values if value))
-
-
-def _form_match_spans(
-    text: str,
-    form: str,
-    *,
-    allow_english_plural: bool = False,
-) -> List[Tuple[int, int]]:
-    normalized_text = unicodedata.normalize("NFKC", text)
-    normalized_form = unicodedata.normalize("NFKC", str(form or "")).strip()
-    if not normalized_form:
-        return []
-    if re.fullmatch(r"[A-Za-z0-9]+(?:\s+[A-Za-z0-9]+)*", normalized_form):
-        phrase = re.escape(normalized_form).replace(r"\ ", r"\s+")
-        if len(normalized_form) == 1:
-            pattern = re.compile(
-                rf"(?<![A-Za-z]){phrase}(?![A-Za-z])",
-                0 if normalized_form.isupper() else re.IGNORECASE,
-            )
-        else:
-            # Crochet abbreviations are commonly attached directly to counts (11sc,
-            # 6inc). Letter boundaries still prevent matches inside ordinary words.
-            plural_suffix = (
-                r"(?:es|s)?"
-                if allow_english_plural and len(normalized_form) > 3
-                else ""
-            )
-            pattern = re.compile(
-                rf"(?<![A-Za-z]){phrase}{plural_suffix}(?![A-Za-z])",
-                re.IGNORECASE,
-            )
-        return [match.span() for match in pattern.finditer(normalized_text)]
-    return [
-        (match.start(), match.end())
-        for match in re.finditer(re.escape(normalized_form), normalized_text)
-    ]
-
-
-def _form_occurrence_count(text: str, forms: Sequence[str]) -> int:
-    occupied: List[Tuple[int, int]] = []
-    for form in sorted(set(forms), key=len, reverse=True):
-        for span in _form_match_spans(text, form):
-            if any(span[0] < end and start < span[1] for start, end in occupied):
-                continue
-            occupied.append(span)
-    return len(occupied)
-
-
-def _attached_count_abbreviation_present(source: str, form: str) -> bool:
-    normalized_form = unicodedata.normalize("NFKC", str(form or "")).strip()
-    if not re.fullmatch(r"[A-Za-z][A-Za-z0-9]{0,7}", normalized_form):
-        return False
-    return bool(
-        re.search(
-            rf"(?<=\d){re.escape(normalized_form)}(?![A-Za-z])",
-            unicodedata.normalize("NFKC", source),
-            re.IGNORECASE,
-        )
-    )
-
-
-def _ascii_phrase_present(normalized_source: str, normalized_phrase: str) -> bool:
-    escaped = re.escape(normalized_phrase).replace(r"\ ", r"\s+")
-    return bool(
-        re.search(
-            rf"(?<![A-Za-z0-9]){escaped}(?![A-Za-z0-9])",
-            normalized_source,
-        )
-    )
-
-
-def _form_present(
-    normalized_source: str,
-    case_preserved_source: str,
-    form: str,
-) -> bool:
-    normalized_form = terminology.norm_text(form)
-    if not normalized_form:
-        return False
-    if re.fullmatch(r"[a-z]", normalized_form):
-        if normalized_form == "k" and re.search(
-            r"(?<![A-Za-z0-9])[Kk](?=\d+(?![A-Za-z0-9]))",
-            case_preserved_source,
-        ):
-            return True
-        # Single-letter crochet abbreviations are conventionally uppercase. Keeping
-        # this case-sensitive avoids treating prose letters as crochet evidence.
-        token = normalized_form.upper()
-        return bool(
-            re.search(
-                rf"(?<![A-Za-z0-9]){re.escape(token)}(?![A-Za-z0-9])",
-                case_preserved_source,
-            )
-        )
-    if re.search(r"[\u3400-\u9fff]", normalized_form):
-        return normalized_form in normalized_source
-    return _ascii_phrase_present(normalized_source, normalized_form)
-
-
-def _explicit_abbreviation_resolutions(
-    source_text: str,
-    config: _RouteConfig,
-    terms: Sequence[Dict[str, Any]],
-    secondary_owners: Mapping[str, Sequence[str]],
-) -> Dict[str, set[str]]:
-    case_source = unicodedata.normalize("NFKC", source_text)
-    entry_by_id = {str(entry["concept_id"]): entry for entry in terms}
-    resolutions: Dict[str, set[str]] = {}
-    for form_key, owners in secondary_owners.items():
-        if len(owners) < 2 or not re.fullmatch(r"[a-z][a-z0-9]*", form_key):
-            continue
-        displayed = form_key.upper() if len(form_key) == 1 else form_key
-        matches = re.finditer(
-            rf"(?<![A-Za-z0-9]){re.escape(displayed)}(?![A-Za-z0-9])\s*=\s*([^\n\r]+)",
-            case_source,
-            flags=0 if len(form_key) == 1 else re.IGNORECASE,
-        )
-        for match in matches:
-            normalized_rhs = terminology.norm_text(match.group(1))
-            matched_owners: set[str] = set()
-            for concept_id in owners:
-                primary, _ = _source_glossary_forms(entry_by_id[concept_id], config)
-                if any(
-                    _form_present(normalized_rhs, match.group(1), primary_form)
-                    for primary_form in primary
-                ):
-                    matched_owners.add(concept_id)
-            if len(matched_owners) == 1:
-                resolutions[form_key] = matched_owners
-                break
-    return resolutions
-
-
-def _compound_form_evidenced(form: str, normalized_segment: str) -> bool:
-    normalized_form = terminology.norm_text(form)
-    components = normalized_form.split()
-    if not (2 <= len(components) <= 3):
-        return False
-    if not all(re.fullmatch(r"[a-z0-9]+", component) for component in components):
-        return False
-    return all(
-        _ascii_phrase_present(normalized_segment, component) for component in components
-    )
-
-
-def select_request_glossary(
-    route_terms: Sequence[Dict[str, Any]],
-    segments: Sequence[Dict[str, str]],
-    config: _RouteConfig,
-) -> List[Dict[str, Any]]:
-    """Select exact source-evidenced entries from an authoritative route glossary."""
-    source_text = "\n".join(str(segment.get("text", "")) for segment in segments)
-    normalized_source = terminology.norm_text(source_text)
-    case_source = unicodedata.normalize("NFKC", source_text)
-    normalized_segments = [
-        terminology.norm_text(str(segment.get("text", ""))) for segment in segments
-    ]
-    forms_by_id: Dict[str, Tuple[List[str], List[str]]] = {}
-    secondary_owners: Dict[str, List[str]] = {}
-    for entry in route_terms:
-        concept_id = str(entry["concept_id"])
-        primary, secondary = _source_glossary_forms(entry, config)
-        forms_by_id[concept_id] = (primary, secondary)
-        for form in secondary:
-            key = terminology.norm_text(form)
-            if key:
-                secondary_owners.setdefault(key, [])
-                if concept_id not in secondary_owners[key]:
-                    secondary_owners[key].append(concept_id)
-
-    explicit_resolutions = _explicit_abbreviation_resolutions(
-        source_text, config, route_terms, secondary_owners
-    )
-    selected_ids: set[str] = set()
-    for entry in route_terms:
-        concept_id = str(entry["concept_id"])
-        primary, secondary = forms_by_id[concept_id]
-        if any(_form_present(normalized_source, case_source, form) for form in primary):
-            selected_ids.add(concept_id)
-        for form in secondary:
-            if not (
-                _form_present(normalized_source, case_source, form)
-                or _attached_count_abbreviation_present(case_source, form)
-            ):
-                continue
-            key = terminology.norm_text(form)
-            owners = secondary_owners.get(key, [])
-            if key in explicit_resolutions:
-                selected_ids.update(explicit_resolutions[key])
-            elif (
-                not config.en_us_source
-                and key in COMPACT_CHINESE_STITCH_CONCEPTS
-                and COMPACT_CHINESE_STITCH_CONCEPTS[key] in owners
-            ):
-                # X/V/A are atomic compact Chinese crochet symbols. The glossary
-                # also contains compound sc-inc/sc-dec rows with the same V/A
-                # aliases; selecting every owner makes a single symbol require two
-                # target concepts and falsely rejects a correct inc/dec translation.
-                selected_ids.add(COMPACT_CHINESE_STITCH_CONCEPTS[key])
-            else:
-                selected_ids.update(owners)
-
-    # Compound aliases such as "sc inc" are retained only when every component
-    # is independently evidenced within the same OCR segment.
-    for entry in route_terms:
-        concept_id = str(entry["concept_id"])
-        if concept_id in selected_ids:
-            continue
-        _, secondary = forms_by_id[concept_id]
-        if any(
-            _compound_form_evidenced(form, segment)
-            for form in secondary
-            for segment in normalized_segments
-        ):
-            selected_ids.add(concept_id)
-
-    return [
-        entry for entry in route_terms if str(entry["concept_id"]) in selected_ids
-    ]
 
 
 def _glossary_char_count(terms: Sequence[Dict[str, Any]]) -> int:
@@ -1129,81 +540,22 @@ def build_prompt(
         "source_segments": list(segments),
         "authoritative_crochet_glossary": list(terms),
     }
-    if (
-        config.source_mode == EN_US_SOURCE
-        and config.output_mode == TRADITIONAL_CHINESE_TARGET
-    ):
-        task = (
-            "TASK: Translate this stored OCR text from an English-US crochet pattern "
-            "into natural Traditional Chinese.\n"
-            "Preserve crochet meaning, quantities, measurements, explicit round/row facts, "
-            "repeat facts, and abbreviations/terminology. Use the authoritative glossary as "
-            "terminology guidance, not as a phrase-replacement table. Do not repair or "
-            "silently resolve ambiguous OCR.\n"
-        )
-    elif (
-        config.source_mode == SIMPLIFIED_CHINESE_SOURCE
-        and config.output_mode == EN_US_TARGET
-    ):
-        task = (
-            "TASK: Translate this stored OCR text from a Simplified Chinese crochet pattern "
-            "into natural US-English crochet instructions.\n"
-            "Preserve crochet meaning, quantities, round/row facts, repeat facts, and stitch "
-            "totals. Use the authoritative glossary as terminology guidance. Do not repair "
-            "or silently resolve ambiguous OCR.\n"
-        )
-    elif (
-        config.source_mode == EN_US_SOURCE
-        and config.output_mode == JAPANESE_TARGET
-    ):
-        task = (
-            "TASK: Translate this stored OCR text from an English-US crochet pattern "
-            "into natural Japanese crochet instructions.\n"
-            "Translate readable titles, headings, colour-change phrases, and prose fully. "
-            "Preserve crochet meaning, quantities, measurements, explicit round/row facts, "
-            "repeat facts, Bobble semantics, and intentional crochet abbreviations. Use the "
-            "authoritative Japanese glossary as terminology guidance, not as a phrase-replacement "
-            "table. Do not fall back to English terminology when a Japanese glossary entry is "
-            "absent. Do not repair or silently resolve ambiguous OCR.\n"
-        )
-    elif (
-        config.source_mode == TRADITIONAL_CHINESE_SOURCE
-        and config.output_mode in {EN_US_TARGET, EN_UK_TARGET}
-    ):
-        dialect = "US-English" if config.output_mode == EN_US_TARGET else "UK-English"
-        task = (
-            "TASK: Translate this stored OCR text from a Traditional Chinese crochet pattern "
-            f"into coherent natural {dialect} crochet instructions.\n"
-            "Preserve crochet meaning, quantities, round/row facts, repeat facts, stitch totals, "
-            "and protected identities. Use only the target dialect fields of the authoritative "
-            "glossary so US and UK stitch names never leak into each other. Do not repair or "
-            "silently resolve ambiguous OCR.\n"
-        )
-    else:
-        task = (
-            "TASK: Translate this stored OCR text from an English-US crochet pattern "
-            "into natural Simplified Chinese.\n"
-            "Preserve crochet meaning, quantities, measurements, explicit round/row facts, "
-            "repeat facts, and abbreviations/terminology. Use the authoritative glossary as "
-            "terminology guidance, not as a phrase-replacement table. Do not repair or "
-            "silently resolve ambiguous OCR.\n"
-        )
-    repeat_contract = (
-        ENGLISH_CROCHET_REPEAT_PROMPT_CONTRACT
-        if config.en_us_source
-        else ""
-    )
+    dialect = ""
+    if config.output_mode == EN_US_TARGET:
+        dialect = " Use US English crochet terminology."
+    elif config.output_mode == EN_UK_TARGET:
+        dialect = " Use UK English crochet terminology."
     return (
-        task
-        + SHARED_TRANSLATION_COMPLETENESS_PROMPT_CONTRACT
-        + SHARED_ARABIC_DIGIT_PROMPT_CONTRACT
-        + repeat_contract
-        + "Preserve every opaque __ciurl...__ URL/domain placeholder exactly once, unchanged, "
-        "and within the semantic unit assigned to its source segment. "
-        + "Preserve each protected handle and URL/domain identity exactly, but translate all "
-        "surrounding natural-language prose in the same semantic unit; a protected identity "
-        "does not exempt surrounding prose from translation. "
-        + "Segments are visual OCR fragments. Combine adjacent segments when they form one "
+        "You are a specialist crochet-pattern translation agent. Translate the complete "
+        f"cleaned OCR pattern from {config.source_language} to {config.target_language}."
+        + dialect
+        + " Use the supplied full route-relevant glossary as terminology context, while allowing "
+        "natural target-language expression. Preserve crochet meaning, quantities, units, "
+        "rows and rounds, repeats, and operation order. Translate clear titles, headings, and "
+        "prose. Do not invent missing instructions or silently repair genuinely ambiguous OCR. "
+        "Preserve every opaque __ciurl...__ URL/domain placeholder exactly once, unchanged, and "
+        "within the semantic unit assigned to its source segment. Segments are visual OCR "
+        "fragments with stable IDs; combine only adjacent segments when they form one "
         "instruction. Return JSON only with exactly two object keys: segment_assignments and "
         "semantic_units. Every input source_segment_id must appear exactly once as a key in "
         "segment_assignments. Each value is a semantic unit ID. Multiple adjacent source "
@@ -1490,585 +842,6 @@ def _validate_id_coverage(
             fail()
 
 
-def _arabic_multiset(text: str) -> Counter[str]:
-    return Counter(ARABIC_TOKEN_RE.findall(text))
-
-
-def _identity_duplicate_allowances(
-    source: str,
-    translation: str,
-    config: _RouteConfig,
-) -> Counter[str]:
-    """Allow one equivalent bilingual identity label, never a new identity value."""
-    round_source = Counter(
-        _identity_numbers(source, _source_round_patterns(config))
-    )
-    row_source_patterns = (ROW_EN_RE,) if config.en_us_source else (ROW_CN_RE,)
-    row_source = Counter(_identity_numbers(source, row_source_patterns))
-    chinese_round_pattern = (
-        ROUND_ID_SIMPLIFIED_CN_RE
-        if config.output_mode == SIMPLIFIED_CHINESE_TARGET
-        else ROUND_ID_CN_RE
-    )
-    round_target_families = (
-        ROUND_ID_EN_RE,
-        ROUND_ID_R_RE,
-        chinese_round_pattern,
-    )
-    row_target_families = (ROW_ID_EN_RE, ROW_ID_CN_RE)
-    allowances: Counter[str] = Counter()
-
-    for required, target_families in (
-        (round_source, round_target_families),
-        (row_source, row_target_families),
-    ):
-        for number in required:
-            represented_families = sum(
-                number in _identity_numbers(translation, (pattern,))
-                for pattern in target_families
-            )
-            if represented_families > 1:
-                allowances[number] += represented_families - 1
-    return allowances
-
-
-def _validate_arabic_digit_multiset(
-    source: str,
-    translation: str,
-    config: _RouteConfig,
-) -> bool:
-    source_counts = _arabic_multiset(source)
-    translation_counts = _arabic_multiset(translation)
-    missing = source_counts - translation_counts
-    if missing:
-        ordinal_identity_allowances = _missing_english_ordinal_identity_allowances(
-            source,
-            translation,
-            config,
-        )
-        for digit, allowance in ordinal_identity_allowances.items():
-            if not missing[digit]:
-                continue
-            missing[digit] -= min(missing[digit], allowance)
-            if missing[digit] == 0:
-                del missing[digit]
-    if missing:
-        return False
-
-    extras = translation_counts - source_counts
-    if extras:
-        identity_allowances = _identity_duplicate_allowances(
-            source,
-            translation,
-            config,
-        )
-        for digit, allowance in identity_allowances.items():
-            if not extras[digit]:
-                continue
-            extras[digit] -= min(extras[digit], allowance)
-            if extras[digit] == 0:
-                del extras[digit]
-    if config.en_us_source and extras:
-        for word, digit in ENGLISH_ORDINAL_WORD_TO_DIGIT.items():
-            if not extras[digit]:
-                continue
-            ordinal_allowance = min(
-                len(ENGLISH_ORDINAL_WORD_PATTERNS[word].findall(source)),
-                len(CHINESE_ARABIC_ORDINAL_PATTERNS[digit].findall(translation)),
-            )
-            extras[digit] -= min(extras[digit], ordinal_allowance)
-            if extras[digit] == 0:
-                del extras[digit]
-        for word, digit in ENGLISH_CARDINAL_WORD_TO_DIGIT.items():
-            if not extras[digit]:
-                continue
-            target_count_patterns = (
-                JAPANESE_ARABIC_CROCHET_COUNT_PATTERNS
-                if config.output_mode == JAPANESE_TARGET
-                else CHINESE_ARABIC_CROCHET_COUNT_PATTERNS
-            )
-            cardinal_allowance = min(
-                len(ENGLISH_CARDINAL_CROCHET_COUNT_PATTERNS[word].findall(source)),
-                len(target_count_patterns[digit].findall(translation)),
-            )
-            extras[digit] -= min(extras[digit], cardinal_allowance)
-            if extras[digit] == 0:
-                del extras[digit]
-    if config.source_mode == EN_US_SOURCE and extras["3"]:
-        trio_target_pattern = (
-            TRIO_SIMPLIFIED_DIGIT_RE
-            if config.output_mode == SIMPLIFIED_CHINESE_TARGET
-            else TRIO_TRADITIONAL_DIGIT_RE
-        )
-        trio_allowance = min(
-            len(TRIO_EN_RE.findall(source)),
-            len(trio_target_pattern.findall(translation)),
-        )
-        extras["3"] -= min(extras["3"], trio_allowance)
-        if extras["3"] == 0:
-            del extras["3"]
-    return not extras
-
-
-def _numbers_present(text: str, numbers: Sequence[str]) -> bool:
-    counts = Counter(numbers)
-    available = _arabic_multiset(text)
-    for number, needed in counts.items():
-        if available[number] < needed:
-            return False
-    return True
-
-
-def _identity_numbers(text: str, patterns: Sequence[re.Pattern[str]]) -> List[str]:
-    numbers: List[str] = []
-    for pattern in patterns:
-        for match in pattern.finditer(text):
-            for value in match.groups():
-                if value:
-                    numbers.append(value)
-    return numbers
-
-
-def _english_ordinal_identity_numbers(text: str, identity: str) -> List[str]:
-    numbers: List[str] = []
-    for match in ENGLISH_ORDINAL_IDENTITY_RE.finditer(text):
-        if not match.group("identity").casefold().startswith(identity):
-            continue
-        numbers.append(
-            ENGLISH_ORDINAL_ID_TO_DIGIT[match.group("ordinal").casefold()]
-        )
-    return numbers
-
-
-def _target_identity_numbers(
-    text: str,
-    patterns: Sequence[re.Pattern[str]],
-    config: Optional[_RouteConfig],
-    identity: str,
-) -> List[str]:
-    numbers = _identity_numbers(text, patterns)
-    if config is not None and config.output_mode in {EN_US_TARGET, EN_UK_TARGET}:
-        numbers.extend(_english_ordinal_identity_numbers(text, identity))
-    return numbers
-
-
-def _missing_english_ordinal_identity_allowances(
-    source: str,
-    translation: str,
-    config: _RouteConfig,
-) -> Counter[str]:
-    if config.output_mode not in {EN_US_TARGET, EN_UK_TARGET}:
-        return Counter()
-    allowances: Counter[str] = Counter()
-    for required, present in (
-        (
-            Counter(_identity_numbers(source, _source_round_patterns(config))),
-            Counter(_english_ordinal_identity_numbers(translation, "round")),
-        ),
-        (
-            Counter(_identity_numbers(source, (ROW_CN_RE,))),
-            Counter(_english_ordinal_identity_numbers(translation, "row")),
-        ),
-    ):
-        allowances.update(required & present)
-    return allowances
-
-
-def _source_round_patterns(config: _RouteConfig) -> Tuple[re.Pattern[str], ...]:
-    if config.en_us_source:
-        return (ROUND_EN_RE,)
-    return (ROUND_SC_RE, ROUND_CN_RE, ROUND_SIMPLIFIED_CN_RE)
-
-
-def _target_round_patterns(config: _RouteConfig) -> Tuple[re.Pattern[str], ...]:
-    patterns = (ROUND_ID_EN_RE, ROUND_ID_R_RE, ROUND_ID_CN_RE)
-    if config.output_mode == SIMPLIFIED_CHINESE_TARGET:
-        return (*patterns, ROUND_ID_SIMPLIFIED_CN_RE)
-    if config.output_mode == JAPANESE_TARGET:
-        return (*patterns, ROUND_ID_JA_RE)
-    return patterns
-
-
-def _validate_round_numbers(
-    source: str,
-    translation: str,
-    source_patterns: Sequence[re.Pattern[str]],
-    config: _RouteConfig,
-) -> bool:
-    required = _identity_numbers(source, source_patterns)
-    if not required:
-        return True
-    present = set(
-        _target_identity_numbers(
-            translation,
-            _target_round_patterns(config),
-            config,
-            "round",
-        )
-    )
-    return all(number in present for number in required)
-
-
-def _validate_row_numbers(
-    source: str,
-    translation: str,
-    patterns: Sequence[re.Pattern[str]],
-    config: Optional[_RouteConfig] = None,
-) -> bool:
-    required = _identity_numbers(source, patterns)
-    if not required:
-        return True
-    present = set(
-        _target_identity_numbers(
-            translation,
-            (ROW_ID_EN_RE, ROW_ID_CN_RE, ROW_ID_JA_RE, ROUND_ID_R_RE),
-            config,
-            "row",
-        )
-    )
-    return all(number in present for number in required)
-
-
-def _validate_totals(source: str, translation: str) -> bool:
-    totals: List[str] = []
-    totals.extend(TOTAL_EQUALS_RE.findall(source))
-    totals.extend(TOTAL_PAREN_END_RE.findall(source))
-    totals.extend(TOTAL_CN_RE.findall(source))
-    if totals and not _numbers_present(translation, totals):
-        return False
-    return True
-
-
-def _repeat_multipliers(
-    text: str,
-    patterns: Sequence[re.Pattern[str]],
-) -> List[str]:
-    return _identity_numbers(text, patterns)
-
-
-def _validate_repeats(
-    source: str,
-    translation: str,
-    config: _RouteConfig,
-) -> bool:
-    strict_repeat_markers = config.en_us_source
-    source_patterns = (
-        (REPEAT_PREFIX_RE, REPEAT_SUFFIX_RE)
-        if strict_repeat_markers
-        else (REPEAT_PREFIX_RE,)
-    )
-    multipliers = _repeat_multipliers(source, source_patterns)
-    if not multipliers:
-        return True
-    if not strict_repeat_markers:
-        return _numbers_present(translation, multipliers)
-    present = Counter(
-        _repeat_multipliers(
-            translation,
-            (REPEAT_PREFIX_RE, REPEAT_SUFFIX_RE, REPEAT_CHINESE_RE),
-        )
-    )
-    return not (Counter(multipliers) - present)
-
-
-def _measurement_fact_present(
-    translation: str,
-    number: str,
-    canonical_unit: str,
-    config: _RouteConfig,
-) -> bool:
-    aliases = MEASUREMENT_TARGET_ALIASES[config.output_mode][canonical_unit]
-    unit_pattern = "|".join(
-        rf"{re.escape(alias)}(?![A-Za-z])" if alias.isascii() else re.escape(alias)
-        for alias in sorted(aliases, key=len, reverse=True)
-    )
-    return bool(
-        re.search(
-            rf"(?<!\d){re.escape(number)}(?!\d)\s*(?:{unit_pattern})",
-            translation,
-            re.IGNORECASE,
-        )
-    )
-
-
-def _validate_measurements(source: str, translation: str, config: _RouteConfig) -> bool:
-    for match in MEASURE_RE.finditer(source):
-        number, unit = match.group(1), match.group(2).lower()
-        if not _numbers_present(translation, [number]):
-            return False
-        canonical_unit = MEASUREMENT_UNIT_CANONICAL[unit]
-        if not _measurement_fact_present(translation, number, canonical_unit, config):
-            return False
-    return True
-
-
-def _canonical_stitch_concept_id(concept_id: str) -> str:
-    if concept_id == _TURNING_CHAIN_CONCEPT_ID:
-        return _CHAIN_CONCEPT_ID
-    return concept_id
-
-
-def _strict_glossary_match_counts(
-    text: str,
-    config: _RouteConfig,
-    terms: Sequence[Dict[str, Any]],
-    *,
-    source_side: bool,
-) -> Dict[str, int]:
-    """Count authoritative stitch concepts once using longest non-overlapping forms."""
-    candidates: List[Tuple[int, int, str]] = []
-    for entry in terms:
-        if str(entry.get("category", "")) not in STRICT_GLOSSARY_SEMANTIC_CATEGORIES:
-            continue
-        concept_id = _canonical_stitch_concept_id(str(entry.get("concept_id", "")))
-        if source_side:
-            primary, secondary = _source_glossary_forms(entry, config)
-            forms = [*primary, *secondary]
-        else:
-            forms = _target_glossary_forms(entry, config)
-        for form in forms:
-            normalized_form = unicodedata.normalize("NFKC", str(form or "")).strip()
-            if source_side and not config.en_us_source and len(normalized_form) == 1:
-                # Single-character aliases such as A, 立, and 環 are ambiguous in
-                # ordinary Chinese headings/prose. Compact X/V/A notation is accounted
-                # for separately, and only when a crochet-row context proves its meaning.
-                continue
-            candidates.extend(
-                (start, end, concept_id)
-                for start, end in _form_match_spans(
-                    text,
-                    form,
-                    allow_english_plural=(
-                        not source_side
-                        and config.output_mode in {EN_US_TARGET, EN_UK_TARGET}
-                    ),
-                )
-            )
-
-    if source_side and not config.en_us_source:
-        # Traditional/Simplified notation uses 立N鎖針 and 立N針 for one numbered
-        # chain instruction. Treat the complete construction atomically so 立 and
-        # 鎖針 are not demanded as two separate stitch concepts.
-        candidates.extend(
-            (match.start(), match.end(), _CHAIN_CONCEPT_ID)
-            for match in _CHINESE_NUMBERED_CHAIN_RE.finditer(text)
-        )
-        # 引拔 is a common compact spelling of the authoritative 引拔針 concept.
-        candidates.extend(
-            (match.start(), match.end(), _SLIP_STITCH_CONCEPT_ID)
-            for match in _CHINESE_SHORT_SLIP_STITCH_RE.finditer(text)
-        )
-
-    occupied: List[Tuple[int, int]] = []
-    counts: Counter[str] = Counter()
-    for start, end, concept_id in sorted(
-        set(candidates),
-        key=lambda item: (-(item[1] - item[0]), item[0], item[2]),
-    ):
-        if any(start < used_end and used_start < end for used_start, used_end in occupied):
-            continue
-        occupied.append((start, end))
-        counts[concept_id] += 1
-    return dict(counts)
-
-
-def _strict_glossary_semantic_counts(
-    source: str,
-    translation: str,
-    config: _RouteConfig,
-    terms: Sequence[Dict[str, Any]],
-) -> Tuple[Dict[str, int], Dict[str, int]]:
-    required = _strict_glossary_match_counts(
-        source,
-        config,
-        terms,
-        source_side=True,
-    )
-    present = _strict_glossary_match_counts(
-        translation,
-        config,
-        terms,
-        source_side=False,
-    )
-    compact_required = _compact_chinese_stitch_counts(source, config)
-    if compact_required:
-        compact_present = _compact_english_stitch_counts(
-            translation,
-            config.output_mode,
-        )
-        for symbol, concept_id in COMPACT_CHINESE_STITCH_CONCEPTS.items():
-            expected = compact_required.get(symbol, 0)
-            observed = compact_present.get(symbol, 0)
-            if expected or observed:
-                required[concept_id] = expected
-                present[concept_id] = observed
-    return required, present
-
-
-def _compact_chinese_stitch_counts(
-    source: str,
-    config: _RouteConfig,
-) -> Dict[str, int]:
-    """Count X/V/A only in compact Chinese crochet-row context."""
-    if config.en_us_source or config.output_mode not in {EN_US_TARGET, EN_UK_TARGET}:
-        return {}
-    normalized = unicodedata.normalize("NFKC", str(source or ""))
-    has_row_context = bool(
-        re.search(r"(?i)(?<![A-Za-z])R\s*\d+", normalized)
-        or re.search(r"\d\s*[XVA](?![A-Za-z])", normalized)
-    )
-    if not has_row_context:
-        return {}
-    counts: Counter[str] = Counter()
-    for match in re.finditer(r"(?<![A-Za-z])([XVA])(?![A-Za-z])", normalized):
-        counts[match.group(1).lower()] += 1
-    return dict(counts)
-
-
-def _compact_english_stitch_counts(
-    translation: str,
-    output_mode: str = EN_US_TARGET,
-) -> Dict[str, int]:
-    """Count sc/inc/dec semantics, preferring compound surface forms atomically."""
-    text = unicodedata.normalize("NFKC", str(translation or ""))
-    base_stitch = (
-        r"(?:double\s+crochets?|dc)"
-        if output_mode == EN_UK_TARGET
-        else r"(?:single\s+crochets?|sc)"
-    )
-    token_patterns = (
-        (
-            "v",
-            re.compile(
-                rf"(?<![A-Za-z]){base_stitch}\s+"
-                r"(?:increase(?:s)?|inc|incr)(?![A-Za-z])",
-                re.IGNORECASE,
-            ),
-        ),
-        (
-            "a",
-            re.compile(
-                rf"(?<![A-Za-z]){base_stitch}\s+"
-                r"(?:decrease(?:s)?|dec|decr)(?![A-Za-z])",
-                re.IGNORECASE,
-            ),
-        ),
-        (
-            "x",
-            re.compile(
-                rf"(?<![A-Za-z]){base_stitch}(?![A-Za-z])",
-                re.IGNORECASE,
-            ),
-        ),
-        (
-            "v",
-            re.compile(
-                r"(?<![A-Za-z])(?:increase(?:s)?|inc|incr)(?![A-Za-z])",
-                re.IGNORECASE,
-            ),
-        ),
-        (
-            "a",
-            re.compile(
-                r"(?<![A-Za-z])(?:decrease(?:s)?|dec|decr)(?![A-Za-z])",
-                re.IGNORECASE,
-            ),
-        ),
-    )
-    candidates: List[Tuple[int, int, str]] = []
-    for symbol, pattern in token_patterns:
-        candidates.extend(
-            (match.start(), match.end(), symbol) for match in pattern.finditer(text)
-        )
-    occupied: List[Tuple[int, int]] = []
-    counts: Counter[str] = Counter()
-    for start, end, symbol in sorted(
-        candidates,
-        key=lambda item: (-(item[1] - item[0]), item[0], item[2]),
-    ):
-        if any(start < used_end and used_start < end for used_start, used_end in occupied):
-            continue
-        occupied.append((start, end))
-        counts[symbol] += 1
-    return dict(counts)
-
-
-def _validate_strict_glossary_semantics(
-    source: str,
-    translation: str,
-    config: _RouteConfig,
-    terms: Sequence[Dict[str, Any]],
-) -> bool:
-    required, present = _strict_glossary_semantic_counts(
-        source,
-        translation,
-        config,
-        terms,
-    )
-    if not required:
-        # Do not classify ordinary translated prose as an invented stitch merely
-        # because a target-language word overlaps a glossary surface form.
-        return True
-    return required == present
-
-
-def _color_change_counts(
-    source: str,
-    translation: str,
-    config: _RouteConfig,
-) -> Tuple[int, int]:
-    if not config.en_us_source:
-        return 0, 0
-    required = len(ENGLISH_COLOR_CHANGE_RE.findall(source))
-    if config.output_mode in {EN_US_TARGET, EN_UK_TARGET}:
-        present = len(ENGLISH_COLOR_CHANGE_RE.findall(translation))
-    elif config.output_mode == JAPANESE_TARGET:
-        present = len(JAPANESE_COLOR_CHANGE_RE.findall(translation))
-    else:
-        # Some valid Chinese crochet notation retains CC alongside a translated
-        # change verb. Count either notation family, not both in the same output.
-        present = max(
-            len(CHINESE_COLOR_CHANGE_RE.findall(translation)),
-            len(ENGLISH_COLOR_CHANGE_RE.findall(translation)),
-        )
-    return required, present
-
-
-def _english_color_change_operations(text: str) -> List[str]:
-    return [
-        _ENGLISH_COLOR_TO_ID[match.group("color").casefold()]
-        for match in ENGLISH_COLOR_CHANGE_OPERATION_RE.finditer(text)
-    ]
-
-
-def _japanese_color_change_operations(text: str) -> List[str]:
-    operations = [
-        (match.start(), _JAPANESE_COLOR_TO_ID[match.group("color")])
-        for pattern in (
-            JAPANESE_COLOR_CHANGE_OPERATION_RE,
-            JAPANESE_PREFIX_COLOR_CHANGE_OPERATION_RE,
-        )
-        for match in pattern.finditer(text)
-    ]
-    return [color_id for _start, color_id in sorted(operations)]
-
-
-def _validate_color_changes(
-    source: str,
-    translation: str,
-    config: _RouteConfig,
-) -> bool:
-    if config.en_us_source and config.output_mode == JAPANESE_TARGET:
-        required_operations = _english_color_change_operations(source)
-        if required_operations:
-            # Compare semantic colour targets in order. This preserves repeated
-            # changes such as white -> dark grey -> white -> dark grey and rejects
-            # dropped, invented, substituted, or reordered operations.
-            return required_operations == _japanese_color_change_operations(translation)
-    required, present = _color_change_counts(source, translation, config)
-    return required == present
-
-
 def _url_domain_counts(text: str) -> Counter[str]:
     return Counter(
         identity
@@ -2082,263 +855,6 @@ def _validate_url_domains(source: str, translation: str) -> bool:
     return _url_domain_counts(translation) == _url_domain_counts(source)
 
 
-def _japanese_residual_english_tokens(
-    translation: str,
-    terms: Sequence[Dict[str, Any]],
-) -> List[str]:
-    protected, _replacements = terminology.protect_url_domains(translation)
-    protected = terminology.URL_PLACEHOLDER_RE.sub(" ", protected)
-    protected = HANDLE_RE.sub(" ", protected)
-    protected = re.sub(r"(?<=\d)\s*in\b", " ", protected, flags=re.IGNORECASE)
-    japanese_config = _ROUTE_CONFIGS[(EN_US_SOURCE, JAPANESE_TARGET)]
-    for entry in terms:
-        for form in _target_glossary_forms(entry, japanese_config):
-            if not form.isascii():
-                continue
-            protected = re.sub(
-                rf"(?<![A-Za-z0-9]){re.escape(form)}(?![A-Za-z0-9])",
-                " ",
-                protected,
-                flags=re.IGNORECASE,
-            )
-    residual: List[str] = []
-    for match in JAPANESE_RESIDUAL_LATIN_TOKEN_RE.finditer(protected):
-        token = match.group(1)
-        if token.casefold() in JAPANESE_ALLOWED_LATIN_TOKENS:
-            continue
-        residual.append(token)
-    return residual
-
-
-def _digit_multiset_fields(source: str, translation: str) -> Dict[str, object]:
-    source_counts = _arabic_multiset(source)
-    translation_counts = _arabic_multiset(translation)
-    return {
-        "source_digit_multiset": dict(sorted(source_counts.items())),
-        "translation_digit_multiset": dict(sorted(translation_counts.items())),
-        "missing_digits": list((source_counts - translation_counts).elements()),
-        "extra_digits": list((translation_counts - source_counts).elements()),
-    }
-
-
-def _round_identity_fields(
-    source: str,
-    translation: str,
-    source_patterns: Sequence[re.Pattern[str]],
-    target_patterns: Sequence[re.Pattern[str]],
-    config: Optional[_RouteConfig] = None,
-) -> Dict[str, object]:
-    required = _identity_numbers(source, source_patterns)
-    present = sorted(
-        set(
-            _target_identity_numbers(
-                translation,
-                target_patterns,
-                config,
-                "round",
-            )
-        )
-    )
-    return {
-        "required_round_identities": required,
-        "present_round_identities": present,
-        "missing_round_identities": [number for number in required if number not in present],
-    }
-
-
-def _row_identity_fields(
-    source: str,
-    translation: str,
-    source_patterns: Sequence[re.Pattern[str]],
-    config: Optional[_RouteConfig] = None,
-) -> Dict[str, object]:
-    required = _identity_numbers(source, source_patterns)
-    present = sorted(
-        set(
-            _target_identity_numbers(
-                translation,
-                (ROW_ID_EN_RE, ROW_ID_CN_RE, ROW_ID_JA_RE, ROUND_ID_R_RE),
-                config,
-                "row",
-            )
-        )
-    )
-    return {
-        "required_row_identities": required,
-        "present_row_identities": present,
-        "missing_row_identities": [number for number in required if number not in present],
-    }
-
-
-def _total_fields(source: str, translation: str) -> Dict[str, object]:
-    totals: List[str] = []
-    totals.extend(TOTAL_EQUALS_RE.findall(source))
-    totals.extend(TOTAL_PAREN_END_RE.findall(source))
-    totals.extend(TOTAL_CN_RE.findall(source))
-    required = Counter(totals)
-    available = _arabic_multiset(translation)
-    missing: List[str] = []
-    for total, needed in required.items():
-        if available[total] < needed:
-            missing.extend([total] * (needed - available[total]))
-    return {
-        "required_totals": totals,
-        "missing_totals": missing,
-    }
-
-
-def _repeat_fields(
-    source: str,
-    translation: str,
-    config: _RouteConfig,
-) -> Dict[str, object]:
-    strict_repeat_markers = config.en_us_source
-    source_patterns = (
-        (REPEAT_PREFIX_RE, REPEAT_SUFFIX_RE)
-        if strict_repeat_markers
-        else (REPEAT_PREFIX_RE,)
-    )
-    multipliers = _repeat_multipliers(source, source_patterns)
-    if strict_repeat_markers:
-        present = _repeat_multipliers(
-            translation,
-            (REPEAT_PREFIX_RE, REPEAT_SUFFIX_RE, REPEAT_CHINESE_RE),
-        )
-        missing = list((Counter(multipliers) - Counter(present)).elements())
-    else:
-        present = list(_arabic_multiset(translation).elements())
-        missing = list((Counter(multipliers) - Counter(present)).elements())
-    return {
-        "required_repeat_multipliers": multipliers,
-        "present_repeat_multipliers": present,
-        "missing_repeat_multipliers": missing,
-    }
-
-
-def _measurement_fields(
-    source: str,
-    translation: str,
-    config: _RouteConfig,
-) -> Dict[str, object]:
-    measurements: List[Dict[str, str]] = []
-    for match in MEASURE_RE.finditer(source):
-        measurements.append(
-            {
-                "number": match.group(1),
-                "unit": match.group(2).lower(),
-            }
-        )
-    for match in MEASURE_RE.finditer(source):
-        number, unit = match.group(1), match.group(2).lower()
-        if not _numbers_present(translation, [number]):
-            return {
-                "measurement_facts": measurements,
-                "failed_measurement_number": number,
-                "failed_measurement_unit": unit,
-                "measurement_failure": "number_missing",
-            }
-        canonical_unit = MEASUREMENT_UNIT_CANONICAL[unit]
-        if canonical_unit == "cm":
-            if _measurement_fact_present(translation, number, "inch", config):
-                return {
-                    "measurement_facts": measurements,
-                    "failed_measurement_number": number,
-                    "failed_measurement_unit": unit,
-                    "measurement_failure": "unit_substituted_to_inch",
-                }
-        if not _measurement_fact_present(translation, number, canonical_unit, config):
-            return {
-                "measurement_facts": measurements,
-                "failed_measurement_number": number,
-                "failed_measurement_unit": unit,
-                "measurement_failure": "unit_marker_missing",
-            }
-    return {"measurement_facts": measurements}
-
-
-def _objective_validation_failure_fields(
-    source: str,
-    translation: str,
-    config: _RouteConfig,
-    failed_rule: str,
-    terms: Sequence[Dict[str, Any]] = (),
-    strict_terms: Optional[Sequence[Dict[str, Any]]] = None,
-) -> Dict[str, object]:
-    fields: Dict[str, object] = {"failed_rule": failed_rule}
-    if failed_rule == "arabic_digit_multiset":
-        fields.update(_digit_multiset_fields(source, translation))
-    elif failed_rule == "round_identity":
-        source_patterns = _source_round_patterns(config)
-        fields.update(
-            _round_identity_fields(
-                source,
-                translation,
-                source_patterns,
-                _target_round_patterns(config),
-                config,
-            )
-        )
-    elif failed_rule == "row_identity":
-        source_patterns = (ROW_EN_RE,) if config.en_us_source else (ROW_CN_RE,)
-        fields.update(
-            _row_identity_fields(source, translation, source_patterns, config)
-        )
-    elif failed_rule == "stitch_totals":
-        fields.update(_total_fields(source, translation))
-    elif failed_rule == "repeat_multiplier":
-        fields.update(_repeat_fields(source, translation, config))
-    elif failed_rule == "measurement_units":
-        fields.update(_measurement_fields(source, translation, config))
-    elif failed_rule == "stitch_terminology":
-        required, present = _strict_glossary_semantic_counts(
-            source,
-            translation,
-            config,
-            strict_terms if strict_terms is not None else terms,
-        )
-        fields.update(
-            {
-                "required_stitch_concept_counts": required,
-                "present_stitch_concept_counts": present,
-                "mismatched_stitch_concept_ids": [
-                    concept_id
-                    for concept_id in sorted(set(required) | set(present))
-                    if present.get(concept_id, 0) != required.get(concept_id, 0)
-                ],
-            }
-        )
-    elif failed_rule == "color_change_count":
-        required, present = _color_change_counts(source, translation, config)
-        fields.update(
-            {
-                "required_color_change_count": required,
-                "present_color_change_count": present,
-            }
-        )
-        if config.en_us_source and config.output_mode == JAPANESE_TARGET:
-            fields["required_color_change_operations"] = (
-                _english_color_change_operations(source)
-            )
-            fields["present_color_change_operations"] = (
-                _japanese_color_change_operations(translation)
-            )
-    elif failed_rule == "protected_url_or_domain":
-        fields.update(
-            {
-                "required_url_or_domains": list(_url_domain_counts(source).elements()),
-                "present_url_or_domains": list(
-                    _url_domain_counts(translation).elements()
-                ),
-            }
-        )
-    elif failed_rule == "residual_source_language":
-        fields["residual_source_tokens"] = _japanese_residual_english_tokens(
-            translation,
-            terms,
-        )
-    return fields
-
-
 def _validation_diagnostic_excerpt(text: str) -> Tuple[str, bool]:
     compact = re.sub(r"\s+", " ", text).strip()
     if len(compact) <= VALIDATION_DIAGNOSTIC_EXCERPT_CHARS:
@@ -2346,79 +862,58 @@ def _validation_diagnostic_excerpt(text: str) -> Tuple[str, bool]:
     return compact[:VALIDATION_DIAGNOSTIC_EXCERPT_CHARS] + "…", True
 
 
-def _validate_objective_facts(
+def _unit_integrity_failure_fields(
     source: str,
     translation: str,
-    config: _RouteConfig,
+    failed_rule: str,
+    source_segment_ids: Optional[Sequence[str]] = None,
+) -> Dict[str, object]:
+    source_excerpt, source_truncated = _validation_diagnostic_excerpt(source)
+    translation_excerpt, translation_truncated = _validation_diagnostic_excerpt(
+        translation
+    )
+    fields: Dict[str, object] = {
+        "failed_rule": failed_rule,
+        "failed_source_excerpt": source_excerpt,
+        "failed_translation_excerpt": translation_excerpt,
+        "failed_source_excerpt_truncated": source_truncated,
+        "failed_translation_excerpt_truncated": translation_truncated,
+    }
+    if source_segment_ids is not None:
+        fields["source_segment_ids"] = list(source_segment_ids)
+    if failed_rule == "protected_url_or_domain":
+        fields["required_url_or_domains"] = list(
+            _url_domain_counts(source).elements()
+        )
+        fields["present_url_or_domains"] = list(
+            _url_domain_counts(translation).elements()
+        )
+    return fields
+
+
+def _validate_unit_integrity(
+    source: str,
+    translation: str,
     *,
     diagnostic_logger: Optional[DiagnosticLogger] = None,
     source_segment_ids: Optional[Sequence[str]] = None,
-    terms: Sequence[Dict[str, Any]] = (),
-    strict_terms: Optional[Sequence[Dict[str, Any]]] = None,
 ) -> None:
-    def fail(failed_rule: str) -> None:
-        fields = _objective_validation_failure_fields(
-            source,
-            translation,
-            config,
-            failed_rule,
-            terms,
-            strict_terms,
-        )
-        source_excerpt, source_truncated = _validation_diagnostic_excerpt(source)
-        translation_excerpt, translation_truncated = _validation_diagnostic_excerpt(translation)
-        fields["failed_source_excerpt"] = source_excerpt
-        fields["failed_translation_excerpt"] = translation_excerpt
-        fields["failed_source_excerpt_truncated"] = source_truncated
-        fields["failed_translation_excerpt_truncated"] = translation_truncated
-        if source_segment_ids is not None:
-            fields["source_segment_ids"] = list(source_segment_ids)
-        _log(diagnostic_logger, "objective_validation_failed", **fields)
-        raise _ObjectiveValidationError(failed_rule, fields)
-
+    failed_rule = ""
     if not translation.strip():
-        fail("blank_translation")
-    if not _validate_url_domains(source, translation):
-        fail("protected_url_or_domain")
-    if not _validate_arabic_digit_multiset(source, translation, config):
-        fail("arabic_digit_multiset")
+        failed_rule = "blank_translation"
+    elif not _validate_url_domains(source, translation):
+        failed_rule = "protected_url_or_domain"
+    if not failed_rule:
+        return
 
-    if config.en_us_source:
-        if not _validate_round_numbers(source, translation, (ROUND_EN_RE,), config):
-            fail("round_identity")
-        if not _validate_row_numbers(source, translation, (ROW_EN_RE,), config):
-            fail("row_identity")
-    else:
-        if not _validate_round_numbers(
-            source,
-            translation,
-            _source_round_patterns(config),
-            config,
-        ):
-            fail("round_identity")
-        if not _validate_row_numbers(source, translation, (ROW_CN_RE,), config):
-            fail("row_identity")
-
-    if not _validate_totals(source, translation):
-        fail("stitch_totals")
-    if not _validate_repeats(source, translation, config):
-        fail("repeat_multiplier")
-    if not _validate_measurements(source, translation, config):
-        fail("measurement_units")
-    if not _validate_strict_glossary_semantics(
+    fields = _unit_integrity_failure_fields(
         source,
         translation,
-        config,
-        strict_terms if strict_terms is not None else terms,
-    ):
-        fail("stitch_terminology")
-    if not _validate_color_changes(source, translation, config):
-        fail("color_change_count")
-    if (
-        config.output_mode == JAPANESE_TARGET
-        and _japanese_residual_english_tokens(translation, terms)
-    ):
-        fail("residual_source_language")
+        failed_rule,
+        source_segment_ids,
+    )
+    _log(diagnostic_logger, "unit_integrity_validation_failed", **fields)
+    raise _UnitIntegrityError(failed_rule, fields)
 
 
 def validate_semantic_units(
@@ -2428,37 +923,22 @@ def validate_semantic_units(
     diagnostic_logger: Optional[DiagnosticLogger] = None,
     terms: Optional[Sequence[Dict[str, Any]]] = None,
 ) -> None:
-    route_terms = build_glossary(config.source_mode, config.output_mode)
-    selected_terms = (
-        list(terms)
-        if terms is not None
-        else select_request_glossary(
-            route_terms,
-            segments,
-            config,
-        )
-    )
+    del config, terms
     expected_ids = [segment["source_segment_id"] for segment in segments]
     _validate_id_coverage(units, expected_ids, diagnostic_logger=diagnostic_logger)
-    source_by_id = {segment["source_segment_id"]: segment["text"] for segment in segments}
+    source_by_id = {
+        segment["source_segment_id"]: segment["text"] for segment in segments
+    }
     for unit in units:
-        source = "\n".join(source_by_id[item] for item in unit["source_segment_ids"])
-        _validate_objective_facts(
+        source = "\n".join(
+            source_by_id[item] for item in unit["source_segment_ids"]
+        )
+        _validate_unit_integrity(
             source,
             unit["translation"],
-            config,
             diagnostic_logger=diagnostic_logger,
             source_segment_ids=unit["source_segment_ids"],
-            terms=selected_terms,
-            strict_terms=route_terms,
         )
-
-
-def _unresolved_translation(source: str, config: _RouteConfig) -> str:
-    prefix = _UNRESOLVED_WARNING_PREFIX_BY_TARGET.get(config.output_mode)
-    if prefix is None:
-        raise BroadTranslationError()
-    return prefix + source
 
 
 def request_warning_for_target(output_mode: str) -> str:
@@ -2469,36 +949,19 @@ def request_warning_for_target(output_mode: str) -> str:
     )
 
 
-def _resolve_objective_validation_failures(
+def _resolve_unit_integrity_failures(
     units: Sequence[dict[str, Any]],
     segments: Sequence[Dict[str, str]],
-    config: _RouteConfig,
     diagnostic_logger: Optional[DiagnosticLogger] = None,
-    terms: Optional[Sequence[Dict[str, Any]]] = None,
-    strict_terms: Optional[Sequence[Dict[str, Any]]] = None,
 ) -> Tuple[List[dict[str, Any]], int]:
-    """Fail closed per trusted unit while keeping structural failures request-fatal."""
+    """Preserve source only for blank or protected-literal-corrupt units."""
     expected_ids = [segment["source_segment_id"] for segment in segments]
     _validate_id_coverage(units, expected_ids, diagnostic_logger=diagnostic_logger)
     source_by_id = {
         segment["source_segment_id"]: segment["text"] for segment in segments
     }
     resolved_units: List[dict[str, Any]] = []
-    failures: List[_ObjectiveValidationError] = []
-    selected_terms = (
-        list(terms)
-        if terms is not None
-        else select_request_glossary(
-            build_glossary(config.source_mode, config.output_mode),
-            segments,
-            config,
-        )
-    )
-    route_terms = (
-        list(strict_terms)
-        if strict_terms is not None
-        else build_glossary(config.source_mode, config.output_mode)
-    )
+    failures: List[_UnitIntegrityError] = []
 
     for unit in units:
         resolved = dict(unit)
@@ -2506,18 +969,15 @@ def _resolve_objective_validation_failures(
             source_by_id[source_id] for source_id in unit["source_segment_ids"]
         )
         try:
-            _validate_objective_facts(
+            _validate_unit_integrity(
                 source,
                 unit["translation"],
-                config,
                 diagnostic_logger=diagnostic_logger,
                 source_segment_ids=unit["source_segment_ids"],
-                terms=selected_terms,
-                strict_terms=route_terms,
             )
-        except _ObjectiveValidationError as error:
+        except _UnitIntegrityError as error:
             failures.append(error)
-            resolved["translation"] = _unresolved_translation(source, config)
+            resolved["translation"] = source
             resolved["validation_status"] = "unresolved"
             resolved["validation_failure_reason"] = error.failed_rule
         else:
@@ -2529,12 +989,12 @@ def _resolve_objective_validation_failures(
         _log(
             diagnostic_logger,
             (
-                "all_units_validation_failed"
+                "all_units_integrity_failed"
                 if len(failures) == len(resolved_units)
-                else "partial_validation_failure"
+                else "partial_unit_integrity_failure"
             ),
-            partial_validation_failure=True,
-            all_units_validation_failed=len(failures) == len(resolved_units),
+            partial_unit_integrity_failure=True,
+            all_units_integrity_failed=len(failures) == len(resolved_units),
             **error.diagnostic_fields,
         )
 
@@ -2823,17 +1283,17 @@ def translate_merged_ocr_lines_broad(
         _protect_segment_url_domains(segments)
     )
 
-    route_terms = build_glossary(source_mode, output_mode)
-    terms = select_request_glossary(route_terms, segments, config)
+    terms = build_glossary(source_mode, output_mode)
+    prompt = build_prompt(protected_segments, terms, config)
     _log(
         diagnostic_logger,
         "broad_glossary_scope",
-        route_glossary_entry_count=len(route_terms),
-        scoped_glossary_entry_count=len(terms),
-        route_glossary_char_count=_glossary_char_count(route_terms),
-        scoped_glossary_char_count=_glossary_char_count(terms),
+        route_glossary_entry_count=len(terms),
+        request_glossary_entry_count=len(terms),
+        route_glossary_char_count=_glossary_char_count(terms),
+        request_glossary_char_count=_glossary_char_count(terms),
+        prompt_char_count=len(prompt),
     )
-    prompt = build_prompt(protected_segments, terms, config)
     api_key = _resolve_api_key(environ)
     caller = luna_caller or call_luna_once
 
@@ -2932,6 +1392,14 @@ def translate_merged_ocr_lines_broad(
                 raw_units,
                 url_replacements_by_segment,
             )
+            if not any(unit["translation"].strip() for unit in units):
+                raise _BroadResponseParsingError(
+                    "semantic_unit_schema",
+                    "all_translations_blank",
+                    expected_top_level_shape=KEYED_RESPONSE_SHAPE,
+                    actual_top_level_json_type="object",
+                    semantic_unit_count=len(units),
+                )
         except _BroadResponseParsingError as error:
             elapsed_seconds = time.perf_counter() - luna_start
             _log_response_parsing_failure(
@@ -2979,13 +1447,10 @@ def translate_merged_ocr_lines_broad(
             ) from None
 
         processed_units = units
-        units, partial_failure_count = _resolve_objective_validation_failures(
+        units, partial_failure_count = _resolve_unit_integrity_failures(
             units,
             segments,
-            config,
             diagnostic_logger=diagnostic_logger,
-            terms=terms,
-            strict_terms=route_terms,
         )
         result = adapt_semantic_units_to_line_df(units, segments, segment_rows)
         if debug_capture_enabled:
@@ -3008,8 +1473,8 @@ def translate_merged_ocr_lines_broad(
             model=BROAD_MODEL,
             route="broad",
             outcome="partial_success" if partial_failure_count else "success",
-            partial_validation_failure_count=partial_failure_count,
-            all_units_validation_failed=all_units_invalid,
+            partial_unit_integrity_failure_count=partial_failure_count,
+            all_units_integrity_failed=all_units_invalid,
             retry_scheduled=False,
         )
         _log(
@@ -3018,8 +1483,8 @@ def translate_merged_ocr_lines_broad(
             elapsed_seconds=time.perf_counter() - broad_start,
             visual_line_count=len(result),
             outcome="partial_success" if partial_failure_count else "success",
-            partial_validation_failure_count=partial_failure_count,
-            all_units_validation_failed=all_units_invalid,
+            partial_unit_integrity_failure_count=partial_failure_count,
+            all_units_integrity_failed=all_units_invalid,
         )
         return result
 

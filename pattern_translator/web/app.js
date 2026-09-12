@@ -1,6 +1,6 @@
 import { displayBoxToImage, normalizedCropBox, readExifOrientation, resizeCropBox } from "/static/crop_coordinates.js";
 import { modeLabelFor, resolveUiLang, stringsFor } from "/static/translations.js";
-import { MODE_VALUES, adaptApiError, applyQualityResponse, beginTranslation, canTranslate, confirmPoorQuality, diagnosticFilename, discardCompletedResult, forceRunForCurrentQuality, hasCurrentQuality, invalidateQuality, invalidateRequest, isCurrentDiagnosticRequest, isCurrentImage, isCurrentQualityRequest, isCurrentRequest, isValidQualityResponse, isValidTranslationResponse, postDiagnosticReport, qualityFormEntries, qualityIdentity, restartCropWorkflow, translationFormEntries, validateImageFile } from "/static/workflow_state.js";
+import { MODE_VALUES, adaptApiError, applyQualityResponse, beginTranslation, canTranslate, confirmPoorQuality, diagnosticFilename, discardCompletedResult, forceRunForCurrentQuality, hasCurrentQuality, invalidateQuality, invalidateRequest, isCurrentDiagnosticRequest, isCurrentImage, isCurrentQualityRequest, isCurrentRequest, isValidQualityResponse, isValidTranslationResponse, japaneseSourceBetaNotice, languageSelectionMessage, postDiagnosticReport, qualityFormEntries, qualityIdentity, restartCropWorkflow, translationFormEntries, validateImageFile } from "/static/workflow_state.js";
 
 const MAX_BYTES = 25 * 1024 * 1024;
 const state = {
@@ -141,8 +141,10 @@ function renderWorkflow() {
 
 function renderHints() {
   const hintFor = (mode, us, uk) => mode === "English — US" ? text[us] : mode === "English — UK" ? text[uk] : "";
-  const sourceHint = hintFor(state.source, "sourceHintUs", "sourceHintUk");
-  const targetHint = hintFor(state.target, "targetHintUs", "targetHintUk");
+  const sourceHint = japaneseSourceBetaNotice(state, text)
+    || hintFor(state.source, "sourceHintUs", "sourceHintUk");
+  const targetHint = languageSelectionMessage(state, text)
+    || hintFor(state.target, "targetHintUs", "targetHintUk");
   $("source-hint").textContent = sourceHint;
   $("source-hint").hidden = !sourceHint;
   $("target-hint").textContent = targetHint;

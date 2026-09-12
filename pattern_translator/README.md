@@ -2,9 +2,7 @@
 
 Mobile-first OCR translation for crochet pattern images.
 
-Current production baseline: `96dd8034b6d70433f848568ec9d34aabd113e334` (`Fix dense overlay placement and page metadata handling`)
-
-The deployed shadow classifier remains observational: `PATTERN_LUNA_TITLE_PRIMARY_ENABLED` is unset/OFF in production. Later title-primary and translation-architecture experiments are local research only and are not committed, deployed, or enabled in Railway. See `pattern_translator/PROJECT_STATUS.md` for the current production/paused-research/next-prototype distinction.
+Current deployed production baseline: `96dd8034b6d70433f848568ec9d34aabd113e334` (`Fix dense overlay placement and page metadata handling`). The 20-route Luna-primary Broad release described below is Human-UAT validated in the local working tree but is not yet committed or deployed.
 
 Production application entry point:
 
@@ -14,13 +12,21 @@ pattern_translator.api:app
 
 Preserved Streamlit rollback entry point: `pattern_translator/app.py`.
 
-## Production Closeout — 2026-09-11
+Local FastAPI/browser command:
 
-Railway production is running `96dd8034b6d70433f848568ec9d34aabd113e334`. Deployment succeeded, `/health` returned `{"status":"ok"}`, and both the health endpoint and public UI returned HTTP 200.
+```bash
+.venv/bin/python -m uvicorn pattern_translator.api:app --host 127.0.0.1 --port 8501 --workers 1
+```
 
-Human UAT approved the source-replacement renderer, source-aware language typography, one-shot post-success result scrolling, previously shipped Broad cross-language corrections, bounded dense-row placement, the subpixel source-anchor correction, Flower short-CJK continuation preservation, and detached page-number handling. Whole Pattern and Select Area remain tested workflows. The source-replacement code default remains OFF; production activation continues to use `PATTERN_SOURCE_REPLACEMENT_OVERLAY_ENABLED=1` in Railway.
+Production URL: `https://pattern.crochetintelligence.com`
 
-Deferred to the next engineering thread: completion of the four-language Broad route matrix; Simplified Chinese → Japanese, Traditional Chinese → Japanese, and Simplified/Traditional Chinese cross-translation; review of Simplified Chinese → English UK architecture; English → Simplified Chinese/Japanese quality work; implicit-number `arabic_digit_multiset` validation; multilingual warning/footer font fallback; provider-call diagnostic visibility; Japanese provider-output variance; and difficult dense/table layout polish. These are not regressions or blockers caused by the Flower page-number correction.
+## Release Finalisation — 2026-09-12
+
+The current local release candidate completes the Luna-primary Broad architecture and all 20 unequal source-to-target routes across English US, English UK, Traditional Chinese, Simplified Chinese, and Japanese. Same-language translation is blocked before OCR/provider work. Japanese source mode shows a non-blocking localized Beta expectation notice; Japanese as target alone does not.
+
+Human UAT approved representative route families, both English-dialect directions, Traditional/Simplified Chinese shorthand preservation, the same-language guard, Japanese-source Beta notice, and the original Simplified Chinese to Japanese renderer failure. The renderer now rejects a bottom-clamped multi-region extra plate unless it can fit glyph height plus padding, allowing the existing safe compound/fallback layout instead of clipping the final line.
+
+This is a release-candidate description, not a deployment claim. Railway remains on the deployed baseline above until a separately approved commit, push, and deployment. The source-replacement code default remains OFF; Railway owns production activation through `PATTERN_SOURCE_REPLACEMENT_OVERLAY_ENABLED=1`.
 
 ## Soft Launch Status — 2026-09-07
 
@@ -56,7 +62,7 @@ Key validated behavior:
 - Core OCR and translation workflow was successfully validated by real crochet users.
 - Overlay translation concept was validated.
 - Google Sheets analytics successfully collected real-world usage data.
-- Broad translation is released for the three production routes documented below; Traditional Chinese to English US and all other routes retain existing Legacy behavior.
+- The local release candidate routes every unequal pair in the five-language matrix through Broad; no same-language route is allowed.
 - Whole Pattern proved more reliable in real-world testing and is now the default workflow.
 - Select Area remains available as an advanced / experimental feature until a future deployment platform improves cropper reliability.
 - RC26 passed local developer validation and Human UAT.
@@ -67,7 +73,7 @@ Key validated behavior:
 - Railway production validation completed successfully.
 - Desktop Human UAT passed on Railway production.
 - Railway Hobby usage during the spike remained suitable for low-volume production: peak RAM approximately 1.84 GB, normal RAM approximately 1.29 GB, and peak CPU approximately 1.39 vCPU.
-- Railway is now the primary production deployment platform. Streamlit Community Cloud remains a backup platform.
+- Railway is the primary production deployment platform. Streamlit is preserved only as rollback/history.
 - RC54 replaced the unreliable `app_open` visitor model with the production-validated shared Plausible analytics baseline.
 - `knowledge_base/data/master_stitches.csv` is the current production database.
 - `stitches_1_8e.csv` is archived as the accepted source snapshot.
@@ -121,7 +127,7 @@ Key validated behavior:
 - Supported formats are JPG, JPEG, PNG, and WebP. The uploader supports all four interface languages, native mobile image selection, desktop drag-and-drop, Replace and Remove, and light and dark modes.
 - The intentional upload limit is 25 MB because Components V1 uses base64 transport. Physical iPhone Safari and Android Chrome Human UAT passed with no functional regression.
 - Unrelated-image/no-crochet-content handling was validated and its message improved.
-- Streamlit remains the runtime and continues to provide session state and component communication.
+- At RC50 closeout, Streamlit still owned runtime and component communication; this is historical. The active frontend is now FastAPI/browser.
 - Phase A Brand Identity Foundation is complete. `Brand identity & UI/UI_SPEC.md` is the authoritative Living Design Specification.
 - RC51 completed the first local Brand Identity implementation. Physical-iPhone Human Visual UAT approved the Home Screen, custom uploader, privacy card, and equal secondary treatment for Replace and Remove as the current baseline. OCR, translation, overlay, diagnostics, analytics, exports, engines, and workflows are unchanged.
 - The selected radio state uses Streamlit's supported Primary Teal theme setting, and the top-right menu uses supported minimal-toolbar configuration.
@@ -130,47 +136,21 @@ Key validated behavior:
 
 Final 2026-09-07 release closeout passed the complete Portal → Pattern Translator → Stitch Translator walkthrough, shared Plausible verification, and a three-browser Pattern Translator concurrency smoke test. All three near-simultaneous translation requests completed successfully within 20 seconds. **Soft Launch is live; production is frozen except for genuine blockers or incidents.**
 
-## Broad Translation Production Status
+## Broad Translation Release-Candidate Status
 
-Production routes:
+Broad routing is data-driven from five language modes: English US, English UK, Traditional Chinese, Simplified Chinese, and Japanese. All `5 × 4 = 20` unequal source-to-target pairs use Broad. Exact same-language pairs are rejected by the browser and API before image decoding, OCR, translation, or fallback; English US and English UK remain distinct valid modes.
 
-- English US → Traditional Chinese: Broad.
-- English US → Simplified Chinese: Broad.
-- English US → Japanese: Broad.
-- Simplified Chinese → English US: Broad.
-- Traditional Chinese → English US: Broad.
-- Traditional Chinese → English UK: Broad.
-- All other routes remain Legacy unless explicitly documented otherwise.
+The normal successful path sends one whole-pattern request to Luna. Luna receives the full route-relevant glossary plus language/dialect metadata and is the translation authority. Acceptance hard checks are limited to structural, schema, segment-ownership, placeholder, and integrity safety. There is no deterministic linguistic hard-gate validator framework; structurally valid output is normally accepted even when source and target normalize to identical text.
 
-Commit `f1a9b45cad9e361bcdeb4c7066fe66f1d45ec07d` (`Improve Broad translation failure recovery`) keeps a normal successful Broad translation to one provider call. Selected promptly returned malformed/schema failures and selected transient provider failures may retry Broad once within the shared existing 90-second budget; timeouts do not retry.
+Provider failure, malformed structure, or structural/integrity failure retains deterministic fallback from the original OCR rows. Accepted Broad `validated` units remain trusted downstream unless an objective integrity problem is found. This prevents false warning treatment for unchanged English-dialect prose, Traditional/Simplified Chinese shorthand, protected-domain content, and valid symbol-heavy text.
 
-Objective validation remains fail-closed per translation unit. An invalid unit returns its exact source with a localized warning, while valid units remain deliverable. An all-units-invalid result is non-fatal and returns unresolved, source-preserving output. A final classified Broad failure uses deterministic-only Legacy emergency fallback from the original OCR rows, without Legacy provider or title-shadow calls. Trusted OCR/source is preserved whenever safe instead of turning a recoverable local failure into a whole-request HTTP 500; unexpected internal or invariant failures remain fatal.
-
-Release verification passed `361 / 361` complete regression tests, `66 / 66` final staged-tree focused tests, Python compilation, and diff checks. Human UAT A passed the normal Broad path. Human UAT B passed the Simplified Chinese → English US fail-soft path, and Railway production deployment was confirmed.
-
-Cross-language UAT status:
-
-- Case 1, English US → Traditional Chinese / Broad: PASS.
-- Case 2, English US → Simplified Chinese / Broad: PASS.
-- Case 3, Simplified Chinese → English US / Broad: PASS. Partial warnings correctly protect OCR-fused or otherwise unsafe units without failing the request.
-- Case 4, Traditional Chinese → English US / Legacy: PASS.
-- Cases 5–13, the remaining English/Chinese Legacy routes and Japanese-target Legacy routes: PASS WITH IMPERFECTION.
-
-The bounded first-launch Cross-language translation UAT matrix is complete with no translation-engine Soft Launch blocker found. Japanese-source routes were intentionally skipped because expected practical usage is low and Japanese crochet patterns are commonly chart/symbol-oriented. The Codex static release-gap audit returned GO with no known pre-launch code change required. LAUNCH-001 through LAUNCH-005 subsequently passed Human/Product closeout. **Soft Launch gate: PASS — APPROVED TO LAUNCH.**
-
-Accepted non-blocking, post-launch translation-quality items are: Simplified Chinese `F` / `4F` may remain unresolved instead of becoming English US `dc` / `4 dc`; Legacy can translate ordinary `around` as crochet `一圈` / `1周`; Japanese-target Legacy routes can leave substantial ordinary language untranslated or mixed; occasional Legacy malformed-response, timeout, or validation fail-closed outcomes can preserve partial source-language residue and do not justify weakening validators; and Traditional Chinese output can occasionally contain a Simplified character such as `个`.
+The original eight Broad routes passed Human UAT. The additional twelve routes complete the matrix, with representative Human UAT across English UK to CJK, Simplified Chinese to English UK, English-dialect, and Traditional/Simplified Chinese route families. Japanese source is supported with a Beta expectation notice because chart/symbol-heavy OCR structure can constrain quality. This is representative validation, not an exhaustive claim for every pattern on every route.
 
 ## Contextual LLM Translation
 
-The production Contextual LLM translation architecture keeps the deterministic engine authoritative for crochet-critical terminology and structure. Eligible ordinary natural-language content is handled by `gpt-5.6-luna`; the validated title route remains separate where applicable. The general Luna route uses low reasoning effort and `max_output_tokens=400`. `gpt-5-nano` is no longer an active production translation route.
+The active Broad architecture sends OCR text and crochet context—not the uploaded image—to Luna. One whole-pattern request owns natural translation on the normal success path. The request contains the full route-relevant glossary; the application retains source-segment ownership and geometry locally for delivery and rendering.
 
-Compact semantic context is derived from the active OCR translation scope: Whole Pattern uses the Whole Pattern OCR scope, while Select Area uses only the selected-area OCR scope. Historical ordinary `pattern_instruction` mappings do not constrain successful LLM translation; deterministic translation remains the fail-open result. Mixed notation and prose spans are supported while rounds, stitches, counts, repeats, and other structural tokens remain protected. Chinese- and Japanese-target output is also checked for unsupported invented Latin or alphanumeric content.
-
-Uploaded images are never sent to OpenAI. Legacy provider failures fail closed to deterministic output. In Broad, invalid translation units preserve exact source with a localized warning, including a non-fatal all-units-invalid result; a final classified Broad failure uses deterministic-only Legacy emergency fallback from the original OCR rows. Unexpected internal or invariant failures remain fatal. Production requires `PATTERN_LLM_FALLBACK_ENABLED=1` and an `OPENAI_API_KEY` Railway secret. `PATTERN_LLM_DEBUG` is diagnostic-only and should remain disabled in production.
-
-The custom uploader hydrates its frontend from the authoritative backend active-image state after Streamlit reruns, so Replace and Remove remain available and replacing the active image continues to work after translation.
-
-Validation passed: Hybrid/Human-UAT automated suite `73 / 73`; feature-flag-OFF deterministic corpus `220 / 220` identical; Local Human UAT; Production Owner Smoke UAT; and Railway production deployment. Minor overlay placement refinement remains deferred and is not a release blocker. Natural LLM wording variation is acceptable when meaning and crochet structure remain valid; further translation-quality changes must be evidence-driven.
+Deterministic logic protects structural integrity and provides fallback, but it does not overrule a structurally valid Luna result on linguistic preference. Natural wording variation is acceptable when structure and meaning remain valid. Production provider configuration remains a Railway concern; local regression must not make live provider calls.
 
 ## Current Project Status
 
@@ -179,7 +159,7 @@ Validation passed: Hybrid/Human-UAT automated suite `73 / 73`; feature-flag-OFF 
 - Current production runtime: FastAPI/browser; Streamlit is preserved as rollback-only.
 - Latest Pattern Translator analytics milestone: RC54B Analytics Transport Migration completed with Production Human UAT PASS.
 - Current production database: `knowledge_base/data/master_stitches.csv`
-- Bounded first-launch Cross-language translation UAT is complete through Case 13, the static release-gap audit found no known pre-launch code change required, and LAUNCH-001 through LAUNCH-005 passed Human/Product closeout. **Soft Launch gate: PASS — APPROVED TO LAUNCH.**
+- The local 20-route Broad release candidate is Human-UAT validated across the original routes and representative added route families; validation is not exhaustive for every pattern/route combination.
 - PRIMARY title routing and the protected broad-batch experiment remain paused/local research evidence. `PATTERN_LUNA_TITLE_PRIMARY_ENABLED` remains unset/OFF in production.
 - Future testing: continue with occasional trusted-user testing and incremental fixes based on production evidence.
 
@@ -194,8 +174,10 @@ Known non-blocking polish items:
 ## Run Locally
 
 ```bash
-python3 -m streamlit run pattern_translator/app.py
+.venv/bin/python -m uvicorn pattern_translator.api:app --host 127.0.0.1 --port 8501 --workers 1
 ```
+
+The browser UI is served at `http://127.0.0.1:8501`. Streamlit is preserved only as rollback/history and is not the current local frontend workflow.
 
 ## Deployment Direction
 
@@ -215,11 +197,14 @@ Railway deployment
 Production validation
 ```
 
-Railway is the primary production deployment platform after RC28 production validation. Streamlit Community Cloud is retained as a backup platform.
+Railway is the primary production deployment platform. The public Pattern Translator URL is `https://pattern.crochetintelligence.com`; Streamlit is retained only as a rollback/history path pending separately approved retirement.
 
 ## Required Runtime Files
 
-- `pattern_translator/app.py`
+- `pattern_translator/api.py`
+- `pattern_translator/web/`
+- `pattern_translator/translation_service.py`
+- `pattern_translator/engine/`
 - `knowledge_base/data/master_stitches.csv`
 - `knowledge_base/symbols/`
 - `requirements.txt`

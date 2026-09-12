@@ -121,6 +121,86 @@ class PatternBrowserUiTests(unittest.TestCase):
             payload["form"],
         )
 
+    def test_same_language_ui_gate_and_localized_message(self):
+        payload = run_browser_modules(
+            """
+            import { readFileSync } from 'node:fs';
+            const module = (path) => import('data:text/javascript,' + encodeURIComponent(readFileSync(path, 'utf8')));
+            const { stringsFor } = await module('./pattern_translator/web/translations.js');
+            const { MODE_VALUES, beginTranslation, canTranslate, languageSelectionMessage } = await module('./pattern_translator/web/workflow_state.js');
+            const file = { name: 'pattern.png' };
+            const base = {
+              file, area: 'Whole Pattern', crop: null, loading: false, generation: 7,
+              qualityAssessment: { level: 'good' }, qualityFile: file,
+              qualityArea: 'Whole Pattern', qualityCrop: null,
+              qualityConfirmed: false, qualityLoading: false,
+            };
+            const blocked = MODE_VALUES.map((mode) => {
+              const state = { ...base, source: mode, target: mode };
+              return [mode, canTranslate(state), beginTranslation(state, {}), state.loading];
+            });
+            const allowed = [
+              ['English — US', 'English — UK'],
+              ['English — UK', 'English — US'],
+            ].map(([source, target]) => canTranslate({ ...base, source, target }));
+            const messages = ['en', 'zh-Hant', 'zh-Hans', 'ja'].map((lang) => {
+              const state = { ...base, source: 'Japanese', target: 'Japanese' };
+              return languageSelectionMessage(state, stringsFor(lang));
+            });
+            console.log(JSON.stringify({ blocked, allowed, messages }));
+            """
+        )
+        self.assertEqual(
+            [[mode, False, None, False] for mode in (
+                "English — US",
+                "English — UK",
+                "Traditional Chinese",
+                "Simplified Chinese",
+                "Japanese",
+            )],
+            payload["blocked"],
+        )
+        self.assertEqual([True, True], payload["allowed"])
+        self.assertEqual(
+            [
+                "The source and target languages are the same. Please choose a different target language.",
+                "來源語言與翻譯語言相同，請選擇另一個翻譯語言。",
+                "来源语言与翻译语言相同，请选择另一个翻译语言。",
+                "翻訳元と翻訳先の言語が同じです。別の翻訳先言語を選択してください。",
+            ],
+            payload["messages"],
+        )
+
+    def test_japanese_source_beta_notice_is_localized_and_source_only(self):
+        payload = run_browser_modules(
+            """
+            import { readFileSync } from 'node:fs';
+            const module = (path) => import('data:text/javascript,' + encodeURIComponent(readFileSync(path, 'utf8')));
+            const { stringsFor } = await module('./pattern_translator/web/translations.js');
+            const { MODE_VALUES, japaneseSourceBetaNotice } = await module('./pattern_translator/web/workflow_state.js');
+            const languages = ['en', 'zh-Hant', 'zh-Hans', 'ja'];
+            const notices = languages.map((lang) => japaneseSourceBetaNotice(
+              { source: 'Japanese', target: 'English — US' }, stringsFor(lang),
+            ));
+            const hiddenForOtherSources = MODE_VALUES
+              .filter((mode) => mode !== 'Japanese')
+              .every((source) => japaneseSourceBetaNotice(
+                { source, target: 'Japanese' }, stringsFor('en'),
+              ) === '');
+            console.log(JSON.stringify({ notices, hiddenForOtherSources }));
+            """
+        )
+        self.assertEqual(
+            [
+                "🧪 Japanese translation is currently in Beta. We aim for accurate results, but Japanese crochet patterns often contain dense symbols and specialised layouts, so some content may not translate perfectly.",
+                "🧪 日文翻譯目前為 Beta 版本。系統會盡力準確翻譯，但日文鈎織圖樣常包含較多符號及特殊排版，結果可能未能完全準確，敬請留意。",
+                "🧪 日文翻译目前为 Beta 版本。系统会尽力准确翻译，但日文钩织图样常包含较多符号及特殊排版，结果可能无法完全准确，敬请留意。",
+                "🧪 日本語パターンの翻訳機能は現在ベータ版です。できる限り正確に翻訳しますが、日本の編み図には記号や特殊なレイアウトが多く含まれるため、一部の内容を正確に翻訳できない場合があります。",
+            ],
+            payload["notices"],
+        )
+        self.assertTrue(payload["hiddenForOtherSources"])
+
     def test_select_area_start_over_resets_to_whole_pattern_without_affecting_other_paths(self):
         payload = run_browser_modules(
             """

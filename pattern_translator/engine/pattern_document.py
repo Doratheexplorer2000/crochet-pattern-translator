@@ -429,6 +429,8 @@ def translation_trust_status(row: object) -> str:
         and not protected_identity_spans_preserved(original, translated)
     ):
         return "untrusted"
+    if validation_status == "validated":
+        return "trusted"
     if not translated or terminology_engine.norm_text(original) == terminology_engine.norm_text(translated):
         return "source_preserved"
     return "trusted"

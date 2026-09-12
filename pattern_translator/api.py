@@ -70,6 +70,14 @@ def _validate_language(value: str, field_name: str) -> str:
     return value
 
 
+def _validate_distinct_languages(source_mode: str, output_mode: str) -> None:
+    if source_mode == output_mode:
+        raise HTTPException(
+            status_code=400,
+            detail="Source and target languages must differ",
+        )
+
+
 def _validate_area_mode(value: str) -> str:
     if value not in translation_area_state_engine.AREA_OPTIONS:
         raise HTTPException(status_code=400, detail="Unsupported area mode")
@@ -436,6 +444,7 @@ def translate_pattern(
     request_id = uuid.uuid4().hex
     source_mode = _validate_language(source_mode, "source_mode")
     output_mode = _validate_language(output_mode, "output_mode")
+    _validate_distinct_languages(source_mode, output_mode)
     area_mode = _validate_area_mode(area_mode)
 
     image_load_start = time.perf_counter()

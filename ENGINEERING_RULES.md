@@ -302,7 +302,7 @@ Railway deployment
 ↓
 Production validation
 
-Streamlit Community Cloud may remain as a temporary backup during migration, but should not be treated as the primary production platform unless explicitly reinstated.
+Streamlit is preserved only as rollback/history and must not be treated as the active Pattern Translator frontend unless explicitly reinstated.
 
 ---
 
@@ -310,19 +310,31 @@ Streamlit Community Cloud may remain as a temporary backup during migration, but
 
 Architecture migration work must preserve the current production baseline as a rollback target.
 
-For the approved post-Streamlit migration:
+The FastAPI/browser migration is complete. The FastAPI/browser application is the active Pattern Translator frontend; Streamlit remains rollback/history only until retirement is separately approved. The current local frontend command is:
 
-- begin locally only;
-- preserve `c49755b59686e58298febba445e5ae51a6cb6e05` and its byte-identical `8dccd17518344d7d2152dc49fc3e13c0e95e3fd0` tree as the production rollback baseline;
-- first extract one framework-neutral `translate_image()` service and keep Streamlit as its caller;
-- introduce the FastAPI boundary and browser migration only in later separately reviewed units;
-- do not push migration work to GitHub until the local unit and its evidence have been independently reviewed;
-- do not deploy migration builds to Railway until explicitly approved;
-- separate business logic from Streamlit before replacing the frontend;
-- do not rewrite business logic that has already passed Human UAT and regression simply because the presentation layer changes;
+```bash
+.venv/bin/python -m uvicorn pattern_translator.api:app --host 127.0.0.1 --port 8501 --workers 1
+```
+
+The canonical public Pattern Translator URL is `https://pattern.crochetintelligence.com`.
+
+Preserve these approved Broad translation contracts unless a separately scoped, evidence-backed change is approved:
+
+- every unequal pair across English US, English UK, Traditional Chinese, Simplified Chinese, and Japanese uses the data-driven Broad route matrix;
+- exact same-language requests are blocked before image decoding, OCR, provider, and fallback work, while English US and English UK remain distinct modes;
+- a normal successful Broad translation uses one whole-pattern Luna request with the full route-relevant glossary;
+- Luna is the translation authority, with hard acceptance checks limited to structural, schema, ownership, placeholder, and objective integrity safety rather than deterministic linguistic preference;
+- structurally valid Luna output is normally accepted, including valid unchanged text; and
+- deterministic fallback remains for provider, malformed-structure, and structural/integrity failure.
+
+For later architecture work:
+
+- begin locally unless release work is explicitly approved;
+- do not describe experiments as production behavior;
+- do not push or deploy until the local unit and its evidence have been independently reviewed and release action is explicitly approved;
+- do not rewrite business logic that passed Human UAT and regression merely because an architectural boundary changes;
+- keep commits small and reversible;
 - prefer Git tags and local branches over duplicating the repository.
-
-Migration commits should be small and organized by reversible engineering step, such as baseline capture, business-logic extraction, API introduction, frontend prototype, and deployment spike.
 
 ---
 

@@ -92,7 +92,7 @@ class BroadRawCandidateDebugCaptureTests(unittest.TestCase):
         report = diagnostic_report.build_debug_report_text(result)
         self.assertNotIn("=== Broad Raw Candidate Debug ===", report)
         self.assertIn("Raw provider output retained: No", report)
-        self.assertNotIn("R2：6 短針（12）", report)
+        self.assertNotIn("Raw Candidate:", report)
 
     def test_flag_on_captures_exact_candidates_and_validation_outcomes(self):
         result, calls = self._translate("1")
@@ -103,14 +103,14 @@ class BroadRawCandidateDebugCaptureTests(unittest.TestCase):
         self.assertEqual("English US -> Traditional Chinese", capture["route"])
         self.assertEqual(4, len(capture["units"]))
         accepted = capture["units"][0]
-        rejected = capture["units"][2]
+        natural_variation = capture["units"][2]
         protected = capture["units"][3]
         self.assertEqual("unit-0000", accepted["semantic_unit_id"])
         self.assertEqual("PATTERN", accepted["source_text"])
         self.assertEqual("花樣（パターン）", accepted["raw_candidate"])
         self.assertEqual("accepted", accepted["validation_status"])
-        self.assertEqual("rejected", rejected["validation_status"])
-        self.assertEqual("stitch_terminology", rejected["rejection_reason"])
+        self.assertEqual("accepted", natural_variation["validation_status"])
+        self.assertEqual("", natural_variation["rejection_reason"])
         self.assertEqual("__ciurla__", protected["raw_candidate"])
         self.assertEqual("docs.example.com", protected["processed_candidate"])
         self.assertEqual(
@@ -131,8 +131,8 @@ class BroadRawCandidateDebugCaptureTests(unittest.TestCase):
         self.assertIn("=== Broad Raw Candidate Debug ===", report)
         self.assertIn("Raw provider output retained: Yes", report)
         self.assertIn("Semantic Unit: unit-0002", report)
-        self.assertIn("Validation: rejected", report)
-        self.assertIn("Reason: stitch_terminology", report)
+        self.assertIn("Validation: accepted", report)
+        self.assertNotIn("Reason: stitch_terminology", report)
         self.assertIn("花樣（パターン）", report)
         self.assertIn("R2：6 短針（12）", report)
         self.assertIn("Processed Candidate:\ndocs.example.com", report)

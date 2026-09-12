@@ -1,6 +1,28 @@
 # Crochet Pattern Translator Project Status
 
-Last updated: 2026-09-11
+Last updated: 2026-09-12
+
+## 20-Route Broad Release Finalisation — 2026-09-12
+
+Status: local release candidate complete and Human-UAT validated; not yet committed, pushed, or deployed. The currently deployed production revision remains `96dd8034b6d70433f848568ec9d34aabd113e334` until separate release approval.
+
+The FastAPI/browser application is the active frontend. Streamlit remains preserved for rollback/history only. Local frontend command:
+
+```bash
+.venv/bin/python -m uvicorn pattern_translator.api:app --host 127.0.0.1 --port 8501 --workers 1
+```
+
+Production URL: `https://pattern.crochetintelligence.com`
+
+Broad is now data-driven across five source/target modes: English US, English UK, Traditional Chinese, Simplified Chinese, and Japanese. Every unequal pair uses Broad (`5 × 4 = 20` routes). Exact same-language pairs are blocked in the browser and rejected by the API before image decoding, OCR, provider, or fallback work; English US and English UK remain distinct valid routes.
+
+Luna is the translation authority. A normal successful Broad translation uses one whole-pattern provider request with the full route-relevant glossary and language/dialect metadata. Hard acceptance checks cover structure, schema, segment ownership, placeholders, and objective integrity only. The superseded deterministic linguistic hard-gate validator framework is not part of acceptance; structurally valid Luna output is normally accepted. Deterministic fallback remains for provider, malformed-structure, and structural/integrity failure.
+
+Downstream delivery preserves trusted status for accepted Broad `validated` units unless an objective integrity problem exists. This resolves false warnings for unchanged English US/UK prose, Traditional/Simplified Chinese shorthand, protected-domain/opaque content, and valid symbol-heavy text.
+
+The renderer bottom-boundary defect is fixed: a clamped multi-region extra plate is rejected unless it can fit glyph height plus padding, allowing the existing safe compound/fallback layout and preventing silent clipping of the final rendered line. Focused regression and Human UAT with the original failing Simplified Chinese to Japanese image passed.
+
+The original eight Broad routes passed Human UAT, and representative added route families—including English UK to Traditional Chinese, Simplified Chinese, and Japanese, plus Simplified Chinese to English UK—were confirmed. Trust/delivery corrections were validated for both English-dialect directions and both Traditional/Simplified Chinese directions. Japanese source remains supported but shows a localized non-blocking Beta expectation notice because chart/symbol-heavy OCR structure can constrain quality. Japanese target alone does not show the notice. These results do not claim exhaustive validation of every possible pattern on every route.
 
 ## Production Engineering Closeout — 2026-09-11
 
@@ -62,7 +84,7 @@ Final release closeout is complete:
 
 No additional pre-launch product-code work is approved. Production code is frozen for Soft Launch except for a genuine user-facing blocker or production incident. New polish, scaling, Streamlit retirement, translation-quality refinement, and other enhancements move to post-launch evidence-driven work.
 
-## Broad Translation Production Release — 2026-09-06
+## Historical Broad Translation Production Release — 2026-09-06
 
 Production routes:
 
@@ -204,9 +226,9 @@ This is not an approved product architecture. Its current principles are:
 
 Japanese glossary completeness is a later prerequisite, not the current critical path. Reviewed coverage was approximately 32 of 59 active non-`pattern_instruction` concepts and 6 of 49 `pattern_instruction` rows with Japanese targets. This does not block the next English US → Traditional Chinese prototype; do not start Japanese glossary work as part of that experiment.
 
-### Immediate Next Task
+### Historical Next Task — Superseded
 
-**Experiment 1 — Glossary-only broad Carnation translation** is the next critical-path experiment. Its purpose is to falsify or support the hypothesis before integrating a Challenger provider.
+At the time of this research closeout, **Experiment 1 — Glossary-only broad Carnation translation** was the next critical-path experiment. That direction has since been superseded by the completed Luna-primary 20-route Broad release candidate documented at the top of this file.
 
 Use only the stored Carnation OCR, English US → Traditional Chinese, a compact full authoritative source/target crochet glossary, no whole-operation placeholders, semantic-unit output with `source_segment_ids`, a deliberately split `Begin with 4 ch...` instruction across two source segments, one real Luna broad translation call, local narrow invariant checks, and full Product Owner-visible output.
 

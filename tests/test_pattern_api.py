@@ -1160,6 +1160,71 @@ class PatternApiHttpTests(unittest.TestCase):
         self.assertEqual(400, response.status_code)
         translate_spy.assert_not_called()
 
+    def test_all_same_language_requests_stop_before_translation_and_ai(self):
+        modes = (
+            "English — US",
+            "English — UK",
+            "Traditional Chinese",
+            "Simplified Chinese",
+            "Japanese",
+        )
+        with mock.patch(
+            "pattern_translator.api.translate_image",
+        ) as translate_spy, mock.patch(
+            "pattern_translator.engine.broad_translation.call_luna_once",
+        ) as provider_spy, mock.patch(
+            "pattern_translator.engine.line_translation.translate_ocr_line",
+        ) as fallback_spy:
+            for mode in modes:
+                with self.subTest(mode=mode):
+                    response = self._multipart(
+                        files={
+                            "image": (
+                                "pattern.png",
+                                self._png_bytes(),
+                                "image/png",
+                            )
+                        },
+                        source_mode=mode,
+                        output_mode=mode,
+                        area_mode="Whole Pattern",
+                    )
+                    self.assertEqual(400, response.status_code)
+                    self.assertEqual(
+                        "Source and target languages must differ",
+                        response.json()["detail"],
+                    )
+
+        translate_spy.assert_not_called()
+        provider_spy.assert_not_called()
+        fallback_spy.assert_not_called()
+
+    def test_english_dialect_cross_routes_pass_same_language_gate(self):
+        with mock.patch(
+            "pattern_translator.api.translate_image",
+            side_effect=RuntimeError("stop after validation gate"),
+        ) as translate_spy:
+            for source_mode, output_mode in (
+                ("English — US", "English — UK"),
+                ("English — UK", "English — US"),
+            ):
+                with self.subTest(route=(source_mode, output_mode)):
+                    response = self._multipart(
+                        files={
+                            "image": (
+                                "pattern.png",
+                                self._png_bytes(),
+                                "image/png",
+                            )
+                        },
+                        source_mode=source_mode,
+                        output_mode=output_mode,
+                        area_mode="Whole Pattern",
+                    )
+                    self.assertEqual(500, response.status_code)
+
+        self.assertEqual(2, translate_spy.call_count)
+
     def test_unsupported_area_mode_fails_before_service(self):
         with mock.patch(
             "pattern_translator.api.translate_image",
