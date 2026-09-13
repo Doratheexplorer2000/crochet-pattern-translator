@@ -2,7 +2,9 @@
 
 Mobile-first OCR translation for crochet pattern images.
 
-Current deployed production baseline: `96dd8034b6d70433f848568ec9d34aabd113e334` (`Fix dense overlay placement and page metadata handling`). Repository `main` is at `5a73c0b87896cd1c20ce46f41aa811a95063542e` (`Complete Luna-primary 20-route translation matrix`), which is committed and pushed but not yet deployed. Additional approved Human-UAT work remains local and uncommitted.
+Current production source of truth: `origin/main` at `8684255e43e36d379551433b80e3e01acb572cc3` (`Harden OCR relevance, translation, and overlay delivery`). This baseline is pushed and deployed to Railway. Production smoke testing passed, and its isolated clean-clone-equivalent release boundary passed `495 / 495` tests.
+
+The local working tree is intentionally dirty with unrelated, unfinished title-primary/title-routing experiments and historical/local artifacts. Those changes are not part of production. Do not accidentally stage, clean, reset, restore, stash, or overwrite them; any future title-primary work must be reviewed and committed separately if approved.
 
 Production application entry point:
 
@@ -20,7 +22,7 @@ Local FastAPI/browser command:
 
 Production URL: `https://pattern.crochetintelligence.com`
 
-## Release Finalisation — 2026-09-12
+## Release Finalisation — 2026-09-13
 
 The `5a73c0b` repository baseline completes the Luna-primary Broad architecture and all 20 unequal source-to-target routes across English US, English UK, Traditional Chinese, Simplified Chinese, and Japanese. Same-language translation is blocked before OCR/provider work. Japanese source mode shows a non-blocking localized Beta expectation notice; Japanese as target alone does not.
 
@@ -32,7 +34,7 @@ The same hardening separates confident multi-column OCR reading lanes, preserves
 
 The existing 1000-pixel OCR resize policy is unchanged. OCR remains probabilistic, and Select Area remains available for difficult dense regions.
 
-This is a release-candidate description, not a deployment claim. The approved post-baseline work remains local and uncommitted, and Railway remains on the deployed baseline above until separately approved release and deployment actions. The source-replacement code default remains OFF; Railway owns production activation through `PATTERN_SOURCE_REPLACEMENT_OVERLAY_ENABLED=1`.
+This release is deployed at `8684255e43e36d379551433b80e3e01acb572cc3`. Production smoke testing passed for normal loading, same-language blocking, non-crochet rejection and reset behavior, the Broad route, PNG/TXT/Diagnostic Report downloads, and complete visual delivery through on-image placement or footer fallback. The source-replacement code default remains OFF; Railway owns production activation through `PATTERN_SOURCE_REPLACEMENT_OVERLAY_ENABLED=1`.
 
 ## Soft Launch Status — 2026-09-07
 
@@ -61,7 +63,7 @@ The production baseline is now frozen for Soft Launch. Further UI polish, Stream
 
 ## Current Product Status
 
-The current production revision is `96dd8034b6d70433f848568ec9d34aabd113e334`, deployed from GitHub `main` to Railway and publicly available at `https://pattern.crochetintelligence.com`. It includes the FastAPI/browser production cutover and the production-validated Portal Centralization, Broad and Legacy translation routes, source-replacement presentation, source-aware typography, shared Plausible analytics, custom domain, isolated OCR worker, canonical translation state, and rerun-safe result delivery. Railway deployment of this revision is verified.
+The current production revision is `8684255e43e36d379551433b80e3e01acb572cc3`, deployed from GitHub `origin/main` to Railway and publicly available at `https://pattern.crochetintelligence.com`. It includes the FastAPI/browser production cutover and the production-validated Portal Centralization, 20-route Broad translation, deterministic crochet relevance gating, hardened source-replacement delivery, source-aware typography, shared Plausible analytics, custom domain, isolated OCR worker, canonical translation state, and rerun-safe result delivery. Railway deployment and production smoke testing of this revision are verified.
 
 Key validated behavior:
 
@@ -142,7 +144,7 @@ Key validated behavior:
 
 Final 2026-09-07 release closeout passed the complete Portal → Pattern Translator → Stitch Translator walkthrough, shared Plausible verification, and a three-browser Pattern Translator concurrency smoke test. All three near-simultaneous translation requests completed successfully within 20 seconds. **Soft Launch is live; production is frozen except for genuine blockers or incidents.**
 
-## Broad Translation Release-Candidate Status
+## Broad Translation Production Status
 
 Broad routing is data-driven from five language modes: English US, English UK, Traditional Chinese, Simplified Chinese, and Japanese. All `5 × 4 = 20` unequal source-to-target pairs use Broad. Exact same-language pairs are rejected by the browser and API before image decoding, OCR, translation, or fallback; English US and English UK remain distinct valid modes.
 
@@ -160,12 +162,12 @@ Deterministic logic protects structural integrity and provides fallback, but it 
 
 ## Current Project Status
 
-- Current production baseline: `96dd8034b6d70433f848568ec9d34aabd113e334`
+- Current production baseline and source of truth: `origin/main` at `8684255e43e36d379551433b80e3e01acb572cc3`
 - Current app version string: `Pattern OCR Translator (Beta RC26)`
 - Current production runtime: FastAPI/browser; Streamlit is preserved as rollback-only.
 - Latest Pattern Translator analytics milestone: RC54B Analytics Transport Migration completed with Production Human UAT PASS.
 - Current production database: `knowledge_base/data/master_stitches.csv`
-- The local 20-route Broad release candidate is Human-UAT validated across the original routes and representative added route families; validation is not exhaustive for every pattern/route combination.
+- The production 20-route Broad baseline is Human-UAT validated across the original routes and representative added route families; validation is not exhaustive for every pattern/route combination.
 - PRIMARY title routing and the protected broad-batch experiment remain paused/local research evidence. `PATTERN_LUNA_TITLE_PRIMARY_ENABLED` remains unset/OFF in production.
 - Future testing: continue with occasional trusted-user testing and incremental fixes based on production evidence.
 

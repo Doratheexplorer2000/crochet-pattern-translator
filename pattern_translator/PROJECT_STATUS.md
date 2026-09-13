@@ -2,9 +2,11 @@
 
 Last updated: 2026-09-13
 
-## 20-Route Broad Release Finalisation — 2026-09-12
+## Production Release Close-Out — 2026-09-13
 
-Status: the 20-route release baseline is committed and pushed at `5a73c0b87896cd1c20ce46f41aa811a95063542e`; approved post-baseline Human-UAT work remains local and uncommitted. Neither the baseline nor the post-baseline work is deployed. The currently deployed production revision remains `96dd8034b6d70433f848568ec9d34aabd113e334` until separate release approval.
+Status: production source of truth is `origin/main` at `8684255e43e36d379551433b80e3e01acb572cc3` (`Harden OCR relevance, translation, and overlay delivery`). The commit is pushed and deployed to Railway. Production smoke testing passed for application load, same-language blocking, non-crochet relevance rejection/reset behavior, the Broad route, PNG/TXT/Diagnostic Report downloads, and complete PNG visual delivery with footer fallback where required. The isolated clean-clone-equivalent release boundary passed `495 / 495` tests.
+
+The local working tree intentionally remains dirty. Tracked changes in `ENGINEERING_RULES.md`, `engine/llm_fallback.py`, `engine/ocr_lines.py`, `engine/shadow_title_classifier.py`, and `tests/test_primary_title_routing.py` are primarily unfinished title-primary/title-routing work; `experiments/` and local/generated historical evidence also remain. None of this is part of production. Do not accidentally stage, clean, reset, restore, stash, or overwrite it. Future title-primary work must be reviewed and committed separately if it is ever approved.
 
 The FastAPI/browser application is the active frontend. Streamlit remains preserved for rollback/history only. Local frontend command:
 
@@ -42,7 +44,7 @@ Deferred to the next engineering thread: complete the four-language Broad route 
 
 ## Current Version
 
-Current FastAPI production application baseline: `96dd8034b6d70433f848568ec9d34aabd113e334` (`Fix dense overlay placement and page metadata handling`)
+Current FastAPI production application baseline: `8684255e43e36d379551433b80e3e01acb572cc3` (`Harden OCR relevance, translation, and overlay delivery`)
 
 Application version string: `Pattern OCR Translator (Beta RC26)`
 
@@ -60,7 +62,7 @@ pattern_translator/app.py
 
 ## Current Production Status
 
-The FastAPI/browser Crochet Pattern Translator is live at `https://pattern.crochetintelligence.com` from GitHub `main`, using the existing Railway service and custom domain. The production application baseline is `96dd8034b6d70433f848568ec9d34aabd113e334`. Railway deployment of this revision is verified. The deployed shadow Luna title classifier remains observational, and unrelated title-primary experiments remain local and uncommitted. Railway uses this validated Custom Start Command with one Uvicorn worker:
+The FastAPI/browser Crochet Pattern Translator is live at `https://pattern.crochetintelligence.com` from GitHub `origin/main`, using the existing Railway service and custom domain. The production application baseline is `8684255e43e36d379551433b80e3e01acb572cc3`. Railway deployment and production smoke testing of this revision are verified. The deployed shadow Luna title classifier remains observational, and unrelated title-primary experiments remain local and uncommitted. Railway uses this validated Custom Start Command with one Uvicorn worker:
 
 ```sh
 sh -c 'python -m uvicorn pattern_translator.api:app --host 0.0.0.0 --port "$PORT" --workers 1'
@@ -406,7 +408,7 @@ Other non-blocking polish already recorded:
 
 ### FastAPI production cutover (complete; Production Human UAT PASS)
 
-- FastAPI/browser is live on the existing Railway service at `https://pattern.crochetintelligence.com`; the current production application baseline is `f1a9b45cad9e361bcdeb4c7066fe66f1d45ec07d`.
+- FastAPI/browser is live on the existing Railway service at `https://pattern.crochetintelligence.com`; the baseline for this historical cutover was `f1a9b45cad9e361bcdeb4c7066fe66f1d45ec07d`.
 - Validated Railway Custom Start Command: `sh -c 'python -m uvicorn pattern_translator.api:app --host 0.0.0.0 --port "$PORT" --workers 1'`. The shell wrapper is required for `PORT` expansion; direct `"${PORT}"` use failed because Uvicorn received the literal value. One worker is the validated initial production configuration.
 - Production smoke UAT passed across the browser, custom domain, image upload/quality, Whole Pattern, Select Area/crop, OCR/translation, results/overlay, PNG/TXT downloads, Diagnostic Report, physical mobile workflow, and redeploy/startup behavior.
 - Plausible production verification passed for all five approved events, each observed exactly once with no duplicates, in the intended shared `crochetintelligence.com` site.
