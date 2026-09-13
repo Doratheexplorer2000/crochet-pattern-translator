@@ -6,7 +6,8 @@ Streamlit orchestration, session state, downloads, OCR execution, or analytics.
 
 import re
 import unicodedata
-from typing import Dict, List, Optional, Tuple
+from collections import Counter
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import pandas as pd
 
@@ -55,7 +56,7 @@ _STUDIO_IDENTITY_RE = re.compile(
 _PURE_NUMERIC_RE = re.compile(r"^[\s\d.,:;_+\-–—~～/()\[\]{}%]+$")
 _DECORATED_PAGE_LABEL_RE = re.compile(r"^\s*[-–—]\s*\d{1,4}\s*[-–—]\s*$")
 _PLAIN_PAGE_LABEL_RE = re.compile(r"^\s*\d{1,4}\s*$")
-_SINGLE_CJK_RE = re.compile(r"^[\u3400-\u9fff\uf900-\ufaff]$")
+_SHORT_PURE_CJK_RE = re.compile(r"^[\u3400-\u9fff\uf900-\ufaff]{1,2}$")
 _SHORT_CJK_TERMINAL_RE = re.compile(
     r"^\s*([\u3400-\u9fff\uf900-\ufaff])\s*[。！？!?]\s*$"
 )
@@ -127,7 +128,7 @@ def is_watermark_like_text(
     if repeated_count >= 5 and not looks_like_pattern_text(s):
         return True
     if contextual_short_cjk and (
-        _SINGLE_CJK_RE.fullmatch(s) or _SHORT_CJK_TERMINAL_RE.fullmatch(s)
+        _SHORT_PURE_CJK_RE.fullmatch(s) or _SHORT_CJK_TERMINAL_RE.fullmatch(s)
     ):
         return False
     # Very short decorative leftovers with no crochet meaning.
@@ -180,6 +181,99 @@ def _contextual_short_cjk_continuation_indices(rows: pd.DataFrame) -> set:
             ):
                 preserved.add(index)
         previous = row
+    return preserved
+
+
+def _aligned_with_substantive_row(
+    row: object,
+    rows: pd.DataFrame,
+    *,
+    median_height: float,
+) -> bool:
+    min_x = float(row.get("min_x", 0) or 0)
+    max_x = float(row.get("max_x", min_x) or min_x)
+    min_y = float(row.get("min_y", 0) or 0)
+    max_y = float(row.get("max_y", min_y) or min_y)
+    maximum_gap = max(16.0, median_height * 1.5)
+    maximum_start_delta = max(24.0, median_height * 1.5)
+    for other_index, other in rows.iterrows():
+        if other_index == row.name:
+            continue
+        other_text = str(other.get("text", "") or "").strip()
+        if len(other_text) <= 2 and not looks_like_pattern_text(other_text):
+            continue
+        other_min_x = float(other.get("min_x", 0) or 0)
+        other_max_x = float(other.get("max_x", other_min_x) or other_min_x)
+        other_min_y = float(other.get("min_y", 0) or 0)
+        other_max_y = float(other.get("max_y", other_min_y) or other_min_y)
+        vertical_gap = max(0.0, other_min_y - max_y, min_y - other_max_y)
+        if vertical_gap > maximum_gap:
+            continue
+        horizontal_overlap = max(
+            0.0,
+            min(max_x, other_max_x) - max(min_x, other_min_x),
+        )
+        if (
+            horizontal_overlap > 0
+            or abs(min_x - other_min_x) <= maximum_start_delta
+        ):
+            return True
+    return False
+
+
+def _credible_short_cjk_content_indices(
+    rows: pd.DataFrame,
+    *,
+    image_width: Optional[float],
+    image_height: Optional[float],
+) -> set:
+    """Protect credible short CJK content using OCR and layout evidence."""
+    if rows is None or rows.empty:
+        return set()
+    heights = [_positive_row_height(row) for _, row in rows.iterrows()]
+    median_height = float(pd.Series(heights).median() or 20.0)
+    preserved = set()
+    for index, row in rows.iterrows():
+        text = unicodedata.normalize(
+            "NFKC", str(row.get("original_text_before_filter", "") or "")
+        ).strip()
+        if _SHORT_PURE_CJK_RE.fullmatch(text) is None:
+            continue
+        try:
+            confidence = float(row.get("confidence", 0) or 0)
+            min_x = float(row.get("min_x", 0) or 0)
+            max_x = float(row.get("max_x", min_x) or min_x)
+            min_y = float(row.get("min_y", 0) or 0)
+            max_y = float(row.get("max_y", min_y) or min_y)
+        except (TypeError, ValueError):
+            continue
+        width = max_x - min_x
+        height = max_y - min_y
+        minimum_height = max(
+            6.0,
+            median_height * 0.45,
+            float(image_height or 0) * 0.004,
+        )
+        if confidence < 0.80 or width <= 0 or height < minimum_height:
+            continue
+
+        marginal = False
+        if image_width and image_height:
+            center_x = (min_x + max_x) / 2.0
+            center_y = (min_y + max_y) / 2.0
+            marginal = (
+                center_x <= float(image_width) * 0.025
+                or center_x >= float(image_width) * 0.975
+                or center_y <= float(image_height) * 0.015
+                or center_y >= float(image_height) * 0.985
+            )
+        if marginal and not _aligned_with_substantive_row(
+            row,
+            rows,
+            median_height=median_height,
+        ):
+            continue
+        preserved.add(index)
     return preserved
 
 
@@ -257,6 +351,12 @@ def filter_noise_and_watermarks(
     rows["original_text_before_filter"] = rows["text"].astype(str)
     rows["text"] = rows["text"].astype(str).map(strip_watermark_substrings)
     contextual_short_cjk = _contextual_short_cjk_continuation_indices(rows)
+    credible_short_cjk = _credible_short_cjk_content_indices(
+        rows,
+        image_width=image_width,
+        image_height=image_height,
+    )
+    protected_short_cjk = contextual_short_cjk | credible_short_cjk
 
     norm_counts = rows["text"].map(lambda x: terminology_engine.norm_text(x)).value_counts().to_dict()
     keep = []
@@ -287,7 +387,7 @@ def filter_noise_and_watermarks(
             and is_watermark_like_text(
                 txt,
                 repeated_count=repeated,
-                contextual_short_cjk=row_index in contextual_short_cjk,
+                contextual_short_cjk=row_index in protected_short_cjk,
             )
         ):
             reason = f"watermark/noise; repeated={repeated}"
@@ -310,14 +410,24 @@ def filter_noise_and_watermarks(
     return keep_df, removed_df
 
 
-def protected_identity_spans(text: str) -> Tuple[Dict[str, object], ...]:
+def protected_identity_spans(
+    text: str,
+    url_domain_identities: Optional[Sequence[str]] = None,
+) -> Tuple[Dict[str, object], ...]:
     """Return deterministic identity spans whose source spelling must remain exact."""
     value = unicodedata.normalize("NFKC", str(text or "")).strip()
     if not value:
         return ()
     candidates: List[Tuple[int, int, str]] = []
-    for start, end, _identity in terminology_engine.iter_url_domain_spans(value):
-        candidates.append((start, end, "url_or_domain"))
+    if url_domain_identities is None:
+        for start, end, _identity in terminology_engine.iter_url_domain_spans(value):
+            candidates.append((start, end, "url_or_domain"))
+    else:
+        remaining = Counter(str(item) for item in url_domain_identities if str(item))
+        for identity, expected_count in remaining.items():
+            matches = list(re.finditer(re.escape(identity), value))
+            for match in matches[:expected_count]:
+                candidates.append((*match.span(), "url_or_domain"))
     for match in _HANDLE_RE.finditer(value):
         candidates.append((match.start(), match.end(), "handle"))
     for match in _ACCOUNT_ID_RE.finditer(value):
@@ -385,14 +495,23 @@ def protected_identity_spans(text: str) -> Tuple[Dict[str, object], ...]:
     return tuple(spans)
 
 
-def protected_identity_spans_preserved(source: str, translation: str) -> bool:
+def protected_identity_spans_preserved(
+    source: str,
+    translation: str,
+    url_domain_identities: Optional[Sequence[str]] = None,
+) -> bool:
     return all(
         str(span["text"]) in str(translation or "")
-        for span in protected_identity_spans(source)
+        for span in protected_identity_spans(source, url_domain_identities)
     )
 
 
-def classify_overlay_content(text: str, *, near_pattern_content: bool = False) -> str:
+def classify_overlay_content(
+    text: str,
+    *,
+    near_pattern_content: bool = False,
+    url_domain_identities: Optional[Sequence[str]] = None,
+) -> str:
     """Classify translation/preservation policy without an AI classifier."""
     del near_pattern_content
     value = unicodedata.normalize("NFKC", str(text or "")).strip()
@@ -400,7 +519,7 @@ def classify_overlay_content(text: str, *, near_pattern_content: bool = False) -
         return "unchanged_non_language"
     if _PURE_NUMERIC_RE.fullmatch(value):
         return "unchanged_numeric"
-    spans = protected_identity_spans(value)
+    spans = protected_identity_spans(value, url_domain_identities)
     if not spans:
         return "translated_content"
     visible = list(value)
@@ -422,11 +541,16 @@ def translation_trust_status(row: object) -> str:
     original = str(row.get("Original", "")).strip()
     translated = str(row.get("Translation", "")).strip()
     validation_status = str(row.get("Validation Status", "")).strip().lower()
+    url_domain_identities = row.get("Protected URL/Domain Identities", None)
     if validation_status == "unresolved" or _UNRESOLVED_PREFIX_RE.search(translated):
         return "untrusted"
     if (
-        protected_identity_spans(original)
-        and not protected_identity_spans_preserved(original, translated)
+        protected_identity_spans(original, url_domain_identities)
+        and not protected_identity_spans_preserved(
+            original,
+            translated,
+            url_domain_identities,
+        )
     ):
         return "untrusted"
     if validation_status == "validated":
@@ -471,6 +595,7 @@ def annotate_overlay_content(line_df: pd.DataFrame) -> pd.DataFrame:
     protected_spans = []
     protected_span_statuses = []
     for _, row in out.iterrows():
+        url_domain_identities = row.get("Protected URL/Domain Identities", None)
         center_y = (
             float(row.get("min_y", 0) or 0) + float(row.get("max_y", 0) or 0)
         ) / 2.0
@@ -482,10 +607,14 @@ def annotate_overlay_content(line_df: pd.DataFrame) -> pd.DataFrame:
             classify_overlay_content(
                 str(row.get("Original", "")),
                 near_pattern_content=near_pattern,
+                url_domain_identities=url_domain_identities,
             )
         )
         trust_statuses.append(translation_trust_status(row))
-        spans = protected_identity_spans(str(row.get("Original", "")))
+        spans = protected_identity_spans(
+            str(row.get("Original", "")),
+            url_domain_identities,
+        )
         protected_span_counts.append(len(spans))
         protected_spans.append(
             tuple((str(span["text"]), str(span["kind"])) for span in spans)
@@ -498,6 +627,7 @@ def annotate_overlay_content(line_df: pd.DataFrame) -> pd.DataFrame:
                 if protected_identity_spans_preserved(
                     str(row.get("Original", "")),
                     str(row.get("Translation", "")),
+                    url_domain_identities,
                 )
                 else "missing_or_changed"
             )

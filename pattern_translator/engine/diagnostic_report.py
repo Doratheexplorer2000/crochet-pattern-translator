@@ -885,7 +885,7 @@ def _format_ai_fallback_diagnostics(
         fallback_returned = (
             "yes" if record.get("deterministic_fallback_returned") else "no"
         )
-        lines.append(
+        line = (
             "Call {call} | outcome={outcome} | reason={reason} | "
             "route={source}->{target} | fallback_returned={fallback} | "
             "elapsed_seconds={elapsed}".format(
@@ -898,6 +898,19 @@ def _format_ai_fallback_diagnostics(
                 elapsed=_debug_cell(record.get("elapsed_seconds", "")),
             )
         )
+        if record.get("route") == "broad":
+            line += (
+                " | architecture=broad"
+                f" | classification={_debug_cell(record.get('failure_classification', ''))}"
+                f" | attempts={_debug_cell(record.get('attempt_count', ''))}"
+                " | retry_occurred="
+                f"{'yes' if record.get('retry_occurred') else 'no'}"
+                " | retry_scheduled="
+                f"{'yes' if record.get('retry_scheduled') else 'no'}"
+                " | fallback_invoked="
+                f"{'yes' if record.get('fallback_invoked') else 'no'}"
+            )
+        lines.append(line)
     return "\n".join(lines)
 
 
@@ -908,6 +921,7 @@ def _broad_debug_capture_enabled(capture: Optional[Mapping[str, object]]) -> boo
 def _format_broad_validation_diagnostics(
     line_df: Optional[pd.DataFrame],
     broad_raw_candidate_debug: Optional[Mapping[str, object]] = None,
+    ai_fallback_diagnostics: Optional[List[Dict[str, object]]] = None,
 ) -> str:
     retained = (
         "Yes" if _broad_debug_capture_enabled(broad_raw_candidate_debug) else "No"
@@ -917,12 +931,41 @@ def _format_broad_validation_diagnostics(
         or line_df.empty
         or "Validation Status" not in line_df.columns
     ):
-        return "\n".join(
+        broad_fallback = next(
+            (
+                record
+                for record in reversed(ai_fallback_diagnostics or [])
+                if record.get("route") == "broad"
+                and record.get("fallback_invoked") is True
+            ),
+            None,
+        )
+        lines = []
+        if broad_fallback is not None:
+            lines.extend(
+                [
+                    "Broad translation failed before semantic adaptation.",
+                    "Broad route: broad",
+                    "Broad failure reason: "
+                    f"{_debug_cell(broad_fallback.get('reason', ''))}",
+                    "Broad failure classification: "
+                    f"{_debug_cell(broad_fallback.get('failure_classification', ''))}",
+                    "Broad provider attempts: "
+                    f"{_debug_cell(broad_fallback.get('attempt_count', ''))}",
+                    "Broad retry occurred: "
+                    f"{'Yes' if broad_fallback.get('retry_occurred') else 'No'}",
+                    "Deterministic fallback used: Yes",
+                    "Broad elapsed seconds: "
+                    f"{_debug_cell(broad_fallback.get('elapsed_seconds', ''))}",
+                ]
+            )
+        lines.extend(
             [
                 "No Broad validation metadata captured.",
                 f"Raw provider output retained: {retained}",
             ]
         )
+        return "\n".join(lines)
     statuses = line_df["Validation Status"].fillna("").astype(str)
     rejected = line_df[statuses.eq("unresolved")]
     reason_counts: Dict[str, int] = {}
@@ -1004,6 +1047,28 @@ def _format_broad_raw_candidate_debug(
     return "\n".join(lines)
 
 
+def _format_relevance_gate_diagnostics(
+    diagnostics: Optional[Mapping[str, object]],
+) -> str:
+    diagnostics = diagnostics or {}
+    if diagnostics.get("evaluated") is not True:
+        return "Relevance gate evaluated: No"
+    return "\n".join(
+        [
+            "Relevance gate evaluated: Yes",
+            "Result: "
+            + ("allowed" if diagnostics.get("allowed") is True else "rejected"),
+            f"Reason: {_debug_cell(diagnostics.get('reason', ''))}",
+            "Glossary signals: "
+            f"{_debug_cell(diagnostics.get('glossary_hit_count', 0))}",
+            "Pattern-structure signals: "
+            f"{_debug_cell(diagnostics.get('structure_signal_count', 0))}",
+            "Explicit crochet-language signals: "
+            f"{_debug_cell(diagnostics.get('explicit_domain_signal_count', 0))}",
+        ]
+    )
+
+
 def _format_overlay_renderer_diagnostics(diagnostics: Optional[Dict[str, object]]) -> str:
     diagnostics = diagnostics or {}
     if not diagnostics:
@@ -1012,6 +1077,14 @@ def _format_overlay_renderer_diagnostics(diagnostics: Optional[Dict[str, object]
     resolver = resolver if isinstance(resolver, dict) else {}
     size_summary = diagnostics.get("final_font_size_summary", {})
     size_summary = size_summary if isinstance(size_summary, dict) else {}
+    replacement_search = diagnostics.get("replacement_candidate_search", {})
+    replacement_search = (
+        replacement_search if isinstance(replacement_search, dict) else {}
+    )
+    terminal_invariant = diagnostics.get("terminal_state_invariant", {})
+    terminal_invariant = (
+        terminal_invariant if isinstance(terminal_invariant, dict) else {}
+    )
     lines = [
         f"Renderer: {_debug_cell(diagnostics.get('renderer', ''))}",
         f"Target language: {_debug_cell(resolver.get('target_language', ''))}",
@@ -1036,8 +1109,28 @@ def _format_overlay_renderer_diagnostics(diagnostics: Optional[Dict[str, object]
         f"Preserved/excluded count: {_debug_cell(diagnostics.get('preserved_excluded', 0))}",
         f"Maximum horizontal expansion: {_debug_cell(diagnostics.get('max_expansion_x', 0))}",
         f"Maximum vertical expansion: {_debug_cell(diagnostics.get('max_expansion_y', 0))}",
-        "Protected-region collision rejections: "
+        "Replacement candidate search: "
+        f"{_debug_cell(replacement_search.get('algorithm', ''))}",
+        "Candidate-mode probes evaluated: "
+        f"{_debug_cell(replacement_search.get('candidate_mode_probes', 0))}",
+        "Protected-region collision rejections among evaluated candidates: "
         f"{_debug_cell(diagnostics.get('protected_region_collision_rejections', 0))}",
+        "Intended trusted visual units: "
+        f"{_debug_cell(terminal_invariant.get('intended_trusted_unit_count', 0))}",
+        "Terminal visual units: "
+        f"{_debug_cell(terminal_invariant.get('terminal_unit_count', 0))}",
+        "On-image translated units: "
+        f"{_debug_cell(terminal_invariant.get('on_image_unit_count', 0))}",
+        "Footer translated units: "
+        f"{_debug_cell(terminal_invariant.get('footer_unit_count', 0))}",
+        "Justified non-translation exclusions: "
+        f"{_debug_cell(terminal_invariant.get('justified_exclusion_unit_count', 0))}",
+        "Silent visual remainder: "
+        f"{_debug_cell(terminal_invariant.get('silent_remainder_count', 0))}",
+        "Silent visual remainder unit IDs: "
+        f"{_debug_cell(terminal_invariant.get('silent_remainder_unit_ids', ()))}"
+        if terminal_invariant.get("silent_remainder_unit_ids", ())
+        else "Silent visual remainder unit IDs: None",
         f"Renderer time: {_debug_cell(diagnostics.get('overlay_generation_time', 0))} sec",
     ]
     units = diagnostics.get("units", [])
@@ -1060,6 +1153,7 @@ def _format_overlay_renderer_diagnostics(diagnostics: Optional[Dict[str, object]
                 "allowed_lines={allowed_lines} | actual_lines={actual_lines} | blocker={blocker} | "
                 "dense_row_candidate={dense_row_candidate} | dense_row_reason={dense_row_reason} | "
                 "row_band={row_band_top}..{row_band_bottom} | strategy={placement_strategy} | "
+                "replacement_search={replacement_search} | candidate_mode_probes={candidate_mode_probes} | "
                 "source_rect={source_rectangle} | source_anchor_top_range={source_anchor_top_range} | "
                 "neighbour_boundary_before={neighbour_boundary_before} | "
                 "neighbour_boundary_after={neighbour_boundary_after} | "
@@ -1132,6 +1226,12 @@ def _format_overlay_renderer_diagnostics(diagnostics: Optional[Dict[str, object]
                     row_band_bottom=_debug_cell(unit.get("row_band_bottom", 0)),
                     placement_strategy=_debug_cell(
                         unit.get("placement_strategy", "normal")
+                    ),
+                    replacement_search=_debug_cell(
+                        unit.get("replacement_search_algorithm", "")
+                    ),
+                    candidate_mode_probes=_debug_cell(
+                        unit.get("replacement_candidate_mode_probes", 0)
                     ),
                     source_rectangle=_debug_cell(
                         unit.get("source_rectangle", "")
@@ -1229,6 +1329,7 @@ def build_debug_report_text(
     rc11g_lookup_index_diagnostics: Optional[Dict[str, object]] = None,
     overlay_renderer_diagnostics: Optional[Dict[str, object]] = None,
     broad_raw_candidate_debug: Optional[Mapping[str, object]] = None,
+    relevance_gate_diagnostics: Optional[Mapping[str, object]] = None,
 ) -> str:
     """Developer-facing diagnostic export for beta testing."""
     quality_metrics = quality_metrics or {}
@@ -1316,11 +1417,18 @@ def build_debug_report_text(
         "",
         "=== Translation Information ===",
         "",
+        "=== Pre-Luna Crochet Relevance Gate ===",
+        _format_relevance_gate_diagnostics(relevance_gate_diagnostics),
+        "",
         "=== Translation Statistics ===",
         _format_rc11c_translation_diagnostics(rc11c_translation_diagnostics),
         "",
         "=== Broad Validation Diagnostics ===",
-        _format_broad_validation_diagnostics(line_df, broad_raw_candidate_debug),
+        _format_broad_validation_diagnostics(
+            line_df,
+            broad_raw_candidate_debug,
+            ai_fallback_diagnostics,
+        ),
         *(
             [
                 "",

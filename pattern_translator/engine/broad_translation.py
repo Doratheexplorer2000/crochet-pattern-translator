@@ -16,7 +16,7 @@ from collections import Counter
 from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Callable, Collection, Dict, List, Mapping, Optional, Sequence, Tuple
 
 import pandas as pd
 
@@ -126,12 +126,14 @@ class BroadRecoverableError(BroadTranslationError):
         failure_classification: str,
         *,
         attempt_count: int,
+        elapsed_seconds: float = 0.0,
     ) -> None:
         super().__init__()
         self.reason = reason
         self.failure_classification = failure_classification
         self.attempt_count = attempt_count
         self.retry_attempted = attempt_count > 1
+        self.elapsed_seconds = max(0.0, float(elapsed_seconds))
 
 
 class _UnitIntegrityError(BroadTranslationError):
@@ -184,6 +186,35 @@ _LANGUAGE_LABELS = {
     TRADITIONAL_CHINESE_SOURCE: "Traditional Chinese",
     SIMPLIFIED_CHINESE_SOURCE: "Simplified Chinese",
     JAPANESE_SOURCE: "Japanese",
+}
+
+_CHINESE_MODES = frozenset(
+    {TRADITIONAL_CHINESE_TARGET, SIMPLIFIED_CHINESE_TARGET}
+)
+_CHINESE_GLOSSARY_FIELDS = {
+    TRADITIONAL_CHINESE_TARGET: {
+        "canonical": "traditional_chinese",
+        "aliases": "traditional_chinese_aliases",
+        "abbreviation": "traditional_chinese_abbreviation",
+    },
+    SIMPLIFIED_CHINESE_TARGET: {
+        "canonical": "simplified_chinese_authoritative_term",
+        "aliases": "simplified_chinese_aliases",
+        "abbreviation": "simplified_chinese_abbreviation",
+    },
+}
+_CHINESE_SOURCE_TARGET_FIELDS = {
+    EN_US_TARGET: {
+        "canonical": "english_us",
+        "abbreviations": "english_us_abbreviations",
+    },
+    EN_UK_TARGET: {
+        "canonical": "english_uk",
+        "abbreviations": "english_uk_abbreviations",
+    },
+    JAPANESE_TARGET: {
+        "canonical": "japanese",
+    },
 }
 
 _ROUTE_CONFIGS: Dict[Tuple[str, str], _RouteConfig] = {
@@ -270,6 +301,93 @@ def _japanese_forms(row: dict[str, str]) -> List[str]:
 def _load_glossary_rows() -> List[dict[str, str]]:
     with GLOSSARY_PATH.open(encoding="utf-8", newline="") as handle:
         return list(csv.DictReader(handle))
+
+
+def _prefer_canonical_chinese_target(
+    entry: Dict[str, Any],
+    config: _RouteConfig,
+) -> None:
+    """Keep source shorthand recognizable without preferring it as Chinese output."""
+    if config.output_mode not in _CHINESE_MODES:
+        return
+    source_fields = _CHINESE_GLOSSARY_FIELDS.get(config.source_mode)
+    target_fields = _CHINESE_GLOSSARY_FIELDS[config.output_mode]
+    if source_fields is None:
+        return
+    source_abbreviation = str(
+        entry.get(source_fields["abbreviation"], "") or ""
+    ).strip()
+    target_abbreviation = str(
+        entry.get(target_fields["abbreviation"], "") or ""
+    ).strip()
+    if (
+        not source_abbreviation
+        or source_abbreviation.casefold() != target_abbreviation.casefold()
+    ):
+        return
+
+    entry.pop(target_fields["abbreviation"], None)
+    target_aliases = entry.get(target_fields["aliases"])
+    if isinstance(target_aliases, list):
+        entry[target_fields["aliases"]] = [
+            alias
+            for alias in target_aliases
+            if str(alias).strip().casefold() != source_abbreviation.casefold()
+        ]
+
+
+def _chinese_target_terminology_policy(config: _RouteConfig) -> Dict[str, Any]:
+    if config.output_mode not in _CHINESE_MODES:
+        return {}
+    target_fields = _CHINESE_GLOSSARY_FIELDS[config.output_mode]
+    return {
+        "source_abbreviation_matching": "case_insensitive",
+        "target_output_preference": "canonical_readable_crochet_terminology",
+        "preferred_target_term_field": target_fields["canonical"],
+        "conflicting_target_abbreviations": "recognition_only_not_preferred_output",
+        "preserve_language_neutral_structure": [
+            "row_and_round_numbers",
+            "counts",
+            "parentheses",
+            "repeat_markers",
+            "multiplication_symbols",
+            "stitch_arithmetic",
+        ],
+    }
+
+
+def _terminology_policy(config: _RouteConfig) -> Dict[str, Any]:
+    chinese_target_policy = _chinese_target_terminology_policy(config)
+    if chinese_target_policy:
+        return chinese_target_policy
+    if config.source_mode not in _CHINESE_MODES:
+        return {}
+    target_fields = _CHINESE_SOURCE_TARGET_FIELDS.get(config.output_mode)
+    if target_fields is None:
+        return {}
+
+    policy: Dict[str, Any] = {
+        "source_abbreviation_matching": "case_insensitive",
+        "source_abbreviation_role": "recognition_only_not_preferred_output",
+        "target_output_preference": (
+            "canonical_japanese_crochet_terminology"
+            if config.output_mode == JAPANESE_TARGET
+            else "standard_english_crochet_terminology_and_abbreviations"
+        ),
+        "preferred_target_term_field": target_fields["canonical"],
+        "preserve_language_neutral_structure": [
+            "row_and_round_numbers",
+            "counts",
+            "parentheses",
+            "repeat_markers",
+            "multiplication_symbols",
+            "stitch_arithmetic",
+        ],
+    }
+    abbreviation_field = target_fields.get("abbreviations")
+    if abbreviation_field:
+        policy["preferred_target_abbreviation_field"] = abbreviation_field
+    return policy
 
 
 def build_glossary(source_mode: str, output_mode: str) -> List[Dict[str, Any]]:
@@ -382,6 +500,7 @@ def build_glossary(source_mode: str, output_mode: str) -> List[Dict[str, Any]]:
                 continue
             entry["japanese"] = japanese_terms[0]
             entry["japanese_aliases"] = japanese_terms[1:]
+        _prefer_canonical_chinese_target(entry, config)
         terms.append(entry)
 
     if not terms:
@@ -391,6 +510,32 @@ def build_glossary(source_mode: str, output_mode: str) -> List[Dict[str, Any]]:
 
 def _glossary_char_count(terms: Sequence[Dict[str, Any]]) -> int:
     return len(json.dumps(list(terms), ensure_ascii=False, separators=(",", ":")))
+
+
+def _source_abbreviations(
+    terms: Sequence[Dict[str, Any]],
+    config: _RouteConfig,
+) -> frozenset[str]:
+    source_fields = _CHINESE_GLOSSARY_FIELDS.get(config.source_mode, {})
+    source_abbreviation_field = source_fields.get("abbreviation", "")
+    return frozenset(
+        str(entry.get(source_abbreviation_field, "")).strip().casefold()
+        for entry in terms
+        if source_abbreviation_field
+        and str(entry.get(source_abbreviation_field, "")).strip()
+    )
+
+
+def _is_dot_separated_source_shorthand(
+    value: str,
+    source_abbreviations: Collection[str],
+) -> bool:
+    parts = [part.strip().casefold() for part in value.split(".")]
+    return (
+        len(parts) >= 2
+        and bool(source_abbreviations)
+        and all(part in source_abbreviations for part in parts)
+    )
 
 
 def build_source_segments(rows: pd.DataFrame) -> Tuple[List[Dict[str, str]], List[pd.Series]]:
@@ -408,7 +553,11 @@ def build_source_segments(rows: pd.DataFrame) -> Tuple[List[Dict[str, str]], Lis
 
 def _protect_segment_url_domains(
     segments: Sequence[Dict[str, str]],
+    terms: Sequence[Dict[str, Any]],
+    config: _RouteConfig,
 ) -> Tuple[List[Dict[str, str]], Dict[str, Dict[str, str]]]:
+    source_abbreviations = _source_abbreviations(terms, config)
+
     protected_segments: List[Dict[str, str]] = []
     replacements_by_segment: Dict[str, Dict[str, str]] = {}
     placeholder_offset = 0
@@ -419,6 +568,13 @@ def _protect_segment_url_domains(
             placeholder_start_index=placeholder_offset,
         )
         placeholder_offset += len(replacements)
+        for placeholder, identity in tuple(replacements.items()):
+            if _is_dot_separated_source_shorthand(
+                identity,
+                source_abbreviations,
+            ):
+                protected = protected.replace(placeholder, identity)
+                replacements.pop(placeholder)
         protected_segments.append(
             {"source_segment_id": source_id, "text": protected}
         )
@@ -540,15 +696,48 @@ def build_prompt(
         "source_segments": list(segments),
         "authoritative_crochet_glossary": list(terms),
     }
+    terminology_policy = _terminology_policy(config)
+    if terminology_policy:
+        payload["terminology_policy"] = terminology_policy
     dialect = ""
     if config.output_mode == EN_US_TARGET:
         dialect = " Use US English crochet terminology."
     elif config.output_mode == EN_UK_TARGET:
         dialect = " Use UK English crochet terminology."
+    chinese_target_guidance = ""
+    if config.output_mode in _CHINESE_MODES and terminology_policy:
+        chinese_target_guidance = (
+            " Interpret glossary-recognized compact crochet abbreviations "
+            "case-insensitively. For a Chinese target, normally expand recognized "
+            "crochet shorthand into the glossary's canonical readable target term; "
+            "a conflicting target abbreviation is recognition context, not an equally "
+            "preferred output form. Preserve language-neutral structure such as row and "
+            "round numbers, counts, parentheses, repeat markers, multiplication symbols, "
+            "and stitch arithmetic. Preserve compact notation only when expansion would "
+            "be semantically inappropriate or it is not recognized crochet shorthand."
+        )
+    chinese_source_guidance = ""
+    if config.source_mode in _CHINESE_MODES and config.output_mode not in _CHINESE_MODES:
+        target_preference = (
+            "the glossary's canonical Japanese crochet terminology"
+            if config.output_mode == JAPANESE_TARGET
+            else "the glossary's standard target English crochet terminology or abbreviations"
+        )
+        chinese_source_guidance = (
+            " Interpret glossary-recognized Chinese-source compact crochet abbreviations "
+            "case-insensitively as source terminology. A recognized source abbreviation is "
+            "recognition context, not a preferred target output form; normally render it using "
+            f"{target_preference}. Preserve language-neutral structure such as row and round "
+            "numbers, counts, parentheses, repeat markers, multiplication symbols, and stitch "
+            "arithmetic. Preserve compact source notation only when it is not recognized crochet "
+            "shorthand or its meaning is genuinely ambiguous."
+        )
     return (
         "You are a specialist crochet-pattern translation agent. Translate the complete "
         f"cleaned OCR pattern from {config.source_language} to {config.target_language}."
         + dialect
+        + chinese_target_guidance
+        + chinese_source_guidance
         + " Use the supplied full route-relevant glossary as terminology context, while allowing "
         "natural target-language expression. Preserve crochet meaning, quantities, units, "
         "rows and rounds, repeats, and operation order. Translate clear titles, headings, and "
@@ -842,17 +1031,31 @@ def _validate_id_coverage(
             fail()
 
 
-def _url_domain_counts(text: str) -> Counter[str]:
+def _url_domain_counts(
+    text: str,
+    source_abbreviations: Collection[str] = (),
+) -> Counter[str]:
     return Counter(
         identity
         for _start, _end, identity in terminology.iter_url_domain_spans(text)
+        if not _is_dot_separated_source_shorthand(
+            identity,
+            source_abbreviations,
+        )
     )
 
 
-def _validate_url_domains(source: str, translation: str) -> bool:
+def _validate_url_domains(
+    source: str,
+    translation: str,
+    source_abbreviations: Collection[str] = (),
+) -> bool:
     if terminology.URL_PLACEHOLDER_RE.search(translation):
         return False
-    return _url_domain_counts(translation) == _url_domain_counts(source)
+    return _url_domain_counts(
+        translation,
+        source_abbreviations,
+    ) == _url_domain_counts(source, source_abbreviations)
 
 
 def _validation_diagnostic_excerpt(text: str) -> Tuple[str, bool]:
@@ -867,6 +1070,7 @@ def _unit_integrity_failure_fields(
     translation: str,
     failed_rule: str,
     source_segment_ids: Optional[Sequence[str]] = None,
+    source_abbreviations: Collection[str] = (),
 ) -> Dict[str, object]:
     source_excerpt, source_truncated = _validation_diagnostic_excerpt(source)
     translation_excerpt, translation_truncated = _validation_diagnostic_excerpt(
@@ -883,10 +1087,10 @@ def _unit_integrity_failure_fields(
         fields["source_segment_ids"] = list(source_segment_ids)
     if failed_rule == "protected_url_or_domain":
         fields["required_url_or_domains"] = list(
-            _url_domain_counts(source).elements()
+            _url_domain_counts(source, source_abbreviations).elements()
         )
         fields["present_url_or_domains"] = list(
-            _url_domain_counts(translation).elements()
+            _url_domain_counts(translation, source_abbreviations).elements()
         )
     return fields
 
@@ -897,11 +1101,12 @@ def _validate_unit_integrity(
     *,
     diagnostic_logger: Optional[DiagnosticLogger] = None,
     source_segment_ids: Optional[Sequence[str]] = None,
+    source_abbreviations: Collection[str] = (),
 ) -> None:
     failed_rule = ""
     if not translation.strip():
         failed_rule = "blank_translation"
-    elif not _validate_url_domains(source, translation):
+    elif not _validate_url_domains(source, translation, source_abbreviations):
         failed_rule = "protected_url_or_domain"
     if not failed_rule:
         return
@@ -911,6 +1116,7 @@ def _validate_unit_integrity(
         translation,
         failed_rule,
         source_segment_ids,
+        source_abbreviations,
     )
     _log(diagnostic_logger, "unit_integrity_validation_failed", **fields)
     raise _UnitIntegrityError(failed_rule, fields)
@@ -923,7 +1129,11 @@ def validate_semantic_units(
     diagnostic_logger: Optional[DiagnosticLogger] = None,
     terms: Optional[Sequence[Dict[str, Any]]] = None,
 ) -> None:
-    del config, terms
+    route_terms = list(terms) if terms is not None else build_glossary(
+        config.source_mode,
+        config.output_mode,
+    )
+    source_abbreviations = _source_abbreviations(route_terms, config)
     expected_ids = [segment["source_segment_id"] for segment in segments]
     _validate_id_coverage(units, expected_ids, diagnostic_logger=diagnostic_logger)
     source_by_id = {
@@ -938,6 +1148,7 @@ def validate_semantic_units(
             unit["translation"],
             diagnostic_logger=diagnostic_logger,
             source_segment_ids=unit["source_segment_ids"],
+            source_abbreviations=source_abbreviations,
         )
 
 
@@ -953,6 +1164,7 @@ def _resolve_unit_integrity_failures(
     units: Sequence[dict[str, Any]],
     segments: Sequence[Dict[str, str]],
     diagnostic_logger: Optional[DiagnosticLogger] = None,
+    source_abbreviations: Collection[str] = (),
 ) -> Tuple[List[dict[str, Any]], int]:
     """Preserve source only for blank or protected-literal-corrupt units."""
     expected_ids = [segment["source_segment_id"] for segment in segments]
@@ -974,6 +1186,7 @@ def _resolve_unit_integrity_failures(
                 unit["translation"],
                 diagnostic_logger=diagnostic_logger,
                 source_segment_ids=unit["source_segment_ids"],
+                source_abbreviations=source_abbreviations,
             )
         except _UnitIntegrityError as error:
             failures.append(error)
@@ -1036,6 +1249,9 @@ def adapt_semantic_units_to_line_df(
     semantic_units: Sequence[dict[str, Any]],
     segments: Sequence[Dict[str, str]],
     segment_rows: Sequence[pd.Series],
+    url_replacements_by_segment: Optional[
+        Mapping[str, Mapping[str, str]]
+    ] = None,
 ) -> pd.DataFrame:
     segment_row_by_id = {
         segments[index]["source_segment_id"]: segment_rows[index]
@@ -1096,6 +1312,14 @@ def adapt_semantic_units_to_line_df(
             _row_geometry_value(row, "max_y", "y", min_y + 20.0) for row in member_rows
         )
         changed = terminology.norm_text(original) != terminology.norm_text(translation)
+        protected_url_domains = tuple(
+            identity
+            for source_id in ids
+            for identity in (url_replacements_by_segment or {}).get(
+                source_id,
+                {},
+            ).values()
+        )
         out.append(
             {
                 "Original": original,
@@ -1108,6 +1332,7 @@ def adapt_semantic_units_to_line_df(
                 "Validation Failure Reason": str(
                     unit.get("validation_failure_reason", "")
                 ),
+                "Protected URL/Domain Identities": protected_url_domains,
                 "Source Regions": tuple(source_regions),
                 "Visual Line IDs": tuple(
                     str(region.get("visual_line_id", "")) for region in source_regions
@@ -1220,12 +1445,7 @@ def _provider_failure_policy(
     if isinstance(reason, ssl.SSLError):
         return "tls_failure", "transport_non_retryable", False
     if isinstance(error, json.JSONDecodeError):
-        retryable = elapsed_seconds <= BROAD_FAST_TRANSIENT_SECONDS
-        return (
-            "provider_json_malformed",
-            "malformed_response" if retryable else "late_malformed_response",
-            retryable,
-        )
+        return "provider_json_malformed", "malformed_response", True
     if isinstance(error, (urllib.error.URLError, OSError)):
         return "transport_failure", "transport_non_retryable", False
     return "provider_failure", "unexpected_provider_failure", False
@@ -1279,11 +1499,10 @@ def translate_merged_ocr_lines_broad(
     segments, segment_rows = build_source_segments(rows)
     if not segments:
         return pd.DataFrame()
-    protected_segments, url_replacements_by_segment = (
-        _protect_segment_url_domains(segments)
-    )
-
     terms = build_glossary(source_mode, output_mode)
+    protected_segments, url_replacements_by_segment = (
+        _protect_segment_url_domains(segments, terms, config)
+    )
     prompt = build_prompt(protected_segments, terms, config)
     _log(
         diagnostic_logger,
@@ -1309,6 +1528,7 @@ def translate_merged_ocr_lines_broad(
                 "shared_budget_exhausted",
                 "request_timeout",
                 attempt_count=attempt - 1,
+                elapsed_seconds=max(0.0, luna_start - broad_start),
             )
         _log(
             diagnostic_logger,
@@ -1371,6 +1591,10 @@ def translate_merged_ocr_lines_broad(
                 reason,
                 classification,
                 attempt_count=attempt,
+                elapsed_seconds=max(
+                    0.0,
+                    BROAD_TIMEOUT_SECONDS - remaining_after_failure,
+                ),
             ) from None
         finally:
             _BROAD_CALL_TIMEOUT_SECONDS.reset(timeout_token)
@@ -1402,6 +1626,7 @@ def translate_merged_ocr_lines_broad(
                 )
         except _BroadResponseParsingError as error:
             elapsed_seconds = time.perf_counter() - luna_start
+            failure_classification = "malformed_response"
             _log_response_parsing_failure(
                 diagnostic_logger,
                 error,
@@ -1412,8 +1637,8 @@ def translate_merged_ocr_lines_broad(
                 time.perf_counter() - broad_start
             )
             retry_scheduled = (
-                attempt == 1
-                and elapsed_seconds <= BROAD_FAST_TRANSIENT_SECONDS
+                failure_classification == "malformed_response"
+                and attempt == 1
                 and remaining_after_failure >= BROAD_MIN_RETRY_BUDGET_SECONDS
             )
             _log(
@@ -1425,7 +1650,7 @@ def translate_merged_ocr_lines_broad(
                 route="broad",
                 outcome="validation_rejected",
                 reason=error.reason,
-                failure_classification="malformed_response",
+                failure_classification=failure_classification,
                 retry_scheduled=retry_scheduled,
                 remaining_budget_seconds=max(0.0, remaining_after_failure),
             )
@@ -1435,24 +1660,37 @@ def translate_merged_ocr_lines_broad(
                     "broad_retry_scheduled",
                     call_ordinal=attempt,
                     reason=error.reason,
-                    failure_classification="malformed_response",
+                    failure_classification=failure_classification,
                     retry_scheduled=True,
                 )
                 attempt += 1
                 continue
             raise BroadRecoverableError(
                 error.reason,
-                "malformed_response",
+                failure_classification,
                 attempt_count=attempt,
+                elapsed_seconds=max(
+                    0.0,
+                    BROAD_TIMEOUT_SECONDS - remaining_after_failure,
+                ),
             ) from None
 
         processed_units = units
+        source_abbreviations = _source_abbreviations(terms, config)
         units, partial_failure_count = _resolve_unit_integrity_failures(
             units,
             segments,
             diagnostic_logger=diagnostic_logger,
+            source_abbreviations=source_abbreviations,
         )
-        result = adapt_semantic_units_to_line_df(units, segments, segment_rows)
+        result = adapt_semantic_units_to_line_df(
+            units,
+            segments,
+            segment_rows,
+            url_replacements_by_segment,
+        )
+        result.attrs["broad_attempt_count"] = attempt
+        result.attrs["broad_retry_occurred"] = attempt > 1
         if debug_capture_enabled:
             result.attrs[BROAD_DEBUG_CAPTURE_ATTR] = _build_broad_debug_capture(
                 raw_units,

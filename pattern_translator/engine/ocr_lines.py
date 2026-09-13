@@ -49,6 +49,16 @@ _FOOTNOTE_OR_CAPTION_RE = re.compile(
     r"(?:\[\s*\d+\s*\]|[＊*†‡]|(?:圖|图|表|Figure|Fig\.?)\s*\d+\b)",
     re.IGNORECASE,
 )
+_READING_LANE_MIN_SUPPORT = 4
+_READING_LANE_MIN_OVERLAP_SUPPORT = 3
+_READING_LANE_MIN_VERTICAL_BANDS = 4
+_READING_LANE_START_TOLERANCE_HEIGHT_RATIO = 0.9
+_READING_LANE_START_TOLERANCE_WIDTH_RATIO = 0.015
+_READING_LANE_MIN_SEPARATION_HEIGHT_RATIO = 6.0
+_READING_LANE_MIN_SEPARATION_WIDTH_RATIO = 0.25
+_READING_LANE_MIN_VERTICAL_SPAN_HEIGHT_RATIO = 3.0
+_READING_LANE_MIN_GUTTER_HEIGHT_RATIO = 1.2
+_READING_LANE_MIN_GUTTER_WIDTH_RATIO = 0.03
 
 _profile_getter: ProfileGetter = lambda: None
 _profile_count_func: ProfileCount = lambda name, amount=1.0: None
@@ -102,6 +112,184 @@ def profile_function(time_name: str, count_name: str):
     return decorator
 
 
+def _distinct_vertical_band_count(centers: list[float], median_height: float) -> int:
+    if not centers:
+        return 0
+    separation = max(8.0, median_height * 0.75)
+    band_count = 1
+    last_center = sorted(centers)[0]
+    for center in sorted(centers)[1:]:
+        if center - last_center >= separation:
+            band_count += 1
+            last_center = center
+    return band_count
+
+
+def _infer_confident_reading_lanes(
+    rows: pd.DataFrame,
+    *,
+    median_height: float,
+) -> Dict[object, int]:
+    """Return confident row-index to reading-lane assignments.
+
+    Lanes require repeated, vertically distributed x-start anchors on both
+    sides of a persistent gutter. Rows that cross a confident gutter are
+    treated as neutral spanners, and rows whose start is not near a supported
+    anchor remain unclassified so the existing merge rules still apply.
+    """
+    if rows is None or len(rows) < _READING_LANE_MIN_SUPPORT * 2:
+        return {}
+
+    min_x = float(rows["min_x"].min())
+    max_x = float(rows["max_x"].max())
+    content_width = max(1.0, max_x - min_x)
+    start_tolerance = max(
+        12.0,
+        median_height * _READING_LANE_START_TOLERANCE_HEIGHT_RATIO,
+        content_width * _READING_LANE_START_TOLERANCE_WIDTH_RATIO,
+    )
+
+    clusters: list[Dict[str, object]] = []
+    for index, row in rows.sort_values("min_x").iterrows():
+        start = float(row["min_x"])
+        if not clusters or abs(start - float(clusters[-1]["anchor"])) > start_tolerance:
+            clusters.append({"anchor": start, "indices": [index]})
+            continue
+        indices = clusters[-1]["indices"]
+        if not isinstance(indices, list):
+            continue
+        indices.append(index)
+        clusters[-1]["anchor"] = sum(
+            float(rows.loc[item, "min_x"]) for item in indices
+        ) / len(indices)
+
+    min_vertical_span = max(
+        80.0,
+        median_height * _READING_LANE_MIN_VERTICAL_SPAN_HEIGHT_RATIO,
+    )
+    supported: list[Dict[str, object]] = []
+    for cluster in clusters:
+        indices = cluster["indices"]
+        if not isinstance(indices, list) or len(indices) < _READING_LANE_MIN_SUPPORT:
+            continue
+        centers = [float(rows.loc[index, "_cy"]) for index in indices]
+        if max(centers) - min(centers) < min_vertical_span:
+            continue
+        if (
+            _distinct_vertical_band_count(centers, median_height)
+            < _READING_LANE_MIN_VERTICAL_BANDS
+        ):
+            continue
+        supported.append(cluster)
+
+    if len(supported) < 2:
+        return {}
+
+    supported.sort(key=lambda cluster: float(cluster["anchor"]))
+    min_anchor_separation = max(
+        180.0,
+        median_height * _READING_LANE_MIN_SEPARATION_HEIGHT_RATIO,
+        content_width * _READING_LANE_MIN_SEPARATION_WIDTH_RATIO,
+    )
+    min_gutter = max(
+        24.0,
+        median_height * _READING_LANE_MIN_GUTTER_HEIGHT_RATIO,
+        content_width * _READING_LANE_MIN_GUTTER_WIDTH_RATIO,
+    )
+
+    confident_pairs: list[tuple[int, int, float]] = []
+    participating_clusters: set[int] = set()
+    for left_position in range(len(supported) - 1):
+        right_position = left_position + 1
+        left = supported[left_position]
+        right = supported[right_position]
+        left_anchor = float(left["anchor"])
+        right_anchor = float(right["anchor"])
+        if right_anchor - left_anchor < min_anchor_separation:
+            continue
+
+        left_indices = left["indices"]
+        right_indices = right["indices"]
+        if not isinstance(left_indices, list) or not isinstance(right_indices, list):
+            continue
+        left_centers = [float(rows.loc[index, "_cy"]) for index in left_indices]
+        right_centers = [float(rows.loc[index, "_cy"]) for index in right_indices]
+        overlap_top = max(min(left_centers), min(right_centers))
+        overlap_bottom = min(max(left_centers), max(right_centers))
+        if overlap_bottom - overlap_top < min_vertical_span:
+            continue
+        left_overlap = [
+            index
+            for index in left_indices
+            if overlap_top <= float(rows.loc[index, "_cy"]) <= overlap_bottom
+        ]
+        right_overlap = [
+            index
+            for index in right_indices
+            if overlap_top <= float(rows.loc[index, "_cy"]) <= overlap_bottom
+        ]
+        if (
+            len(left_overlap) < _READING_LANE_MIN_OVERLAP_SUPPORT
+            or len(right_overlap) < _READING_LANE_MIN_OVERLAP_SUPPORT
+        ):
+            continue
+        if (
+            _distinct_vertical_band_count(
+                [float(rows.loc[index, "_cy"]) for index in left_overlap],
+                median_height,
+            )
+            < _READING_LANE_MIN_OVERLAP_SUPPORT
+            or _distinct_vertical_band_count(
+                [float(rows.loc[index, "_cy"]) for index in right_overlap],
+                median_height,
+            )
+            < _READING_LANE_MIN_OVERLAP_SUPPORT
+        ):
+            continue
+
+        right_start = min(float(rows.loc[index, "min_x"]) for index in right_overlap)
+        left_ends = [
+            float(rows.loc[index, "max_x"])
+            for index in left_overlap
+            if float(rows.loc[index, "max_x"]) <= right_start - min_gutter
+        ]
+        if len(left_ends) < _READING_LANE_MIN_OVERLAP_SUPPORT:
+            continue
+        left_end = max(left_ends)
+        if right_start - left_end < min_gutter:
+            continue
+
+        confident_pairs.append(
+            (left_position, right_position, (left_end + right_start) / 2.0)
+        )
+        participating_clusters.update((left_position, right_position))
+
+    if not confident_pairs:
+        return {}
+
+    lane_for_cluster = {
+        cluster_position: lane_id
+        for lane_id, cluster_position in enumerate(sorted(participating_clusters))
+    }
+    gutter_centers = [gutter for _left, _right, gutter in confident_pairs]
+    assignments: Dict[object, int] = {}
+    for index, row in rows.iterrows():
+        start = float(row["min_x"])
+        candidates = [
+            (abs(start - float(supported[position]["anchor"])), position)
+            for position in participating_clusters
+        ]
+        distance, cluster_position = min(candidates)
+        if distance > start_tolerance:
+            continue
+        row_min_x = float(row["min_x"])
+        row_max_x = float(row["max_x"])
+        if any(row_min_x < gutter < row_max_x for gutter in gutter_centers):
+            continue
+        assignments[index] = lane_for_cluster[cluster_position]
+    return assignments
+
+
 def merge_ocr_boxes_into_visual_lines(
     ocr_rows: pd.DataFrame,
     *,
@@ -131,6 +319,11 @@ def merge_ocr_boxes_into_visual_lines(
     rows["_h"] = (rows["max_y"].fillna(rows.get("y", 0) + 20) - rows["min_y"].fillna(rows.get("y", 0))).abs()
     median_h = float(rows["_h"].replace(0, pd.NA).dropna().median() or 20)
     y_threshold = max(10.0, median_h * 0.65)
+    reading_lanes = _infer_confident_reading_lanes(
+        rows,
+        median_height=median_h,
+    )
+    rows["_reading_lane"] = [reading_lanes.get(index) for index in rows.index]
 
     rows = rows.sort_values(["_cy", "min_x"]).reset_index(drop=True)
     line_groups = []
@@ -160,13 +353,27 @@ def merge_ocr_boxes_into_visual_lines(
         ):
             continue
         cluster = []
+        cluster_lane_ids = set()
         last_max_x = None
         for _, row in line.iterrows():
             min_x = float(row.get("min_x", row.get("x", 0)) or 0)
-            if cluster and last_max_x is not None and min_x - last_max_x > gap_threshold:
+            raw_lane_id = row.get("_reading_lane")
+            lane_id = None if pd.isna(raw_lane_id) else int(raw_lane_id)
+            lane_conflict = (
+                lane_id is not None
+                and bool(cluster_lane_ids)
+                and lane_id not in cluster_lane_ids
+            )
+            gap_split = (
+                last_max_x is not None and min_x - last_max_x > gap_threshold
+            )
+            if cluster and (lane_conflict or gap_split):
                 merged_records.append(_merge_ocr_cluster(cluster))
                 cluster = []
+                cluster_lane_ids = set()
             cluster.append(row)
+            if lane_id is not None:
+                cluster_lane_ids.add(lane_id)
             last_max_x = float(row.get("max_x", row.get("x", min_x) + 80) or (min_x + 80))
         if cluster:
             merged_records.append(_merge_ocr_cluster(cluster))
@@ -491,12 +698,32 @@ def build_ocr_line_translations(
                 profile_add_time=_profile_add_time,
             ))
         except broad_translation.BroadRecoverableError as error:
+            failure_diagnostics = {
+                "route": "broad",
+                "model": broad_translation.BROAD_MODEL,
+                "source_mode": source_mode,
+                "target_mode": output_mode,
+                "reason": error.reason,
+                "failure_classification": error.failure_classification,
+                "attempt_count": error.attempt_count,
+                "retry_occurred": error.retry_attempted,
+                "fallback_invoked": True,
+                "elapsed_seconds": error.elapsed_seconds,
+            }
             if diagnostic_logger is not None:
                 diagnostic_logger(
                     "broad_terminal_fallback_begin",
                     terminal_fallback_reason=error.reason,
                     failure_classification=error.failure_classification,
+                    route="broad",
+                    model=broad_translation.BROAD_MODEL,
+                    source_mode=source_mode,
+                    target_mode=output_mode,
+                    attempt_count=error.attempt_count,
                     retry_attempted=error.retry_attempted,
+                    retry_occurred=error.retry_attempted,
+                    fallback_invoked=True,
+                    elapsed_seconds=error.elapsed_seconds,
                     deterministic_legacy_fallback_ran=True,
                 )
             try:
@@ -518,13 +745,25 @@ def build_ocr_line_translations(
                 broad_translation.request_warning_for_target(output_mode)
             )
             result.attrs["broad_fallback_mode"] = fallback_outcome
+            result.attrs["broad_failure_diagnostics"] = {
+                **failure_diagnostics,
+                "fallback_mode": fallback_outcome,
+            }
             if diagnostic_logger is not None:
                 diagnostic_logger(
                     "broad_terminal_fallback_end",
                     outcome=fallback_outcome,
                     terminal_fallback_reason=error.reason,
                     failure_classification=error.failure_classification,
+                    route="broad",
+                    model=broad_translation.BROAD_MODEL,
+                    source_mode=source_mode,
+                    target_mode=output_mode,
+                    attempt_count=error.attempt_count,
                     retry_attempted=error.retry_attempted,
+                    retry_occurred=error.retry_attempted,
+                    fallback_invoked=True,
+                    elapsed_seconds=error.elapsed_seconds,
                     deterministic_legacy_fallback_ran=True,
                 )
             return _annotate_overlay_metadata(result)

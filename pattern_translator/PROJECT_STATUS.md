@@ -1,10 +1,10 @@
 # Crochet Pattern Translator Project Status
 
-Last updated: 2026-09-12
+Last updated: 2026-09-13
 
 ## 20-Route Broad Release Finalisation — 2026-09-12
 
-Status: local release candidate complete and Human-UAT validated; not yet committed, pushed, or deployed. The currently deployed production revision remains `96dd8034b6d70433f848568ec9d34aabd113e334` until separate release approval.
+Status: the 20-route release baseline is committed and pushed at `5a73c0b87896cd1c20ce46f41aa811a95063542e`; approved post-baseline Human-UAT work remains local and uncommitted. Neither the baseline nor the post-baseline work is deployed. The currently deployed production revision remains `96dd8034b6d70433f848568ec9d34aabd113e334` until separate release approval.
 
 The FastAPI/browser application is the active frontend. Streamlit remains preserved for rollback/history only. Local frontend command:
 
@@ -21,6 +21,12 @@ Luna is the translation authority. A normal successful Broad translation uses on
 Downstream delivery preserves trusted status for accepted Broad `validated` units unless an objective integrity problem exists. This resolves false warnings for unchanged English US/UK prose, Traditional/Simplified Chinese shorthand, protected-domain/opaque content, and valid symbol-heavy text.
 
 The renderer bottom-boundary defect is fixed: a clamped multi-region extra plate is rejected unless it can fit glyph height plus padding, allowing the existing safe compound/fallback layout and preventing silent clipping of the final rendered line. Focused regression and Human UAT with the original failing Simplified Chinese to Japanese image passed.
+
+Approved post-baseline hardening adds a deterministic Pre-Luna crochet relevance gate. Readable irrelevant images and sparse zero-signal text are rejected before provider translation, while compact counted abbreviations such as `8F` and `6X` remain allowed. The browser locks Translate for the rejected image/source/crop identity, resets that state when an OCR input changes, and preserves it across target-only changes.
+
+The same boundary adds confident multi-column OCR lane separation, credible short-CJK preservation, route-aware readable Chinese shorthand output, genuine URL/domain protection without treating `F.FV` as a domain, and classified malformed-response retry telemetry within the existing shared budget. Renderer hardening adds exact run-local text-measurement memoization, binary font-fit boundary search, safe source-ownership reconciliation, and a terminal-state invariant: every intended trusted visual translation must be placed on-image, routed to the footer, or explicitly justified as excluded, with no silent remainder.
+
+The existing 1000-pixel OCR resize policy is unchanged. OCR remains probabilistic; Select Area remains available for difficult dense regions.
 
 The original eight Broad routes passed Human UAT, and representative added route families—including English UK to Traditional Chinese, Simplified Chinese, and Japanese, plus Simplified Chinese to English UK—were confirmed. Trust/delivery corrections were validated for both English-dialect directions and both Traditional/Simplified Chinese directions. Japanese source remains supported but shows a localized non-blocking Beta expectation notice because chart/symbol-heavy OCR structure can constrain quality. Japanese target alone does not show the notice. These results do not claim exhaustive validation of every possible pattern on every route.
 

@@ -534,6 +534,9 @@ def create_diagnostic_snapshot(
         "ai_fallback_diagnostics": inputs.get("ai_fallback_diagnostics")
         if isinstance(inputs.get("ai_fallback_diagnostics"), (list, tuple))
         else [],
+        "relevance_gate_diagnostics": inputs.get("relevance_gate_diagnostics")
+        if isinstance(inputs.get("relevance_gate_diagnostics"), Mapping)
+        else {},
         "ocr_workload_diagnostics": inputs.get("ocr_workload_diagnostics")
         if isinstance(inputs.get("ocr_workload_diagnostics"), Mapping)
         else {},
@@ -793,6 +796,7 @@ def restore_diagnostic_snapshot(
         "ocr_call_diagnostics",
         "downscale_diagnostics",
         "overlay_renderer_diagnostics",
+        "relevance_gate_diagnostics",
     ):
         if not isinstance(diagnostics.get(key), dict):
             raise ValueError("diagnostic detail is invalid")
@@ -984,6 +988,7 @@ def build_deferred_diagnostic_report(
         rc11g_lookup_index_diagnostics=rc11g_lookup_index_diagnostics,
         overlay_renderer_diagnostics=inputs.get("overlay_renderer_diagnostics"),
         broad_raw_candidate_debug=inputs.get(_BROAD_DEBUG_CAPTURE_KEY),
+        relevance_gate_diagnostics=inputs.get("relevance_gate_diagnostics"),
     )
     report_seconds = time.perf_counter() - report_start
     runtime_profile["diagnostic_report_generation"] = report_seconds

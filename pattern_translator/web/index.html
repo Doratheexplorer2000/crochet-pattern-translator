@@ -69,7 +69,8 @@
       <button id="translate-button" class="primary" type="button" data-i18n="translate"></button>
     </section>
     <section id="result-section" class="results" hidden>
-      <section class="overlay-result">
+      <aside id="relevance-validation" class="overlay-guide" role="status" hidden></aside>
+      <section id="overlay-result" class="overlay-result">
         <h2 data-i18n="overlay"></h2>
         <aside class="overlay-guide" aria-labelledby="overlay-guide-title">
           <p id="overlay-guide-title" class="overlay-guide-title" data-i18n="overlayGuideTitle"></p>
@@ -78,7 +79,7 @@
         <img id="overlay-image" alt="">
         <a id="png-download" class="secondary download" download data-i18n="downloadPng"></a>
       </section>
-      <section class="line-result">
+      <section id="line-result" class="line-result">
         <h2 data-i18n="lines"></h2>
         <p class="result-label" data-i18n="translatedLines"></p>
         <div id="translation-text" class="translation-surface" tabindex="0"></div>

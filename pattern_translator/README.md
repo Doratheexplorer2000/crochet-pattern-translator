@@ -2,7 +2,7 @@
 
 Mobile-first OCR translation for crochet pattern images.
 
-Current deployed production baseline: `96dd8034b6d70433f848568ec9d34aabd113e334` (`Fix dense overlay placement and page metadata handling`). The 20-route Luna-primary Broad release described below is Human-UAT validated in the local working tree but is not yet committed or deployed.
+Current deployed production baseline: `96dd8034b6d70433f848568ec9d34aabd113e334` (`Fix dense overlay placement and page metadata handling`). Repository `main` is at `5a73c0b87896cd1c20ce46f41aa811a95063542e` (`Complete Luna-primary 20-route translation matrix`), which is committed and pushed but not yet deployed. Additional approved Human-UAT work remains local and uncommitted.
 
 Production application entry point:
 
@@ -22,11 +22,17 @@ Production URL: `https://pattern.crochetintelligence.com`
 
 ## Release Finalisation — 2026-09-12
 
-The current local release candidate completes the Luna-primary Broad architecture and all 20 unequal source-to-target routes across English US, English UK, Traditional Chinese, Simplified Chinese, and Japanese. Same-language translation is blocked before OCR/provider work. Japanese source mode shows a non-blocking localized Beta expectation notice; Japanese as target alone does not.
+The `5a73c0b` repository baseline completes the Luna-primary Broad architecture and all 20 unequal source-to-target routes across English US, English UK, Traditional Chinese, Simplified Chinese, and Japanese. Same-language translation is blocked before OCR/provider work. Japanese source mode shows a non-blocking localized Beta expectation notice; Japanese as target alone does not.
 
 Human UAT approved representative route families, both English-dialect directions, Traditional/Simplified Chinese shorthand preservation, the same-language guard, Japanese-source Beta notice, and the original Simplified Chinese to Japanese renderer failure. The renderer now rejects a bottom-clamped multi-region extra plate unless it can fit glyph height plus padding, allowing the existing safe compound/fallback layout instead of clipping the final line.
 
-This is a release-candidate description, not a deployment claim. Railway remains on the deployed baseline above until a separately approved commit, push, and deployment. The source-replacement code default remains OFF; Railway owns production activation through `PATTERN_SOURCE_REPLACEMENT_OVERLAY_ENABLED=1`.
+Approved post-baseline hardening adds a deterministic Pre-Luna crochet relevance gate, including sparse zero-signal rejection and compact counted-abbreviation allowance. Rejected images stop before provider translation and keep Translate locked until the image, source, or crop changes; a target-only change retains the rejection.
+
+The same hardening separates confident multi-column OCR reading lanes, preserves credible short CJK text, applies readable route-aware Chinese shorthand output, and protects genuine URLs/domains without misclassifying crochet shorthand such as `F.FV`. The source-replacement renderer uses memoized text measurement and binary font fitting, reconciles safe OCR-row ownership overlaps, and guarantees every intended trusted visual translation ends on-image, in the footer, or as an explicit justified exclusion—never as a silent loss.
+
+The existing 1000-pixel OCR resize policy is unchanged. OCR remains probabilistic, and Select Area remains available for difficult dense regions.
+
+This is a release-candidate description, not a deployment claim. The approved post-baseline work remains local and uncommitted, and Railway remains on the deployed baseline above until separately approved release and deployment actions. The source-replacement code default remains OFF; Railway owns production activation through `PATTERN_SOURCE_REPLACEMENT_OVERLAY_ENABLED=1`.
 
 ## Soft Launch Status — 2026-09-07
 

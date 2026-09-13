@@ -315,6 +315,7 @@ def _serialize_success(
         "crop_box": list(crop_box),
         "quality": quality,
         "raw_ocr_text": primary.get("raw_ocr_text", ""),
+        "relevance_rejected": primary.get("relevance_rejected", False) is True,
         "readable_translation": primary.get("readable_translation", ""),
         "translation_txt": primary.get("translation_txt", ""),
         "overlay_png": _overlay_png_payload(primary.get("overlay_png")),

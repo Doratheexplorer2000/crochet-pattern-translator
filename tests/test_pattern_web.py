@@ -511,6 +511,86 @@ class PatternBrowserUiTests(unittest.TestCase):
         self.assertTrue(payload["changedCropCleared"])
         self.assertTrue(payload["previousResultPreserved"])
 
+    def test_relevance_rejection_is_bound_to_ocr_input_not_target(self):
+        payload = run_browser_modules(
+            """
+            import { readFileSync } from 'node:fs';
+            const module = (path) => import('data:text/javascript,' + encodeURIComponent(readFileSync(path, 'utf8')));
+            const {
+              beginTranslation, canTranslate, clearRelevanceRejection,
+              hasCurrentRelevanceRejection, recordRelevanceRejection,
+            } = await module('./pattern_translator/web/workflow_state.js');
+            const fileA = { name: 'library.jpg' };
+            const fileB = { name: 'crochet.jpg' };
+            const goodQuality = (file, area, crop) => ({
+              qualityAssessment: { level: 'good' }, qualityFile: file,
+              qualityArea: area, qualityCrop: crop, qualityConfirmed: false,
+              qualityLoading: false,
+            });
+            const state = {
+              file: fileA, source: 'Traditional Chinese', target: 'English — US',
+              area: 'Whole Pattern', crop: null, loading: false, generation: 4,
+              relevanceRejection: null,
+              ...goodQuality(fileA, 'Whole Pattern', null),
+            };
+
+            recordRelevanceRejection(state);
+            const blockedAfterRejection = !canTranslate(state)
+              && hasCurrentRelevanceRejection(state);
+            const repeatedActivation = beginTranslation(state, new AbortController());
+
+            state.target = 'Japanese';
+            const targetOnlyStillBlocked = !canTranslate(state)
+              && hasCurrentRelevanceRejection(state);
+
+            state.source = 'Simplified Chinese';
+            const sourceChangeResets = !hasCurrentRelevanceRejection(state)
+              && canTranslate(state);
+
+            state.source = 'Traditional Chinese';
+            state.file = fileB;
+            Object.assign(state, goodQuality(fileB, 'Whole Pattern', null));
+            const replacementEnabled = !hasCurrentRelevanceRejection(state)
+              && canTranslate(state);
+
+            state.file = null;
+            const removeResets = !hasCurrentRelevanceRejection(state);
+            state.file = fileA;
+            state.area = 'Select Area';
+            state.crop = [10, 20, 110, 120];
+            Object.assign(state, goodQuality(fileA, 'Select Area', [...state.crop]));
+            recordRelevanceRejection(state);
+            state.crop = [11, 20, 110, 120];
+            state.qualityCrop = [...state.crop];
+            const cropChangeResets = !hasCurrentRelevanceRejection(state)
+              && canTranslate(state);
+
+            recordRelevanceRejection(state);
+            clearRelevanceRejection(state);
+            const explicitClearRestores = !hasCurrentRelevanceRejection(state)
+              && canTranslate(state);
+
+            console.log(JSON.stringify({
+              blockedAfterRejection,
+              repeatedActivation,
+              targetOnlyStillBlocked,
+              sourceChangeResets,
+              replacementEnabled,
+              removeResets,
+              cropChangeResets,
+              explicitClearRestores,
+            }));
+            """
+        )
+        self.assertTrue(payload["blockedAfterRejection"])
+        self.assertIsNone(payload["repeatedActivation"])
+        self.assertTrue(payload["targetOnlyStillBlocked"])
+        self.assertTrue(payload["sourceChangeResets"])
+        self.assertTrue(payload["replacementEnabled"])
+        self.assertTrue(payload["removeResets"])
+        self.assertTrue(payload["cropChangeResets"])
+        self.assertTrue(payload["explicitClearRestores"])
+
     def test_quality_response_validation_and_stale_crop_protection(self):
         payload = run_browser_modules(
             """
@@ -545,6 +625,10 @@ class PatternBrowserUiTests(unittest.TestCase):
               overlay_png: { media_type: 'image/png', base64: 'cG5n' },
               diagnostic_context: null,
             };
+            const rejected = {
+              ...translation, relevance_rejected: true,
+              readable_translation: '', translation_txt: '', overlay_png: null,
+            };
             const validAccepted = isValidQualityResponse(valid, identity)
               && applyQualityResponse(state, valid, identity)
               && hasCurrentQuality(state);
@@ -554,6 +638,7 @@ class PatternBrowserUiTests(unittest.TestCase):
               wrongCropRejected: !isValidQualityResponse(wrongCrop, identity),
               malformedRejected: !isValidQualityResponse(malformed, identity),
               validTranslation: isValidTranslationResponse(translation, state, identity),
+              validRelevanceRejection: isValidTranslationResponse(rejected, state, identity),
               malformedTranslationRejected: !isValidTranslationResponse(
                 { ...translation, translation_txt: null }, state, identity,
               ),
@@ -566,6 +651,7 @@ class PatternBrowserUiTests(unittest.TestCase):
         self.assertTrue(payload["wrongCropRejected"])
         self.assertTrue(payload["malformedRejected"])
         self.assertTrue(payload["validTranslation"])
+        self.assertTrue(payload["validRelevanceRejection"])
         self.assertTrue(payload["malformedTranslationRejected"])
         self.assertFalse(payload["staleAfterCropChange"])
         self.assertTrue(payload["assessmentUnboundAfterCropChange"])
@@ -746,6 +832,27 @@ class PatternBrowserUiTests(unittest.TestCase):
                     "診断レポートを準備しています……",
                     "診断レポートを生成できませんでした。翻訳結果は引き続き利用できます。",
                 ],
+            ],
+            payload,
+        )
+
+    def test_relevance_rejection_copy_exists_in_all_four_languages(self):
+        payload = run_browser_modules(
+            """
+            import { readFileSync } from 'node:fs';
+            const module = (path) => import('data:text/javascript,' + encodeURIComponent(readFileSync(path, 'utf8')));
+            const { stringsFor } = await module('./pattern_translator/web/translations.js');
+            console.log(JSON.stringify(['en', 'zh-Hant', 'zh-Hans', 'ja'].map(
+              (lang) => stringsFor(lang).notCrochetPattern,
+            )));
+            """
+        )
+        self.assertEqual(
+            [
+                "This image does not appear to contain a crochet pattern. Please upload an image containing crochet instructions or a crochet chart.",
+                "這張圖片看起來不像鈎織圖樣。請上傳包含鈎織文字或圖解的圖片。",
+                "这张图片看起来不像钩织图样。请上传包含钩织文字或图解的图片。",
+                "この画像にはかぎ針編みのパターンが含まれていないようです。かぎ針編みの説明または編み図が含まれる画像をアップロードしてください。",
             ],
             payload,
         )

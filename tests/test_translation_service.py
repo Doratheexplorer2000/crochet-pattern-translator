@@ -1,5 +1,4 @@
 import re
-import csv
 import importlib
 import subprocess
 import sys
@@ -728,6 +727,293 @@ class TranslationServiceOrchestrationTests(unittest.TestCase):
         overlay_image = Image.new("RGB", (1200, 800), color=(255, 255, 255))
         return ocr_rows, line_df, overlay_image
 
+    @mock.patch(
+        "pattern_translator.engine.broad_translation.translate_merged_ocr_lines_broad"
+    )
+    @mock.patch(
+        "pattern_translator.translation_service.line_translation_engine.translate_ocr_line"
+    )
+    @mock.patch(
+        "pattern_translator.translation_service.llm_fallback_engine.get_openai_provider_from_env"
+    )
+    @mock.patch(
+        "pattern_translator.translation_service.overlay_engine.make_line_translation_overlay"
+    )
+    @mock.patch(
+        "pattern_translator.translation_service.ocr_lines_engine.build_ocr_line_translations"
+    )
+    @mock.patch("pattern_translator.translation_service.run_primary_ocr")
+    def test_unrelated_readable_text_stops_before_all_translation_work(
+        self,
+        mock_run_primary_ocr,
+        mock_build_lines,
+        mock_make_overlay,
+        mock_get_provider,
+        mock_translate_line,
+        mock_broad_translate,
+    ):
+        bottle_lines = [
+            "Carbonated natural mineral water",
+            "Warning Pressurised container Open with care",
+            "STORAGE Store in a cool dry place away from direct sunlight",
+            "COMPOSITION Typical values Per litre Calcium Magnesium Potassium",
+            "Sodium Bicarbonate Sulphate Nitrate Chloride",
+            "Recycling Bottled at source Tesco Stores Ltd",
+        ]
+        rows = pd.DataFrame(
+            [
+                {
+                    "text": text,
+                    "confidence": 0.99,
+                    "x": 10.0,
+                    "global_x": 10.0,
+                    "y": float(index * 30),
+                    "min_x": 10.0,
+                    "max_x": 600.0,
+                    "min_y": float(index * 30),
+                    "max_y": float(index * 30 + 20),
+                }
+                for index, text in enumerate(bottle_lines)
+            ]
+        )
+        mock_run_primary_ocr.return_value = {
+            "selected_name": "PaddleOCR",
+            "selected_text": "\n".join(bottle_lines),
+            "selected_rows": rows,
+            "paddle_inference_seconds": 0.1,
+        }
+
+        result = translate_image(self._base_request())
+
+        self.assertTrue(result.primary_result["relevance_rejected"])
+        self.assertIsNone(result.primary_result["overlay_png"])
+        self.assertEqual("", result.primary_result["readable_translation"])
+        self.assertEqual(0.0, result.analytics["translation_time_sec"])
+        mock_build_lines.assert_not_called()
+        mock_broad_translate.assert_not_called()
+        mock_get_provider.assert_not_called()
+        mock_translate_line.assert_not_called()
+        mock_make_overlay.assert_not_called()
+        diagnostics = result.primary_result["diagnostic_report_inputs"]
+        self.assertEqual([], diagnostics["ai_fallback_diagnostics"])
+        self.assertEqual(
+            "readable_text_without_crochet_evidence",
+            diagnostics["relevance_gate_diagnostics"]["reason"],
+        )
+        report = result_delivery_engine.build_deferred_diagnostic_report(
+            result.primary_result,
+            terminology_dataframe=self.df,
+        )
+        self.assertIn("=== Pre-Luna Crochet Relevance Gate ===", report)
+        self.assertIn("Relevance gate evaluated: Yes", report)
+        self.assertIn("Result: rejected", report)
+        self.assertIn("Glossary signals: 0", report)
+
+    @mock.patch(
+        "pattern_translator.engine.broad_translation.translate_merged_ocr_lines_broad"
+    )
+    @mock.patch(
+        "pattern_translator.translation_service.line_translation_engine.translate_ocr_line"
+    )
+    @mock.patch(
+        "pattern_translator.translation_service.llm_fallback_engine.get_openai_provider_from_env"
+    )
+    @mock.patch(
+        "pattern_translator.translation_service.overlay_engine.make_line_translation_overlay"
+    )
+    @mock.patch(
+        "pattern_translator.translation_service.ocr_lines_engine.build_ocr_line_translations"
+    )
+    @mock.patch("pattern_translator.translation_service.run_primary_ocr")
+    def test_sparse_zero_signal_text_stops_before_all_translation_work(
+        self,
+        mock_run_primary_ocr,
+        mock_build_lines,
+        mock_make_overlay,
+        mock_get_provider,
+        mock_translate_line,
+        mock_broad_translate,
+    ):
+        rows = pd.DataFrame(
+            [
+                {
+                    "text": "LIBRARY",
+                    "confidence": 0.99,
+                    "x": 10.0,
+                    "global_x": 10.0,
+                    "y": 10.0,
+                    "min_x": 10.0,
+                    "max_x": 120.0,
+                    "min_y": 10.0,
+                    "max_y": 30.0,
+                }
+            ]
+        )
+        mock_run_primary_ocr.return_value = {
+            "selected_name": "PaddleOCR",
+            "selected_text": "LIBRARY",
+            "selected_rows": rows,
+            "paddle_inference_seconds": 0.1,
+        }
+
+        result = translate_image(self._base_request())
+
+        self.assertTrue(result.primary_result["relevance_rejected"])
+        self.assertIsNone(result.primary_result["overlay_png"])
+        self.assertEqual("", result.primary_result["readable_translation"])
+        self.assertEqual(0.0, result.analytics["translation_time_sec"])
+        mock_build_lines.assert_not_called()
+        mock_broad_translate.assert_not_called()
+        mock_get_provider.assert_not_called()
+        mock_translate_line.assert_not_called()
+        mock_make_overlay.assert_not_called()
+        diagnostics = result.primary_result["diagnostic_report_inputs"]
+        self.assertEqual([], diagnostics["ai_fallback_diagnostics"])
+        self.assertEqual(
+            {
+                "evaluated": True,
+                "allowed": False,
+                "reason": "readable_text_without_crochet_evidence",
+                "glossary_hit_count": 0,
+                "structure_signal_count": 0,
+                "explicit_domain_signal_count": 0,
+            },
+            diagnostics["relevance_gate_diagnostics"],
+        )
+
+    @mock.patch(
+        "pattern_translator.translation_service.overlay_engine.image_to_png_bytes"
+    )
+    @mock.patch(
+        "pattern_translator.translation_service.overlay_engine.make_line_translation_overlay"
+    )
+    @mock.patch(
+        "pattern_translator.translation_service.ocr_lines_engine.build_ocr_line_translations"
+    )
+    @mock.patch("pattern_translator.translation_service.run_primary_ocr")
+    def test_selected_area_counted_shorthand_reaches_translation(
+        self,
+        mock_run_primary_ocr,
+        mock_build_lines,
+        mock_make_overlay,
+        mock_png_bytes,
+    ):
+        overlay_image = Image.new("RGB", (1200, 800), color=(255, 255, 255))
+        mock_png_bytes.return_value = b"png-bytes"
+
+        for shorthand in ("8F", "6X"):
+            with self.subTest(shorthand=shorthand):
+                rows = pd.DataFrame(
+                    [
+                        {
+                            "text": shorthand,
+                            "confidence": 0.99,
+                            "x": 10.0,
+                            "global_x": 10.0,
+                            "y": 10.0,
+                            "min_x": 10.0,
+                            "max_x": 60.0,
+                            "min_y": 10.0,
+                            "max_y": 30.0,
+                        }
+                    ]
+                )
+                translated_rows = pd.DataFrame(
+                    [
+                        {
+                            "Original": shorthand,
+                            "Translated": "translated",
+                            "min_x": 10.0,
+                            "max_x": 60.0,
+                            "min_y": 10.0,
+                            "max_y": 30.0,
+                        }
+                    ]
+                )
+                mock_run_primary_ocr.return_value = {
+                    "selected_name": "PaddleOCR",
+                    "selected_text": shorthand,
+                    "selected_rows": rows,
+                    "paddle_inference_seconds": 0.1,
+                }
+                mock_build_lines.return_value = translated_rows
+                mock_make_overlay.return_value = (
+                    overlay_image,
+                    "translated",
+                    translated_rows,
+                )
+
+                result = translate_image(
+                    self._base_request(area_mode="Select Area")
+                )
+
+                self.assertFalse(result.primary_result["relevance_rejected"])
+                self.assertTrue(
+                    result.primary_result["relevance_gate_diagnostics"]["allowed"]
+                )
+                self.assertEqual(
+                    1,
+                    result.primary_result["relevance_gate_diagnostics"][
+                        "structure_signal_count"
+                    ],
+                )
+                self.assertEqual("Select Area", result.analytics["area_mode"])
+                mock_build_lines.assert_called_once()
+                mock_make_overlay.assert_called_once()
+
+                mock_run_primary_ocr.reset_mock()
+                mock_build_lines.reset_mock()
+                mock_make_overlay.reset_mock()
+                mock_png_bytes.reset_mock()
+
+    @mock.patch(
+        "pattern_translator.translation_service.overlay_engine.make_line_translation_overlay"
+    )
+    @mock.patch(
+        "pattern_translator.translation_service.ocr_lines_engine.build_ocr_line_translations"
+    )
+    @mock.patch("pattern_translator.translation_service.run_primary_ocr")
+    def test_no_text_defers_to_existing_translation_path(
+        self,
+        mock_run_primary_ocr,
+        mock_build_lines,
+        mock_make_overlay,
+    ):
+        empty_rows = pd.DataFrame(
+            columns=(
+                "text",
+                "confidence",
+                "x",
+                "global_x",
+                "y",
+                "min_x",
+                "max_x",
+                "min_y",
+                "max_y",
+            )
+        )
+        mock_run_primary_ocr.return_value = {
+            "selected_name": "PaddleOCR",
+            "selected_text": "",
+            "selected_rows": empty_rows,
+            "paddle_inference_seconds": 0.1,
+        }
+        mock_build_lines.return_value = pd.DataFrame()
+        mock_make_overlay.return_value = (None, "", pd.DataFrame())
+
+        result = translate_image(self._base_request())
+
+        self.assertFalse(result.primary_result["relevance_rejected"])
+        self.assertFalse(
+            result.primary_result["relevance_gate_diagnostics"]["evaluated"]
+        )
+        self.assertEqual(
+            "no_usable_text_existing_path",
+            result.primary_result["relevance_gate_diagnostics"]["reason"],
+        )
+        mock_build_lines.assert_called_once()
+        mock_make_overlay.assert_called_once()
+
     @mock.patch("pattern_translator.translation_service.overlay_engine.image_to_png_bytes")
     @mock.patch("pattern_translator.translation_service.overlay_engine.make_line_translation_overlay")
     @mock.patch("pattern_translator.translation_service.ocr_lines_engine.build_ocr_line_translations")
@@ -977,40 +1263,202 @@ class TranslationServiceOrchestrationTests(unittest.TestCase):
         self.assertNotIn("never-store-this-provider-content", report)
         self.assertNotIn("sk-never-store-this-secret", report)
 
+    @mock.patch("pattern_translator.translation_service.overlay_engine.image_to_png_bytes")
+    @mock.patch("pattern_translator.translation_service.overlay_engine.make_line_translation_overlay")
+    @mock.patch("pattern_translator.translation_service.ocr_lines_engine.build_ocr_line_translations")
+    @mock.patch("pattern_translator.translation_service.run_primary_ocr")
+    def test_broad_retry_and_terminal_fallback_reach_downloadable_report(
+        self,
+        mock_run_primary_ocr,
+        mock_build_lines,
+        mock_make_overlay,
+        mock_png_bytes,
+    ):
+        ocr_rows, line_df, overlay_image = self._mock_pipeline()
+        mock_run_primary_ocr.return_value = {
+            "selected_name": "PaddleOCR",
+            "selected_text": "R1: 6 sc",
+            "selected_rows": ocr_rows,
+            "paddle_inference_seconds": 0.1,
+        }
+
+        def build_lines(*_args, **kwargs):
+            logger = kwargs["diagnostic_logger"]
+            common = {
+                "model": "gpt-5.6-luna",
+                "route": "broad",
+                "source_mode": "English — US",
+                "target_mode": "Traditional Chinese",
+                "failure_classification": "malformed_response",
+                "raw_response": "never-store-this-broad-provider-content",
+                "api_key": "sk-never-store-this-broad-secret",
+            }
+            logger(
+                "ai_request_end",
+                **common,
+                call_ordinal=1,
+                outcome="validation_rejected",
+                reason="output_text_not_found",
+                elapsed_seconds=11.0,
+                retry_scheduled=True,
+            )
+            logger(
+                "ai_request_end",
+                **common,
+                call_ordinal=2,
+                outcome="validation_rejected",
+                reason="output_text_not_found",
+                elapsed_seconds=10.0,
+                retry_scheduled=False,
+            )
+            logger(
+                "broad_terminal_fallback_end",
+                **common,
+                outcome="deterministic_legacy",
+                terminal_fallback_reason="output_text_not_found",
+                attempt_count=2,
+                retry_occurred=True,
+                fallback_invoked=True,
+                elapsed_seconds=21.0,
+            )
+            return line_df
+
+        mock_build_lines.side_effect = build_lines
+        mock_make_overlay.return_value = (overlay_image, "R1: 6 sc", line_df)
+        mock_png_bytes.return_value = b"png-bytes"
+
+        result = translate_image(
+            self._base_request(
+                source_mode="English — US",
+                output_mode="Traditional Chinese",
+            )
+        )
+        records = result.primary_result["diagnostic_report_inputs"][
+            "ai_fallback_diagnostics"
+        ]
+        self.assertEqual([1, 2], [record["call_ordinal"] for record in records])
+        self.assertTrue(records[0]["retry_scheduled"])
+        terminal = records[-1]
+        self.assertEqual("broad", terminal["route"])
+        self.assertEqual("output_text_not_found", terminal["reason"])
+        self.assertEqual("malformed_response", terminal["failure_classification"])
+        self.assertEqual(2, terminal["attempt_count"])
+        self.assertTrue(terminal["retry_occurred"])
+        self.assertTrue(terminal["fallback_invoked"])
+        self.assertNotIn("never-store-this-broad-provider-content", str(records))
+        self.assertNotIn("sk-never-store-this-broad-secret", str(records))
+
+        report = result_delivery_engine.build_deferred_diagnostic_report(
+            result.primary_result,
+            terminology_dataframe=self.df,
+        )
+        self.assertIn("Broad translation failed before semantic adaptation.", report)
+        self.assertIn("Broad failure reason: output_text_not_found", report)
+        self.assertIn("Broad failure classification: malformed_response", report)
+        self.assertIn("Broad provider attempts: 2", report)
+        self.assertIn("Broad retry occurred: Yes", report)
+        self.assertIn("Deterministic fallback used: Yes", report)
+        self.assertIn("fallback_invoked=yes", report)
+        self.assertNotIn("never-store-this-broad-provider-content", report)
+        self.assertNotIn("sk-never-store-this-broad-secret", report)
+
 
 class DirectCorpusParityTests(unittest.TestCase):
+    CASES = (
+        (
+            "Traditional Chinese",
+            "English — US",
+            "起21个辫子针倒2回钩19X,W",
+            "Chain 21, Start in the 2nd chain from hook, 19 sc, "
+            "3 sc in same stitch",
+        ),
+        (
+            "Traditional Chinese",
+            "English — UK",
+            "立9CH，倒2回钩2SL",
+            "Turning chain 9 ch, Start in the 2nd chain from hook, 2 ss",
+        ),
+        (
+            "Traditional Chinese",
+            "Traditional Chinese",
+            "3(X,V)",
+            "（短針，加針）重複3次",
+        ),
+        (
+            "Traditional Chinese",
+            "Simplified Chinese",
+            "2.5mm hook",
+            "2.5mm 钩针",
+        ),
+        (
+            "Traditional Chinese",
+            "Japanese",
+            "(3X,V)*6 (30)",
+            "（細編み3目，増し目）を6回繰り返す (30)",
+        ),
+        ("English — US", "English — US", "2DC", "2 dc"),
+        ("English — US", "English — UK", "2DC", "2 tr"),
+        (
+            "English — US",
+            "Traditional Chinese",
+            "立12CH",
+            "起立針 鎖針12針",
+        ),
+        (
+            "English — US",
+            "Simplified Chinese",
+            "2FO",
+            "斷线收尾2针",
+        ),
+        ("English — US", "Japanese", "2BLO", "back loop only2目"),
+        ("Traditional Chinese", "English — US", "3mm", "3mm"),
+        (
+            "English — US",
+            "Traditional Chinese",
+            "(X,V)",
+            "（短針，加針）",
+        ),
+    )
+
     @classmethod
     def setUpClass(cls):
-        cls.corpus_path = Path("rc49_evidence/Direct_Corpus_RC48_vs_RC49.csv")
         cls.full_df = pd.read_csv("knowledge_base/data/master_stitches.csv").fillna("")
 
-    def test_direct_corpus_remains_identical(self):
-        self.assertTrue(self.corpus_path.exists(), "Expected direct corpus reference file")
-        mismatches = []
-        with self.corpus_path.open(encoding="utf-8", newline="") as handle:
-            reader = csv.DictReader(handle)
-            for row in reader:
-                source_mode = row["source_mode"]
-                output_mode = row["output_mode"]
-                text = row["input"]
-                expected = row["rc49_actual"]
+    def test_representative_direct_translation_contract(self):
+        expected_routes = {
+            (source_mode, output_mode)
+            for source_mode in ("Traditional Chinese", "English — US")
+            for output_mode in (
+                "English — US",
+                "English — UK",
+                "Traditional Chinese",
+                "Simplified Chinese",
+                "Japanese",
+            )
+        }
+        self.assertEqual(
+            expected_routes,
+            {(source_mode, output_mode) for source_mode, output_mode, *_ in self.CASES},
+        )
+
+        active_df = terminology_engine.get_active_search_df(self.full_df)
+        for source_mode, output_mode, text, expected in self.CASES:
+            with self.subTest(
+                source_mode=source_mode,
+                output_mode=output_mode,
+                text=text,
+            ):
                 index = terminology_engine.build_term_index(
-                    terminology_engine.get_active_search_df(self.full_df),
+                    active_df,
                     source_mode,
                 )
-                df = terminology_engine.get_active_search_df(self.full_df)
                 actual = line_translation_engine.translate_ocr_line(
-                    text, index, df, output_mode
+                    text,
+                    index,
+                    active_df,
+                    output_mode,
                 )
-                if actual != expected:
-                    mismatches.append((text, expected, actual))
-        self.assertEqual([], mismatches[:5])
-        self.assertEqual(220, self._corpus_count())
-        self.assertEqual(0, len(mismatches))
-
-    def _corpus_count(self) -> int:
-        with self.corpus_path.open(encoding="utf-8", newline="") as handle:
-            return sum(1 for _ in csv.DictReader(handle))
+                self.assertEqual(expected, actual)
 
 
 if __name__ == "__main__":

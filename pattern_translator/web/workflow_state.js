@@ -57,6 +57,39 @@ function qualityCrop(state) {
     : null;
 }
 
+function relevanceIdentity(state) {
+  return {
+    file: state.file,
+    source: state.source,
+    area: state.area,
+    crop: qualityCrop(state),
+  };
+}
+
+export function hasCurrentRelevanceRejection(state) {
+  const rejected = state.relevanceRejection;
+  const current = relevanceIdentity(state);
+  return Boolean(
+    rejected
+    && rejected.file === current.file
+    && rejected.source === current.source
+    && rejected.area === current.area
+    && matchingCrop(rejected.crop, current.crop)
+  );
+}
+
+export function recordRelevanceRejection(state) {
+  const identity = relevanceIdentity(state);
+  state.relevanceRejection = {
+    ...identity,
+    crop: identity.crop ? [...identity.crop] : null,
+  };
+}
+
+export function clearRelevanceRejection(state) {
+  state.relevanceRejection = null;
+}
+
 export function qualityIdentity(state) {
   return {
     file: state.file,
@@ -109,6 +142,7 @@ export function canTranslate(state) {
     && (state.area === "Whole Pattern" || state.crop)
     && !state.qualityLoading
     && qualityAllowsTranslation
+    && !hasCurrentRelevanceRejection(state)
   );
 }
 
@@ -158,6 +192,7 @@ export function isValidQualityResponse(body, identity) {
 }
 
 export function isValidTranslationResponse(body, state, identity) {
+  const relevanceRejected = body?.relevance_rejected === true;
   return Boolean(
     isValidQualityResponse(body, identity)
     && typeof body.request_id === "string"
@@ -166,10 +201,15 @@ export function isValidTranslationResponse(body, state, identity) {
     && body.output_mode === state.target
     && typeof body.readable_translation === "string"
     && typeof body.translation_txt === "string"
-    && body.overlay_png
-    && body.overlay_png.media_type === "image/png"
-    && typeof body.overlay_png.base64 === "string"
-    && body.overlay_png.base64
+    && (
+      relevanceRejected
+      || (
+        body.overlay_png
+        && body.overlay_png.media_type === "image/png"
+        && typeof body.overlay_png.base64 === "string"
+        && body.overlay_png.base64
+      )
+    )
     && (
       body.diagnostic_context === null
       || (

@@ -217,6 +217,36 @@ class PatternApiHttpTests(unittest.TestCase):
         self.assertEqual("fair", payload["quality"]["level"])
         self.assertFalse(payload["quality"]["requires_confirmation"])
 
+    def test_unrelated_readable_text_returns_normal_relevance_validation_result(self):
+        bottle_rows = self._ocr_rows().copy()
+        bottle_rows.loc[0, "text"] = (
+            "Carbonated mineral water STORAGE COMPOSITION Calcium Magnesium "
+            "Recycling Tesco Stores Ltd"
+        )
+        with mock.patch(
+            "pattern_translator.translation_service.run_primary_ocr",
+            return_value={
+                "selected_name": "PaddleOCR",
+                "selected_text": bottle_rows.loc[0, "text"],
+                "selected_rows": bottle_rows,
+                "paddle_inference_seconds": 0.05,
+            },
+        ):
+            response = self._multipart(
+                files={"image": ("bottle.png", self._png_bytes(), "image/png")},
+                source_mode=self.source_mode,
+                output_mode=self.output_mode,
+                area_mode="Whole Pattern",
+            )
+
+        self.assertEqual(200, response.status_code)
+        payload = response.json()
+        self.assertTrue(payload["relevance_rejected"])
+        self.assertIsNone(payload["overlay_png"])
+        self.assertEqual("", payload["readable_translation"])
+        self.assertEqual("", payload["translation_txt"])
+        self.assertIsInstance(payload["diagnostic_context"], dict)
+
     def test_renderer_markers_are_delivered_in_browser_text_and_txt(self):
         line_df = pd.DataFrame(
             [
@@ -266,7 +296,7 @@ class PatternApiHttpTests(unittest.TestCase):
             {
                 "request_id", "source_mode", "output_mode", "area_mode", "crop_box",
                 "quality", "raw_ocr_text", "readable_translation", "translation_txt",
-                "overlay_png", "overlay_renderer", "diagnostic_context", "ocr_finished_at",
+                "relevance_rejected", "overlay_png", "overlay_renderer", "diagnostic_context", "ocr_finished_at",
                 "ocr_duration_seconds", "ocr_time_sec", "translation_time_sec",
                 "ocr_box_count", "timings",
             },

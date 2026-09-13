@@ -22,6 +22,7 @@ import numpy as np
 import pandas as pd
 from PIL import Image
 
+from pattern_translator.engine import crochet_relevance as crochet_relevance_engine
 from pattern_translator.engine import diagnostic_report as diagnostic_report_engine
 from pattern_translator.engine import line_translation as line_translation_engine
 from pattern_translator.engine import llm_fallback as llm_fallback_engine
@@ -1285,6 +1286,7 @@ def translate_image(request: TranslateImageRequest) -> TranslateImageResult:
     delivery_diagnostic_events = list(request.diagnostic_events)
     ai_fallback_diagnostics: List[Dict[str, object]] = []
     ai_fallback_diagnostics_lock = threading.Lock()
+    broad_retry_expected_ordinals: set[int] = set()
     delivery_diagnostic_platform = request.diagnostic_platform
     total_start = time.perf_counter()
     timings = {
@@ -1374,18 +1376,172 @@ def translate_image(request: TranslateImageRequest) -> TranslateImageResult:
     runtime_profile["ocr_cleanup"] = cleanup_seconds
     timings["OCR cleanup"] = cleanup_seconds
 
+    relevance_start = time.perf_counter()
+    relevance_result = crochet_relevance_engine.evaluate_crochet_relevance(
+        clean_text,
+        df,
+    )
+    relevance_diagnostics = relevance_result.diagnostics()
+    if relevance_result.evaluated and not relevance_result.allowed:
+        gate_finished = time.perf_counter()
+        translation_profile = make_translation_profile()
+        empty_frame = pd.DataFrame()
+        translation_seconds = 0.0
+        overlay_seconds = 0.0
+        png_seconds = 0.0
+        txt_seconds = 0.0
+        runtime_profile.update(
+            {
+                "translation": translation_seconds,
+                "overlay_generation": overlay_seconds,
+                "png_encoding": png_seconds,
+                "translation_txt_generation": txt_seconds,
+            }
+        )
+        timings.update(
+            {
+                "Translation processing": translation_seconds,
+                "Overlay generation": overlay_seconds,
+                "PNG encoding": png_seconds,
+                "Translation TXT generation": txt_seconds,
+            }
+        )
+        ocr_workload_diagnostics = build_ocr_workload_diagnostics(
+            working_image,
+            detected_ocr_rows,
+            ocr_rows,
+            empty_frame,
+        )
+        total_seconds = image_load_seconds + crop_extraction_seconds + (
+            time.perf_counter() - total_start
+        )
+        runtime_profile["total"] = total_seconds
+        timings["Total runtime"] = total_seconds
+        ocr_finished_at_text = time.strftime("%Y-%m-%d %H:%M:%S")
+        ocr_duration_seconds = round(time.perf_counter() - ocr_execution_start, 3)
+        delivery_session_diagnostics.update(
+            {
+                "pending_ocr_run": False,
+                "ocr_running": False,
+                "ocr_finished_at": ocr_finished_at_text,
+                "ocr_duration_seconds": ocr_duration_seconds,
+            }
+        )
+        if request.session_diagnostics.get("ocr_started_at"):
+            delivery_session_diagnostics["ocr_started_at"] = (
+                request.session_diagnostics.get("ocr_started_at")
+            )
+        diagnostic_report_inputs = {
+            "ocr_engine": str(candidate_result.get("selected_name", "")),
+            "image_quality_status": quality_label,
+            "session_diagnostics": delivery_session_diagnostics,
+            "events": delivery_diagnostic_events,
+            "ai_fallback_diagnostics": [],
+            "relevance_gate_diagnostics": relevance_diagnostics,
+            "ocr_workload_diagnostics": ocr_workload_diagnostics,
+            "ocr_box_rows": detected_ocr_rows,
+            "ocr_call_diagnostics": ocr_call_diagnostics,
+            "ocr_call_trace": list(ocr_call_trace),
+            "downscale_diagnostics": downscale_diagnostics,
+            "ocr_resize_test": ocr_resize_test,
+            "overlay_renderer_diagnostics": {},
+            "interface_language": request.interface_language,
+            "platform": delivery_diagnostic_platform,
+        }
+        primary_result = {
+            "overlay_image": None,
+            "overlay_png": None,
+            "overlay_legend": "",
+            "overlay_legend_df": empty_frame,
+            "overlay_renderer": "none",
+            "raw_ocr_text": raw_ocr_text,
+            "clean_text": clean_text,
+            "line_df": empty_frame,
+            "ocr_rows": ocr_rows,
+            "removed_noise_df": removed_noise_df,
+            "matches_df": empty_frame,
+            "unmatched": [],
+            "readable_translation": "",
+            "translation_txt": "",
+            "request_warning": "",
+            "relevance_rejected": True,
+            "relevance_gate_diagnostics": relevance_diagnostics,
+            "quality_metrics": quality_metrics,
+            "quality_errors": quality_errors,
+            "quality_warnings": quality_warnings,
+            "timings": timings,
+            "runtime_profile": runtime_profile,
+            "translation_profile": translation_profile,
+            "source_mode": source_mode,
+            "output_mode": output_mode,
+            "area_mode": area_mode,
+            "crop_box": crop_box,
+            "diagnostic_request_id": diagnostic_request_id,
+            "diagnostic_session_generation": diagnostic_session_generation,
+            "diagnostic_report_inputs": diagnostic_report_inputs,
+        }
+        analytics = {
+            "area_mode": area_mode,
+            "source_mode": source_mode,
+            "output_mode": output_mode,
+            "ocr_box_count": int(len(detected_ocr_rows)),
+            "ocr_time_sec": round(float(ocr_seconds), 3),
+            "translation_time_sec": translation_seconds,
+            "relevance_rejected": True,
+        }
+        return TranslateImageResult(
+            primary_result=primary_result,
+            analytics=analytics,
+            ocr_finished_at=ocr_finished_at_text,
+            ocr_duration_seconds=ocr_duration_seconds,
+            downstream_elapsed_seconds=gate_finished - relevance_start,
+            translation_run_elapsed_seconds=(
+                time.perf_counter() - action_started
+                if isinstance(action_started, (int, float))
+                else time.perf_counter() - ocr_execution_start
+            ),
+        )
+
     translation_profile = make_translation_profile()
     profile_token = _TRANSLATION_PROFILE.set(translation_profile)
 
     def log_downstream_timing(phase: str, **fields: object) -> None:
-        if phase == "ai_request_end" and fields.get("route") in {"general", "title"}:
-            reason = str(fields.get("reason", ""))
+        route = str(fields.get("route", ""))
+        outcome = str(fields.get("outcome", ""))
+        reason = str(
+            fields.get("terminal_fallback_reason", fields.get("reason", ""))
+        )
+        call_ordinal = fields.get("call_ordinal")
+        if phase == "broad_terminal_fallback_end":
+            call_ordinal = fields.get("attempt_count")
+        elapsed_seconds = fields.get("elapsed_seconds")
+        legacy_terminal_event = (
+            phase == "ai_request_end"
+            and route in {"general", "title"}
+            and reason in llm_fallback_engine.AI_TERMINAL_REASON_CODES
+        )
+        broad_retry_success = False
+        if (
+            phase == "ai_request_end"
+            and route == "broad"
+            and outcome == "success"
+            and isinstance(call_ordinal, int)
+            and not isinstance(call_ordinal, bool)
+        ):
+            with ai_fallback_diagnostics_lock:
+                broad_retry_success = call_ordinal in broad_retry_expected_ordinals
+        broad_attempt_event = (
+            phase == "ai_request_end"
+            and route == "broad"
+            and (outcome != "success" or broad_retry_success)
+        )
+        broad_terminal_event = (
+            phase == "broad_terminal_fallback_end" and route == "broad"
+        )
+        if legacy_terminal_event or broad_attempt_event or broad_terminal_event:
             outcome = str(fields.get("outcome", ""))
-            call_ordinal = fields.get("call_ordinal")
-            elapsed_seconds = fields.get("elapsed_seconds")
             if (
-                reason in llm_fallback_engine.AI_TERMINAL_REASON_CODES
-                and isinstance(call_ordinal, int)
+                isinstance(call_ordinal, int)
                 and not isinstance(call_ordinal, bool)
                 and isinstance(elapsed_seconds, (int, float))
                 and not isinstance(elapsed_seconds, bool)
@@ -1393,18 +1549,48 @@ def translate_image(request: TranslateImageRequest) -> TranslateImageResult:
                 record = {
                     "call_ordinal": call_ordinal,
                     "outcome": outcome[:64],
-                    "reason": reason,
+                    "reason": (reason or outcome)[:128],
                     "elapsed_seconds": round(float(elapsed_seconds), 4),
-                    "route": str(fields.get("route", ""))[:32],
+                    "route": route[:32],
                     "model": str(fields.get("model", ""))[:64],
-                    "source_mode": str(fields.get("source_mode", ""))[:64],
-                    "target_mode": str(fields.get("target_mode", ""))[:64],
+                    "source_mode": str(fields.get("source_mode", source_mode))[:64],
+                    "target_mode": str(fields.get("target_mode", output_mode))[:64],
                     "deterministic_fallback_returned": bool(
                         fields.get("deterministic_fallback_returned", False)
+                        or fields.get("fallback_invoked", False)
                     ),
+                    "failure_classification": str(
+                        fields.get("failure_classification", "")
+                    )[:64],
+                    "attempt_count": int(fields.get("attempt_count", call_ordinal) or 0),
+                    "retry_occurred": bool(
+                        fields.get("retry_occurred", call_ordinal > 1)
+                    ),
+                    "retry_scheduled": bool(fields.get("retry_scheduled", False)),
+                    "fallback_invoked": bool(fields.get("fallback_invoked", False)),
                 }
                 with ai_fallback_diagnostics_lock:
-                    ai_fallback_diagnostics.append(record)
+                    if broad_terminal_event:
+                        matching_index = next(
+                            (
+                                index
+                                for index in range(len(ai_fallback_diagnostics) - 1, -1, -1)
+                                if ai_fallback_diagnostics[index].get("route") == "broad"
+                                and ai_fallback_diagnostics[index].get("call_ordinal")
+                                == call_ordinal
+                            ),
+                            None,
+                        )
+                        if matching_index is not None:
+                            ai_fallback_diagnostics[matching_index] = record
+                        else:
+                            ai_fallback_diagnostics.append(record)
+                    else:
+                        ai_fallback_diagnostics.append(record)
+                    if route == "broad" and record["retry_scheduled"]:
+                        broad_retry_expected_ordinals.add(call_ordinal + 1)
+                    if route == "broad" and outcome == "success":
+                        broad_retry_expected_ordinals.discard(call_ordinal)
         try:
             log_app_ocr_timing(
                 diagnostic_request_id,
@@ -1529,6 +1715,7 @@ def translate_image(request: TranslateImageRequest) -> TranslateImageResult:
             ai_fallback_diagnostics,
             key=lambda record: int(record["call_ordinal"]),
         ),
+        "relevance_gate_diagnostics": relevance_diagnostics,
         "ocr_workload_diagnostics": ocr_workload_diagnostics,
         "ocr_box_rows": detected_ocr_rows,
         "ocr_call_diagnostics": ocr_call_diagnostics,
@@ -1564,6 +1751,8 @@ def translate_image(request: TranslateImageRequest) -> TranslateImageResult:
         "readable_translation": readable_translation,
         "translation_txt": translation_txt,
         "request_warning": request_warning,
+        "relevance_rejected": False,
+        "relevance_gate_diagnostics": relevance_diagnostics,
         "quality_metrics": quality_metrics,
         "quality_errors": quality_errors,
         "quality_warnings": quality_warnings,

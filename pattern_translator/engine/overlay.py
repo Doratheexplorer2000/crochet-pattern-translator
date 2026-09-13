@@ -42,6 +42,8 @@ _ABSOLUTE_MIN_FONT_PX = 6
 _SOURCE_GLYPH_HEIGHT_TOLERANCE_PX = 1.0
 _SOURCE_ANCHOR_TOLERANCE_PX = 0.5
 _NEIGHBOUR_SEPARATION_PX = 0.5
+_SOURCE_OWNERSHIP_HALF_GAP_PX = _NEIGHBOUR_SEPARATION_PX / 2.0
+_SOURCE_OWNERSHIP_MAX_OVERLAP_HEIGHT_RATIO = 0.25
 _DENSE_ROW_MAX_GAP_HEIGHT_RATIO = 1.0
 _DENSE_ROW_MIN_HORIZONTAL_OVERLAP = 0.55
 _DENSE_ROW_MIN_MEMBER_GAP_HEIGHT_RATIO = 1.25
@@ -59,6 +61,110 @@ class OverlayFontResolution:
     face_index: Optional[int]
     weight: str
     target_language: str
+
+
+class _RunLocalTextMeasurementDraw:
+    """Delegate drawing while memoizing exact text bboxes for one render."""
+
+    def __init__(self, draw: ImageDraw.ImageDraw) -> None:
+        self._draw = draw
+        self._draw_identity = (
+            id(draw),
+            str(getattr(draw, "mode", "")),
+        )
+        self._textbbox_cache: Dict[
+            Tuple[object, ...],
+            Tuple[float, float, float, float],
+        ] = {}
+        self._textbbox_hits = 0
+        self._textbbox_misses = 0
+
+    @staticmethod
+    def _font_identity(font: object) -> Tuple[object, ...]:
+        if font is None:
+            return (None,)
+        font_type = type(font)
+        return (
+            id(font),
+            font_type.__module__,
+            font_type.__qualname__,
+            getattr(font, "path", None),
+            getattr(font, "index", None),
+            getattr(font, "size", None),
+            getattr(font, "layout_engine", None),
+        )
+
+    def textbbox(
+        self,
+        xy: Tuple[float, float],
+        text: object,
+        font: object = None,
+        anchor: Optional[str] = None,
+        spacing: float = 4,
+        align: str = "left",
+        direction: Optional[str] = None,
+        features: Optional[List[str]] = None,
+        language: Optional[str] = None,
+        stroke_width: float = 0,
+        embedded_color: bool = False,
+        *,
+        font_size: Optional[float] = None,
+    ) -> Tuple[float, float, float, float]:
+        key = (
+            self._draw_identity,
+            tuple(xy),
+            type(text),
+            text,
+            self._font_identity(font),
+            anchor,
+            spacing,
+            align,
+            direction,
+            None if features is None else tuple(features),
+            language,
+            stroke_width,
+            embedded_color,
+            font_size,
+        )
+        cached = self._textbbox_cache.get(key)
+        if cached is not None:
+            self._textbbox_hits += 1
+            return cached
+        measured = self._draw.textbbox(
+            xy,
+            text,
+            font=font,
+            anchor=anchor,
+            spacing=spacing,
+            align=align,
+            direction=direction,
+            features=features,
+            language=language,
+            stroke_width=stroke_width,
+            embedded_color=embedded_color,
+            font_size=font_size,
+        )
+        self._textbbox_cache[key] = measured
+        self._textbbox_misses += 1
+        return measured
+
+    def textbbox_cache_diagnostics(self) -> Dict[str, object]:
+        requests = self._textbbox_hits + self._textbbox_misses
+        return {
+            "scope": "overlay_render_invocation",
+            "requests": requests,
+            "underlying_executions": self._textbbox_misses,
+            "hits": self._textbbox_hits,
+            "misses": self._textbbox_misses,
+            "hit_rate": (
+                round(self._textbbox_hits / requests, 6)
+                if requests
+                else 0.0
+            ),
+        }
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._draw, name)
 
 
 def is_source_replacement_overlay_enabled(environ: Optional[Dict[str, str]] = None) -> bool:
@@ -651,6 +757,75 @@ def _replacement_font_candidates(baseline: int, minimum: int) -> Tuple[int, ...]
     return tuple(range(int(baseline), floor - 1, -1))
 
 
+ReplacementCandidate = Tuple[object, ...]
+ReplacementCandidateEvaluator = Callable[
+    [int, bool],
+    Optional[ReplacementCandidate],
+]
+
+
+def _select_replacement_candidate_exhaustive(
+    baseline: int,
+    minimum: int,
+    evaluate: ReplacementCandidateEvaluator,
+) -> Optional[ReplacementCandidate]:
+    """Return the legacy first fitting normal/expanded candidate.
+
+    This remains available as a deterministic differential-test oracle. Production
+    rendering uses the boundary selector below and never runs both searches.
+    """
+    for font_size in _replacement_font_candidates(baseline, minimum):
+        normal = evaluate(font_size, False)
+        if normal is not None:
+            return normal
+        expanded = evaluate(font_size, True)
+        if expanded is not None:
+            return expanded
+    return None
+
+
+def _select_replacement_candidate_binary(
+    baseline: int,
+    minimum: int,
+    evaluate: ReplacementCandidateEvaluator,
+) -> Optional[ReplacementCandidate]:
+    """Return the largest fitting size, preserving normal-before-expanded priority."""
+    highest = int(baseline)
+    lowest = min(highest, int(minimum))
+    evaluated: Dict[int, Optional[ReplacementCandidate]] = {}
+
+    def evaluate_size(font_size: int) -> Optional[ReplacementCandidate]:
+        if font_size not in evaluated:
+            normal = evaluate(font_size, False)
+            evaluated[font_size] = (
+                normal
+                if normal is not None
+                else evaluate(font_size, True)
+            )
+        return evaluated[font_size]
+
+    highest_result = evaluate_size(highest)
+    if highest_result is not None or highest == lowest:
+        return highest_result
+
+    lowest_result = evaluate_size(lowest)
+    if lowest_result is None:
+        return None
+
+    fitting = lowest
+    failing = highest
+    while failing - fitting > 1:
+        candidate = (fitting + failing) // 2
+        if evaluate_size(candidate) is not None:
+            fitting = candidate
+        else:
+            failing = candidate
+    return evaluate_size(fitting)
+
+
+_select_replacement_candidate = _select_replacement_candidate_binary
+
+
 def _text_width(draw: ImageDraw.ImageDraw, font: object, text: str) -> float:
     bbox = draw.textbbox((0, 0), str(text), font=font)
     return float(bbox[2] - bbox[0])
@@ -912,6 +1087,166 @@ def _rect_for_region(region: Dict[str, object]) -> Tuple[float, float, float, fl
         float(region["max_x"]),
         float(region["max_y"]),
     )
+
+
+def _effective_source_ownership_rects(
+    source_regions: Dict[int, List[Dict[str, object]]],
+) -> Dict[int, List[Tuple[float, float, float, float]]]:
+    """Split touching/overlapping semantic rows into disjoint source ownership."""
+    indexed = [
+        (owner, region_index, _rect_for_region(region))
+        for owner, regions in source_regions.items()
+        for region_index, region in enumerate(regions)
+    ]
+    effective = {
+        owner: [_rect_for_region(region) for region in regions]
+        for owner, regions in source_regions.items()
+    }
+
+    for first_index, first in enumerate(indexed):
+        first_owner, first_region_index, first_rect = first
+        for second_owner, second_region_index, second_rect in indexed[
+            first_index + 1 :
+        ]:
+            if first_owner == second_owner or not _horizontal_overlap(
+                first_rect,
+                second_rect,
+            ):
+                continue
+            first_center = (first_rect[1] + first_rect[3]) / 2.0
+            second_center = (second_rect[1] + second_rect[3]) / 2.0
+            if first_center == second_center:
+                continue
+            if first_center < second_center:
+                upper_owner, upper_region_index, upper_rect = (
+                    first_owner,
+                    first_region_index,
+                    first_rect,
+                )
+                lower_owner, lower_region_index, lower_rect = (
+                    second_owner,
+                    second_region_index,
+                    second_rect,
+                )
+            else:
+                upper_owner, upper_region_index, upper_rect = (
+                    second_owner,
+                    second_region_index,
+                    second_rect,
+                )
+                lower_owner, lower_region_index, lower_rect = (
+                    first_owner,
+                    first_region_index,
+                    first_rect,
+                )
+            if lower_rect[1] > upper_rect[3]:
+                continue
+            overlap_height = max(
+                0.0,
+                min(upper_rect[3], lower_rect[3])
+                - max(upper_rect[1], lower_rect[1]),
+            )
+            shorter_height = min(
+                upper_rect[3] - upper_rect[1],
+                lower_rect[3] - lower_rect[1],
+            )
+            if (
+                overlap_height
+                > shorter_height * _SOURCE_OWNERSHIP_MAX_OVERLAP_HEIGHT_RATIO
+            ):
+                continue
+
+            boundary = (
+                (upper_rect[1] + upper_rect[3]) / 2.0
+                + (lower_rect[1] + lower_rect[3]) / 2.0
+            ) / 2.0
+            upper_bottom = boundary - _SOURCE_OWNERSHIP_HALF_GAP_PX
+            lower_top = boundary + _SOURCE_OWNERSHIP_HALF_GAP_PX
+            current_upper = effective[upper_owner][upper_region_index]
+            current_lower = effective[lower_owner][lower_region_index]
+            if upper_bottom <= current_upper[1] or lower_top >= current_lower[3]:
+                continue
+            effective[upper_owner][upper_region_index] = (
+                current_upper[0],
+                current_upper[1],
+                current_upper[2],
+                min(current_upper[3], upper_bottom),
+            )
+            effective[lower_owner][lower_region_index] = (
+                current_lower[0],
+                max(current_lower[1], lower_top),
+                current_lower[2],
+                current_lower[3],
+            )
+    return effective
+
+
+def _reconcile_external_source_ownership(
+    effective_source_rects: Dict[
+        int,
+        List[Tuple[float, float, float, float]],
+    ],
+    externally_protected_rects: List[
+        Tuple[float, float, float, float]
+    ],
+) -> Dict[int, List[Tuple[float, float, float, float]]]:
+    """Clip only semantic ownership at small external-OCR boundaries."""
+    reconciled = {
+        owner: list(rects)
+        for owner, rects in effective_source_rects.items()
+    }
+    for owner, rects in reconciled.items():
+        for rect_index, original_rect in enumerate(rects):
+            current = original_rect
+            for external in externally_protected_rects:
+                if not _horizontal_overlap(current, external):
+                    continue
+                semantic_center = (current[1] + current[3]) / 2.0
+                external_center = (external[1] + external[3]) / 2.0
+                if semantic_center == external_center:
+                    continue
+                overlap_height = max(
+                    0.0,
+                    min(current[3], external[3])
+                    - max(current[1], external[1]),
+                )
+                shorter_height = min(
+                    current[3] - current[1],
+                    external[3] - external[1],
+                )
+                if (
+                    overlap_height
+                    > shorter_height
+                    * _SOURCE_OWNERSHIP_MAX_OVERLAP_HEIGHT_RATIO
+                ):
+                    continue
+
+                if external_center < semantic_center:
+                    if current[1] > external[3]:
+                        continue
+                    adjusted_top = external[3] + _NEIGHBOUR_SEPARATION_PX
+                    if adjusted_top >= current[3]:
+                        continue
+                    current = (
+                        current[0],
+                        max(current[1], adjusted_top),
+                        current[2],
+                        current[3],
+                    )
+                else:
+                    if external[1] > current[3]:
+                        continue
+                    adjusted_bottom = external[1] - _NEIGHBOUR_SEPARATION_PX
+                    if adjusted_bottom <= current[1]:
+                        continue
+                    current = (
+                        current[0],
+                        current[1],
+                        current[2],
+                        min(current[3], adjusted_bottom),
+                    )
+            rects[rect_index] = current
+    return reconciled
 
 
 def _horizontal_overlap(first: Tuple[float, float, float, float], second: Tuple[float, float, float, float]) -> bool:
@@ -1486,7 +1821,7 @@ def _make_source_replacement_overlay(
 
     canvas = image.convert("RGB")
     width, height = canvas.size
-    draw = ImageDraw.Draw(canvas)
+    draw = _RunLocalTextMeasurementDraw(ImageDraw.Draw(canvas))
     line_df["Overlay Minimum Font Size"] = _ABSOLUTE_MIN_FONT_PX
     image_font_resolution = _resolve_overlay_font(
         _ABSOLUTE_MIN_FONT_PX,
@@ -1499,11 +1834,7 @@ def _make_source_replacement_overlay(
         position: _source_regions_from_row(line_df.iloc[position], width, height)
         for position in range(len(line_df))
     }
-    all_source_rects = [
-        (position, _rect_for_region(region))
-        for position, regions in source_regions.items()
-        for region in regions
-    ]
+    effective_source_rects = _effective_source_ownership_rects(source_regions)
     externally_protected_rects: List[Tuple[float, float, float, float]] = []
     if protected_ocr_rows is not None and not protected_ocr_rows.empty:
         for _, protected_row in protected_ocr_rows.iterrows():
@@ -1517,6 +1848,15 @@ def _make_source_replacement_overlay(
                     height,
                 )
             )
+    effective_source_rects = _reconcile_external_source_ownership(
+        effective_source_rects,
+        externally_protected_rects,
+    )
+    all_source_rects = [
+        (position, rect)
+        for position, rects in effective_source_rects.items()
+        for rect in rects
+    ]
     ordered_positions = sorted(
         range(len(line_df)),
         key=lambda position: (
@@ -1537,6 +1877,13 @@ def _make_source_replacement_overlay(
         "preserved_excluded": 0,
     }
     collision_rejections = 0
+    replacement_candidate_mode_probes = 0
+    replacement_search_algorithm = (
+        "exhaustive_oracle"
+        if _select_replacement_candidate
+        is _select_replacement_candidate_exhaustive
+        else "binary_boundary"
+    )
     max_expansion_x = 0.0
     max_expansion_y = 0.0
     marker_number = 1
@@ -1545,13 +1892,15 @@ def _make_source_replacement_overlay(
     final_font_sizes: List[int] = []
 
     for position in ordered_positions:
+        unit_probe_start = replacement_candidate_mode_probes
         row = line_df.iloc[position]
         original = str(row.get("Original", "")).strip()
         translated = str(row.get("Translation", "")).strip()
         category = str(row.get("Content Category", "unchanged_non_language"))
         trust = str(row.get("Translation Trust", "source_preserved"))
         regions = source_regions[position]
-        original_rects = [_rect_for_region(region) for region in regions]
+        raw_original_rects = [_rect_for_region(region) for region in regions]
+        original_rects = effective_source_rects[position]
         representative_source_height = _representative_source_text_height(regions)
         source_start_size, source_font_resolution, calibrated_glyph_height = (
             _source_calibrated_font_size(
@@ -1669,6 +2018,15 @@ def _make_source_replacement_overlay(
                     for rect in original_rects
                 )
             ),
+            "raw_source_rectangles": tuple(
+                tuple(round(value, 3) for value in rect)
+                for rect in raw_original_rects
+            ),
+            "effective_source_ownership_rectangles": tuple(
+                tuple(round(value, 3) for value in rect)
+                for rect in original_rects
+            ),
+            "source_ownership_adjusted": original_rects != raw_original_rects,
             "source_anchor_top_range": "",
             "lowest_feasible_top": "",
             "highest_feasible_top": "",
@@ -1678,6 +2036,8 @@ def _make_source_replacement_overlay(
             "source_anchor_clamp_applied": {"top": False, "bottom": False},
             "final_failure_predicate": "",
             "placement_strategy": "normal",
+            "replacement_search_algorithm": replacement_search_algorithm,
+            "replacement_candidate_mode_probes": 0,
             **dense_row_geometry,
         }
 
@@ -1769,9 +2129,21 @@ def _make_source_replacement_overlay(
             (rect[2] - rect[0]) >= (rect[3] - rect[1]) * 1.2
             for rect in original_rects
         )
+        single_region_target_feasibility = (
+            len(regions) == 1
+            and category == "translated_content"
+            and trust == "trusted"
+        )
+        placement_geometry_supported = (
+            horizontal_geometry or single_region_target_feasibility
+        )
         selected_layout = None
-        fit_reason = overflow_reason or ("unsupported_geometry" if not horizontal_geometry else "text_did_not_fit")
-        if horizontal_geometry and not overflow_reason:
+        fit_reason = overflow_reason or (
+            "unsupported_geometry"
+            if not placement_geometry_supported
+            else "text_did_not_fit"
+        )
+        if placement_geometry_supported and not overflow_reason:
             if dense_row_geometry["dense_row_candidate"]:
                 source = original_rects[0]
                 dense_horizontal = (
@@ -1933,16 +2305,14 @@ def _make_source_replacement_overlay(
                             )
                             break
 
-            candidate_modes = []
-            for font_size in _replacement_font_candidates(
-                source_start_size, _ABSOLUTE_MIN_FONT_PX
-            ):
-                candidate_modes.extend(
-                    ((font_size, False), (font_size, True))
-                )
-            for font_size, allow_expansion in (
-                candidate_modes if selected_layout is None else ()
-            ):
+            def evaluate_standard_candidate(
+                font_size: int,
+                allow_expansion: bool,
+            ) -> Optional[ReplacementCandidate]:
+                nonlocal collision_rejections
+                nonlocal replacement_candidate_mode_probes
+                nonlocal fit_reason
+                replacement_candidate_mode_probes += 1
                 font_resolution = _resolve_overlay_font(font_size, output_mode)
                 font = font_resolution.font
                 short_single_source_row = (
@@ -2002,7 +2372,7 @@ def _make_source_replacement_overlay(
                         widths.append(widths[-1])
                 lines, complete = _wrap_text_to_widths(translated, draw, font, widths[:max_lines])
                 if not complete or not lines:
-                    continue
+                    return None
                 line_heights = _text_line_heights(draw, font, lines)
 
                 plate_rects = list(expanded_rects)
@@ -2071,10 +2441,10 @@ def _make_source_replacement_overlay(
                         if corridor is None:
                             fit_reason = "protected_region_collision"
                             collision_rejections += 1
-                            continue
+                            return None
                         if vertical_padding is None:
                             fit_reason = "single_line_corridor_fit"
-                            continue
+                            return None
                         plate, anchor_metrics = _single_line_plate(
                             original_rects[0],
                             plate_rects[0],
@@ -2095,7 +2465,7 @@ def _make_source_replacement_overlay(
                                 ).startswith("lowest_top=")
                                 else "single_line_corridor_fit"
                             )
-                            continue
+                            return None
                         plate_rects[0] = plate
                     else:
                         required_height = (
@@ -2114,7 +2484,7 @@ def _make_source_replacement_overlay(
                             - (original_rects[0][3] + padding)
                             > source_start_size
                         ):
-                            continue
+                            return None
                         plate_rects[0] = (
                             current[0],
                             current[1],
@@ -2137,7 +2507,7 @@ def _make_source_replacement_overlay(
                             current[0], current[1], current[2], min(float(height), needed_bottom)
                         )
                     if not plate_rects:
-                        continue
+                        return None
                     if len(lines) > len(plate_rects):
                         last = plate_rects[-1]
                         extra = (
@@ -2157,13 +2527,13 @@ def _make_source_replacement_overlay(
                             extra_height < required_extra_height
                             or extra_height > source_start_size + padding * 2
                         ):
-                            continue
+                            return None
                         plate_rects.append(extra)
 
                 if _candidate_collides(plate_rects, protected, used_slots):
                     collision_rejections += 1
                     fit_reason = "protected_region_collision"
-                    continue
+                    return None
                 selected_layout = (
                     font_size,
                     font_resolution,
@@ -2174,7 +2544,17 @@ def _make_source_replacement_overlay(
                     fit_metrics,
                     "broad_expansion" if allow_expansion else "normal",
                 )
-                break
+                return selected_layout
+
+            if selected_layout is None:
+                selected_layout = _select_replacement_candidate(
+                    source_start_size,
+                    _ABSOLUTE_MIN_FONT_PX,
+                    evaluate_standard_candidate,
+                )
+            diagnostic["replacement_candidate_mode_probes"] = (
+                replacement_candidate_mode_probes - unit_probe_start
+            )
 
             if selected_layout is None and len(regions) > 1:
                 for font_size in _replacement_font_candidates(
@@ -2373,6 +2753,10 @@ def _make_source_replacement_overlay(
                     "font_face_index": font_resolution.face_index,
                     "font_weight": font_resolution.weight,
                     "placement_strategy": placement_strategy,
+                    "rendered_plate_rectangles": tuple(
+                        tuple(round(value, 3) for value in rect)
+                        for rect in plate_rects
+                    ),
                     **fit_metrics,
                 }
             )
@@ -2403,16 +2787,55 @@ def _make_source_replacement_overlay(
                 padded = source
             overflow_rects.append(padded)
         if _candidate_collides(overflow_rects, protected, used_slots):
-            line_df.iloc[position, line_df.columns.get_loc("Overlay State")] = "preserved_unsupported"
-            line_df.iloc[position, line_df.columns.get_loc("Overflow Reason")] = "source_region_collision"
-            line_df.iloc[position, line_df.columns.get_loc("Overlay Collision")] = "rejected"
-            counts["preserved_excluded"] += 1
+            # The source pixels cannot be safely covered, but a validated,
+            # trusted translation still requires a terminal visual outcome.
+            # Preserve the source region and deliver the translation in the
+            # existing footer rather than silently discarding the unit.
+            footer_entries.append(
+                {"marker": marker, "text": translated, "type": "overflow"}
+            )
+            line_df.iloc[
+                position, line_df.columns.get_loc("Overlay Marker")
+            ] = marker
+            line_df.iloc[
+                position, line_df.columns.get_loc("Overlay State")
+            ] = "overflow"
+            line_df.iloc[
+                position, line_df.columns.get_loc("Overflow Reason")
+            ] = "source_region_collision"
+            line_df.iloc[
+                position, line_df.columns.get_loc("Footer Entry Type")
+            ] = "overflow"
+            line_df.iloc[
+                position, line_df.columns.get_loc("Overlay Font Size")
+            ] = _ABSOLUTE_MIN_FONT_PX
+            line_df.iloc[
+                position, line_df.columns.get_loc("Overlay Wrapped Lines")
+            ] = 1
+            line_df.iloc[
+                position, line_df.columns.get_loc("Overlay Collision")
+            ] = "rejected"
+            counts["overflow"] += 1
+            final_font_sizes.append(_ABSOLUTE_MIN_FONT_PX)
             collision_rejections += 1
             diagnostic.update(
                 {
-                    "overlay_state": "preserved_unsupported",
+                    "overlay_state": "overflow",
+                    "final_font_size": _ABSOLUTE_MIN_FONT_PX,
+                    "wrapped_line_count": 1,
                     "collision_decision": "rejected",
                     "overflow_reason": "source_region_collision",
+                    "marker": marker,
+                    "placement_strategy": "footer_only",
+                }
+            )
+            legend_rows.append(
+                {
+                    "Marker": marker,
+                    "Original": original,
+                    "Translation": translated,
+                    "Overlay": "overflow",
+                    "Confidence": row.get("Confidence", ""),
                 }
             )
             unit_diagnostics.append(diagnostic)
@@ -2471,7 +2894,59 @@ def _make_source_replacement_overlay(
         )
         unit_diagnostics.append(diagnostic)
 
-    drawn_count = counts["replacement"] + counts["expanded_replacement"] + counts["overflow"] + counts["warning_untrusted"]
+    intended_trusted_units = [
+        unit
+        for unit in unit_diagnostics
+        if unit.get("content_category")
+        in {"translated_content", "mixed_protected_translation"}
+        and unit.get("trust_status") == "trusted"
+    ]
+    terminal_states = {"replacement", "expanded_replacement", "overflow"}
+    terminal_units = [
+        unit
+        for unit in intended_trusted_units
+        if unit.get("overlay_state") in terminal_states
+    ]
+    on_image_units = [
+        unit
+        for unit in intended_trusted_units
+        if unit.get("overlay_state")
+        in {"replacement", "expanded_replacement"}
+    ]
+    footer_units = [
+        unit
+        for unit in intended_trusted_units
+        if unit.get("overlay_state") == "overflow"
+    ]
+    justified_exclusions = [
+        unit
+        for unit in unit_diagnostics
+        if unit.get("content_category")
+        not in {"translated_content", "mixed_protected_translation"}
+    ]
+    silent_remainder = [
+        unit
+        for unit in intended_trusted_units
+        if unit.get("overlay_state") not in terminal_states
+    ]
+    terminal_state_invariant = {
+        "intended_trusted_unit_count": len(intended_trusted_units),
+        "terminal_unit_count": len(terminal_units),
+        "on_image_unit_count": len(on_image_units),
+        "footer_unit_count": len(footer_units),
+        "justified_exclusion_unit_count": len(justified_exclusions),
+        "silent_remainder_count": len(silent_remainder),
+        "silent_remainder_unit_ids": tuple(
+            str(unit.get("semantic_unit_id", ""))
+            for unit in silent_remainder
+        ),
+    }
+    drawn_count = (
+        counts["replacement"]
+        + counts["expanded_replacement"]
+        + counts["overflow"]
+        + counts["warning_untrusted"]
+    )
     resolver_summary = {
         "target_language": image_font_resolution.target_language,
         "font_family": image_font_resolution.family,
@@ -2499,10 +2974,16 @@ def _make_source_replacement_overlay(
             "max_expansion_x": 0.0,
             "max_expansion_y": 0.0,
             "protected_region_collision_rejections": collision_rejections,
+            "terminal_state_invariant": terminal_state_invariant,
+            "replacement_candidate_search": {
+                "algorithm": replacement_search_algorithm,
+                "candidate_mode_probes": replacement_candidate_mode_probes,
+            },
             "font_resolver": resolver_summary,
             "absolute_minimum_font_size": _ABSOLUTE_MIN_FONT_PX,
             "final_font_size_summary": final_size_summary,
             "overlay_generation_time": round(time.perf_counter() - started, 4),
+            "text_measurement_cache": draw.textbbox_cache_diagnostics(),
             "units": unit_diagnostics,
         }
         return None, request_warning, pd.DataFrame()
@@ -2532,11 +3013,17 @@ def _make_source_replacement_overlay(
         "max_expansion_x": round(max_expansion_x, 1),
         "max_expansion_y": round(max_expansion_y, 1),
         "protected_region_collision_rejections": collision_rejections,
+        "terminal_state_invariant": terminal_state_invariant,
+        "replacement_candidate_search": {
+            "algorithm": replacement_search_algorithm,
+            "candidate_mode_probes": replacement_candidate_mode_probes,
+        },
         "font_resolver": resolver_summary,
         "footer_font_size": footer_size,
         "absolute_minimum_font_size": _ABSOLUTE_MIN_FONT_PX,
         "final_font_size_summary": final_size_summary,
         "overlay_generation_time": round(time.perf_counter() - started, 4),
+        "text_measurement_cache": draw.textbbox_cache_diagnostics(),
         "units": unit_diagnostics,
     }
     line_df.attrs["overlay_renderer_diagnostics"] = diagnostics

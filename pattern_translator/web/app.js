@@ -1,6 +1,6 @@
 import { displayBoxToImage, normalizedCropBox, readExifOrientation, resizeCropBox } from "/static/crop_coordinates.js";
 import { modeLabelFor, resolveUiLang, stringsFor } from "/static/translations.js";
-import { MODE_VALUES, adaptApiError, applyQualityResponse, beginTranslation, canTranslate, confirmPoorQuality, diagnosticFilename, discardCompletedResult, forceRunForCurrentQuality, hasCurrentQuality, invalidateQuality, invalidateRequest, isCurrentDiagnosticRequest, isCurrentImage, isCurrentQualityRequest, isCurrentRequest, isValidQualityResponse, isValidTranslationResponse, japaneseSourceBetaNotice, languageSelectionMessage, postDiagnosticReport, qualityFormEntries, qualityIdentity, restartCropWorkflow, translationFormEntries, validateImageFile } from "/static/workflow_state.js";
+import { MODE_VALUES, adaptApiError, applyQualityResponse, beginTranslation, canTranslate, clearRelevanceRejection, confirmPoorQuality, diagnosticFilename, discardCompletedResult, forceRunForCurrentQuality, hasCurrentQuality, invalidateQuality, invalidateRequest, isCurrentDiagnosticRequest, isCurrentImage, isCurrentQualityRequest, isCurrentRequest, isValidQualityResponse, isValidTranslationResponse, japaneseSourceBetaNotice, languageSelectionMessage, postDiagnosticReport, qualityFormEntries, qualityIdentity, recordRelevanceRejection, restartCropWorkflow, translationFormEntries, validateImageFile } from "/static/workflow_state.js";
 
 const MAX_BYTES = 25 * 1024 * 1024;
 const state = {
@@ -10,6 +10,7 @@ const state = {
   qualityAssessment: null, qualityFile: null, qualityArea: null, qualityCrop: null,
   qualityConfirmed: false, qualityError: false, qualityGeneration: 0,
   qualityLoading: false, qualityController: null,
+  relevanceRejection: null,
   image: { orientation: 1, rawWidth: 0, rawHeight: 0, width: 1, height: 1 },
   selection: null, initialSelection: null, layout: null, controllerPosition: { left: 0, top: 0 },
   activeEdge: "right", pointer: null, repeatDelay: null, repeatTimer: null,
@@ -97,6 +98,9 @@ function clearCompletedResult() {
   $("png-download").removeAttribute("href");
   $("txt-download").removeAttribute("href");
   $("translation-text").textContent = "";
+  $("relevance-validation").hidden = true;
+  $("overlay-result").hidden = false;
+  $("line-result").hidden = false;
   $("result-section").hidden = true;
   setDiagnosticMessage();
   updateDiagnosticAvailability();
@@ -200,6 +204,7 @@ function acceptFile(file) {
     return;
   }
   invalidateTranslationRequest();
+  clearRelevanceRejection(state);
   invalidateQualityForInput();
   clearCompletedResult();
   clearObjectUrl("imageUrl");
@@ -217,6 +222,7 @@ function acceptFile(file) {
 
 function removeFile() {
   invalidateTranslationRequest();
+  clearRelevanceRejection(state);
   invalidateQualityForInput();
   clearCompletedResult();
   clearObjectUrl("imageUrl");
@@ -592,6 +598,27 @@ function requestCompletedResultScroll() {
 }
 
 function showResult(body) {
+  if (body.relevance_rejected === true) {
+    recordRelevanceRejection(state);
+    const previousPngUrl = state.pngUrl;
+    const previousTxtUrl = state.txtUrl;
+    state.pngUrl = null;
+    state.txtUrl = null;
+    state.diagnosticContext = body.diagnostic_context && typeof body.diagnostic_context === "object"
+      ? body.diagnostic_context
+      : null;
+    $("relevance-validation").textContent = text.notCrochetPattern;
+    $("relevance-validation").hidden = false;
+    $("overlay-result").hidden = true;
+    $("line-result").hidden = true;
+    $("result-section").hidden = false;
+    setDiagnosticMessage();
+    updateDiagnosticAvailability();
+    if (previousPngUrl) URL.revokeObjectURL(previousPngUrl);
+    if (previousTxtUrl) URL.revokeObjectURL(previousTxtUrl);
+    return;
+  }
+  clearRelevanceRejection(state);
   if (!body.overlay_png?.base64) throw new Error("missing overlay");
   const binary = atob(body.overlay_png.base64);
   const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
@@ -618,6 +645,9 @@ function showResult(body) {
   $("txt-download").href = state.txtUrl;
   $("txt-download").download = "crochet_translation.txt";
   $("translation-text").textContent = body.readable_translation || body.translation_txt || "";
+  $("relevance-validation").hidden = true;
+  $("overlay-result").hidden = false;
+  $("line-result").hidden = false;
   $("overlay-guide-body").textContent = body.overlay_renderer === "source_replacement"
     ? text.overlayGuideBodyReplacement
     : text.overlayGuideBody;
@@ -715,10 +745,11 @@ $("remove-button").addEventListener("click", removeFile);
 ["dragenter", "dragover"].forEach((type) => zone.addEventListener(type, (event) => { event.preventDefault(); zone.classList.add("drag-over"); }));
 ["dragleave", "drop"].forEach((type) => zone.addEventListener(type, (event) => { event.preventDefault(); zone.classList.remove("drag-over"); }));
 zone.addEventListener("drop", (event) => acceptFile(event.dataTransfer?.files?.[0]));
-$("source-mode").addEventListener("change", (event) => { state.source = event.target.value; renderHints(); invalidateTranslationRequest(); });
+$("source-mode").addEventListener("change", (event) => { state.source = event.target.value; clearRelevanceRejection(state); renderHints(); invalidateTranslationRequest(); });
 $("output-mode").addEventListener("change", (event) => { state.target = event.target.value; renderHints(); invalidateTranslationRequest(); });
 document.querySelectorAll("[name=area-mode]").forEach((radio) => radio.addEventListener("change", (event) => {
   state.area = event.target.value;
+  clearRelevanceRejection(state);
   invalidateTranslationRequest();
   invalidateQualityForInput();
   if (state.area === "Select Area") openCropper();
@@ -758,6 +789,7 @@ $("reset-button").addEventListener("click", () => {
 });
 $("start-over-button").addEventListener("click", () => {
   restartCropWorkflow(state, document.querySelector("#settings input[value='Whole Pattern']"));
+  clearRelevanceRejection(state);
   invalidateTranslationRequest();
   invalidateQualityForInput();
   closeCropper();
@@ -767,6 +799,7 @@ $("start-over-button").addEventListener("click", () => {
 $("use-area-button").addEventListener("click", () => {
   state.crop = currentCropBox();
   renderCropPreview();
+  clearRelevanceRejection(state);
   invalidateTranslationRequest();
   invalidateQualityForInput();
   closeCropper();
@@ -775,6 +808,7 @@ $("use-area-button").addEventListener("click", () => {
 });
 $("edit-area-button").addEventListener("click", () => {
   state.crop = null;
+  clearRelevanceRejection(state);
   invalidateTranslationRequest();
   invalidateQualityForInput();
   openCropper();

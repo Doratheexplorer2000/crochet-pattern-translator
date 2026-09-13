@@ -311,6 +311,120 @@ class OverlayFontResolverTests(unittest.TestCase):
         )
 
 
+class RunLocalTextMeasurementCacheTests(unittest.TestCase):
+    def test_exact_bbox_key_and_run_local_statistics(self):
+        class FakeFont:
+            path = "/fonts/Test.ttf"
+            index = 2
+            size = 24
+            layout_engine = "basic"
+
+        class FakeDraw:
+            mode = "RGB"
+
+            def __init__(self):
+                self.calls = 0
+
+            def textbbox(self, xy, text, **kwargs):
+                self.calls += 1
+                return (xy[0], xy[1], xy[0] + len(str(text)), xy[1] + 10)
+
+        raw_draw = FakeDraw()
+        cached_draw = overlay._RunLocalTextMeasurementDraw(raw_draw)
+        font = FakeFont()
+        expected = cached_draw.textbbox((0, 0), "Round 1", font=font)
+
+        self.assertEqual(
+            expected,
+            cached_draw.textbbox((0, 0), "Round 1", font=font),
+        )
+        cached_draw.textbbox((0, 0), "Round 2", font=font)
+        cached_draw.textbbox((0, 0), "Round 1", font=font, spacing=5)
+        cached_draw.textbbox((1, 0), "Round 1", font=font)
+        cached_draw.textbbox((0, 0), "Round 1", font=FakeFont())
+
+        self.assertEqual(5, raw_draw.calls)
+        self.assertEqual(
+            {
+                "scope": "overlay_render_invocation",
+                "requests": 6,
+                "underlying_executions": 5,
+                "hits": 1,
+                "misses": 5,
+                "hit_rate": round(1 / 6, 6),
+            },
+            cached_draw.textbbox_cache_diagnostics(),
+        )
+        second_run = overlay._RunLocalTextMeasurementDraw(raw_draw)
+        second_run.textbbox((0, 0), "Round 1", font=font)
+        self.assertEqual(6, raw_draw.calls)
+        self.assertEqual(0, second_run.textbbox_cache_diagnostics()["hits"])
+
+
+class ReplacementBoundarySearchTests(unittest.TestCase):
+    @staticmethod
+    def _evaluate_from(
+        normal_fits,
+        expanded_fits,
+        calls,
+    ):
+        def evaluate(font_size, allow_expansion):
+            calls.append((font_size, allow_expansion))
+            fits = expanded_fits if allow_expansion else normal_fits
+            return (font_size, allow_expansion) if fits(font_size) else None
+
+        return evaluate
+
+    def test_binary_boundary_cases_match_exhaustive_oracle(self):
+        cases = (
+            ("highest_normal", lambda size: size <= 20, lambda size: False),
+            ("all_fail", lambda size: False, lambda size: False),
+            ("minimum_expanded", lambda size: False, lambda size: size <= 6),
+            ("expanded_boundary", lambda size: False, lambda size: size <= 13),
+            ("both_fit_at_boundary", lambda size: size <= 13, lambda size: size <= 13),
+        )
+        for name, normal_fits, expanded_fits in cases:
+            with self.subTest(name=name):
+                binary_calls = []
+                exhaustive_calls = []
+                binary = overlay._select_replacement_candidate_binary(
+                    20,
+                    6,
+                    self._evaluate_from(
+                        normal_fits,
+                        expanded_fits,
+                        binary_calls,
+                    ),
+                )
+                exhaustive = overlay._select_replacement_candidate_exhaustive(
+                    20,
+                    6,
+                    self._evaluate_from(
+                        normal_fits,
+                        expanded_fits,
+                        exhaustive_calls,
+                    ),
+                )
+
+                self.assertEqual(exhaustive, binary)
+                self.assertLessEqual(len(binary_calls), len(exhaustive_calls))
+
+    def test_boundary_prefers_normal_when_both_modes_fit(self):
+        calls = []
+        result = overlay._select_replacement_candidate_binary(
+            20,
+            6,
+            self._evaluate_from(
+                lambda size: size <= 13,
+                lambda size: size <= 13,
+                calls,
+            ),
+        )
+
+        self.assertEqual((13, False), result)
+        self.assertNotIn((13, True), calls)
+
+
 class SourceReplacementRendererTests(unittest.TestCase):
     def setUp(self):
         overlay._resolve_overlay_font.cache_clear()
@@ -361,6 +475,268 @@ class SourceReplacementRendererTests(unittest.TestCase):
         self.assertEqual("", legend_df.loc[0, "Marker"])
         self.assertIn("R1: 6 sc", legend)
         self.assertNotIn((255, 80, 80), set(image.getdata()))
+
+    def test_binary_renderer_matches_exhaustive_oracle(self):
+        def make_rows():
+            return pd.DataFrame(
+                [
+                    self._row(
+                        "第七圈：三短針，加針",
+                        (
+                            "Round 7: 3 sc, increase, 3 treble crochet, "
+                            "2 double treble crochet, slip stitch"
+                        ),
+                        x1=30,
+                        x2=390,
+                        y1=40,
+                        y2=92,
+                        **{
+                            "Semantic Unit ID": "binary-expanded",
+                            "Validation Status": "validated",
+                        },
+                    ),
+                    self._row(
+                        "第八圈",
+                        "Round 8: 6 sc",
+                        x1=520,
+                        x2=690,
+                        y1=42,
+                        y2=94,
+                        **{
+                            "Semantic Unit ID": "binary-normal",
+                            "Validation Status": "validated",
+                        },
+                    ),
+                    self._row(
+                        "@protected_designer",
+                        "@protected_designer",
+                        x1=720,
+                        x2=900,
+                        y1=38,
+                        y2=96,
+                    ),
+                ]
+            )
+
+        def render(rows, selector):
+            overlay._resolve_overlay_font.cache_clear()
+            with mock.patch.object(
+                overlay,
+                "_select_replacement_candidate",
+                selector,
+            ):
+                image, legend, legend_df = overlay.make_line_translation_overlay(
+                    Image.new("RGB", (960, 240), "white"),
+                    rows,
+                    "English — US",
+                )
+            return image, legend, legend_df
+
+        binary_rows = make_rows()
+        binary_image, binary_legend, binary_legend_df = render(
+            binary_rows,
+            overlay._select_replacement_candidate_binary,
+        )
+        exhaustive_rows = make_rows()
+        exhaustive_image, exhaustive_legend, exhaustive_legend_df = render(
+            exhaustive_rows,
+            overlay._select_replacement_candidate_exhaustive,
+        )
+
+        self.assertEqual(binary_image.tobytes(), exhaustive_image.tobytes())
+        self.assertEqual(binary_legend, exhaustive_legend)
+        pd.testing.assert_frame_equal(binary_legend_df, exhaustive_legend_df)
+        binary_values = binary_rows.reset_index(drop=True)
+        exhaustive_values = exhaustive_rows.reset_index(drop=True)
+        binary_values.attrs = {}
+        exhaustive_values.attrs = {}
+        pd.testing.assert_frame_equal(binary_values, exhaustive_values)
+
+        fields = (
+            "semantic_unit_id",
+            "overlay_state",
+            "final_font_size",
+            "wrapped_line_count",
+            "placement_strategy",
+            "rendered_plate_rectangles",
+            "collision_decision",
+            "overflow_reason",
+        )
+        binary_diagnostics = binary_rows.attrs["overlay_renderer_diagnostics"]
+        exhaustive_diagnostics = exhaustive_rows.attrs[
+            "overlay_renderer_diagnostics"
+        ]
+        self.assertEqual(
+            [
+                {field: unit.get(field) for field in fields}
+                for unit in binary_diagnostics["units"]
+            ],
+            [
+                {field: unit.get(field) for field in fields}
+                for unit in exhaustive_diagnostics["units"]
+            ],
+        )
+        self.assertEqual(
+            binary_diagnostics["final_dimensions"],
+            exhaustive_diagnostics["final_dimensions"],
+        )
+        self.assertEqual(
+            binary_diagnostics["footer_entry_count"],
+            exhaustive_diagnostics["footer_entry_count"],
+        )
+        self.assertEqual(
+            "binary_boundary",
+            binary_diagnostics["replacement_candidate_search"]["algorithm"],
+        )
+        self.assertEqual(
+            "exhaustive_oracle",
+            exhaustive_diagnostics["replacement_candidate_search"]["algorithm"],
+        )
+        self.assertLess(
+            binary_diagnostics["replacement_candidate_search"][
+                "candidate_mode_probes"
+            ],
+            exhaustive_diagnostics["replacement_candidate_search"][
+                "candidate_mode_probes"
+            ],
+        )
+
+    def test_memoized_measurements_preserve_exact_renderer_output(self):
+        def make_rows():
+            return pd.DataFrame(
+                [
+                    self._row(
+                        "R7:3x.V.3T.2Tv.3T.8x",
+                        (
+                            "Round 7: 3 sc, inc, 3 tr, 2 dtr, 3 tr, "
+                            "8 sc, 3 tr, 2 dtr, 3 tr, inc, 3 sc"
+                        ),
+                        x1=30,
+                        x2=390,
+                        y1=40,
+                        y2=92,
+                        **{"Validation Status": "validated"},
+                    ),
+                    self._row(
+                        "@protected_designer",
+                        "@protected_designer",
+                        x1=680,
+                        x2=880,
+                        y1=38,
+                        y2=96,
+                    ),
+                ]
+            )
+
+        original_textbbox = ImageDraw.ImageDraw.textbbox
+        underlying_calls = {"baseline": 0, "memoized": 0}
+
+        def render_with_count(rows, mode, *, bypass_cache):
+            def counted_textbbox(draw, *args, **kwargs):
+                underlying_calls[mode] += 1
+                return original_textbbox(draw, *args, **kwargs)
+
+            def uncached_textbbox(cached_draw, *args, **kwargs):
+                return cached_draw._draw.textbbox(*args, **kwargs)
+
+            overlay._resolve_overlay_font.cache_clear()
+            cache_patch = (
+                mock.patch.object(
+                    overlay._RunLocalTextMeasurementDraw,
+                    "textbbox",
+                    uncached_textbbox,
+                )
+                if bypass_cache
+                else mock.patch.object(
+                    overlay._RunLocalTextMeasurementDraw,
+                    "textbbox",
+                    overlay._RunLocalTextMeasurementDraw.textbbox,
+                )
+            )
+            with mock.patch.object(
+                ImageDraw.ImageDraw,
+                "textbbox",
+                counted_textbbox,
+            ), cache_patch:
+                image, legend, legend_df = overlay.make_line_translation_overlay(
+                    Image.new("RGB", (960, 240), "white"),
+                    rows,
+                    "English — US",
+                )
+            return image, legend, legend_df
+
+        baseline_rows = make_rows()
+        baseline_image, baseline_legend, baseline_legend_df = render_with_count(
+            baseline_rows,
+            "baseline",
+            bypass_cache=True,
+        )
+        memoized_rows = make_rows()
+        memoized_image, memoized_legend, memoized_legend_df = render_with_count(
+            memoized_rows,
+            "memoized",
+            bypass_cache=False,
+        )
+
+        self.assertEqual(baseline_image.size, memoized_image.size)
+        self.assertEqual(baseline_image.tobytes(), memoized_image.tobytes())
+        self.assertEqual(baseline_legend, memoized_legend)
+        pd.testing.assert_frame_equal(baseline_legend_df, memoized_legend_df)
+        baseline_values = baseline_rows.reset_index(drop=True)
+        memoized_values = memoized_rows.reset_index(drop=True)
+        baseline_values.attrs = {}
+        memoized_values.attrs = {}
+        pd.testing.assert_frame_equal(baseline_values, memoized_values)
+
+        baseline_diagnostics = baseline_rows.attrs["overlay_renderer_diagnostics"]
+        memoized_diagnostics = memoized_rows.attrs["overlay_renderer_diagnostics"]
+        top_level_fields = (
+            "original_dimensions",
+            "final_dimensions",
+            "footer_entry_count",
+            "footer_height",
+            "replacement",
+            "expanded_replacement",
+            "overflow",
+            "warning_untrusted",
+            "preserved_excluded",
+            "protected_region_collision_rejections",
+        )
+        self.assertEqual(
+            {field: baseline_diagnostics[field] for field in top_level_fields},
+            {field: memoized_diagnostics[field] for field in top_level_fields},
+        )
+        unit_fields = (
+            "semantic_unit_id",
+            "overlay_state",
+            "final_font_size",
+            "wrapped_line_count",
+            "placement_strategy",
+            "rendered_plate_rectangles",
+            "collision_decision",
+            "overflow_reason",
+        )
+        self.assertEqual(
+            [
+                {field: unit.get(field) for field in unit_fields}
+                for unit in baseline_diagnostics["units"]
+            ],
+            [
+                {field: unit.get(field) for field in unit_fields}
+                for unit in memoized_diagnostics["units"]
+            ],
+        )
+
+        cache = memoized_diagnostics["text_measurement_cache"]
+        self.assertEqual(cache["requests"], cache["hits"] + cache["misses"])
+        self.assertEqual(cache["misses"], cache["underlying_executions"])
+        self.assertEqual(cache["misses"], underlying_calls["memoized"])
+        self.assertEqual(cache["requests"], underlying_calls["baseline"])
+        self.assertGreater(cache["hits"], 0)
+        self.assertLess(
+            underlying_calls["memoized"],
+            underlying_calls["baseline"],
+        )
 
     def test_expanded_replacement_stays_source_anchored(self):
         rows = pd.DataFrame(
@@ -810,6 +1186,467 @@ class SourceReplacementRendererTests(unittest.TestCase):
             "source_overlaps_protected_neighbour",
             metrics["final_failure_predicate"],
         )
+
+    def test_dense_touching_source_rows_receive_disjoint_effective_ownership(self):
+        rows = pd.DataFrame(
+            [
+                self._row(
+                    "头",
+                    "Head",
+                    x1=39.9,
+                    x2=88.0,
+                    y1=252.3,
+                    y2=297.1,
+                    **{"Validation Status": "validated"},
+                ),
+                self._row(
+                    "R1:6X(6)",
+                    "R1: 6 sc (6)",
+                    x1=41.5,
+                    x2=202.6,
+                    y1=295.5,
+                    y2=343.6,
+                    **{"Validation Status": "validated"},
+                ),
+                self._row(
+                    "R2:6V (12)",
+                    "R2: 6 inc (12)",
+                    x1=41.5,
+                    x2=229.1,
+                    y1=338.6,
+                    y2=385.1,
+                    **{"Validation Status": "validated"},
+                ),
+                self._row(
+                    "R3:(X.V)*6 (18)",
+                    "R3: (sc, inc) × 6 (18)",
+                    x1=41.5,
+                    x2=303.9,
+                    y1=380.1,
+                    y2=426.6,
+                    **{"Validation Status": "validated"},
+                ),
+                self._row(
+                    "R4:(X.V.X)*6 (24)",
+                    "R4: (sc, inc, sc) × 6 (24)",
+                    x1=41.5,
+                    x2=333.7,
+                    y1=423.3,
+                    y2=468.1,
+                    **{"Validation Status": "validated"},
+                ),
+                self._row(
+                    "用黑色毛毡剪出两只眼睛",
+                    "Cut two eyes from black felt.",
+                    x1=506.4,
+                    x2=943.1,
+                    y1=712.1,
+                    y2=758.6,
+                    **{"Validation Status": "validated"},
+                ),
+                self._row(
+                    "R18:(9X.A.9X)*3(57) 把它们粘在脸上",
+                    (
+                        "R18: (9 sc, dec, 9 sc) × 3 (57). "
+                        "Glue them onto the face."
+                    ),
+                    x1=44.8,
+                    x2=787.0,
+                    y1=758.6,
+                    y2=808.4,
+                    **{"Validation Status": "validated"},
+                ),
+            ]
+        )
+        source = Image.new("RGB", (1242, 900), "white")
+        source_draw = ImageDraw.Draw(source)
+        source_draw.rectangle((1000, 500, 1200, 560), fill=(31, 42, 53))
+        branding_before = source.crop((1000, 500, 1201, 561)).tobytes()
+        protected_branding = pd.DataFrame(
+            [
+                {
+                    "text": "@designer",
+                    "min_x": 1000.0,
+                    "max_x": 1200.0,
+                    "min_y": 500.0,
+                    "max_y": 560.0,
+                }
+            ]
+        )
+
+        image, _legend, _legend_df = overlay.make_line_translation_overlay(
+            source,
+            rows,
+            "English — US",
+            protected_ocr_rows=protected_branding,
+        )
+
+        self.assertIsNotNone(image)
+        target_positions = range(len(rows))
+        for position in target_positions:
+            with self.subTest(original=rows.loc[position, "Original"]):
+                self.assertIn(
+                    rows.loc[position, "Overlay State"],
+                    {"replacement", "expanded_replacement"},
+                )
+                self.assertNotEqual(
+                    "preserved_unsupported",
+                    rows.loc[position, "Overlay State"],
+                )
+
+        self.assertNotEqual(
+            "unsupported_geometry",
+            rows.loc[0, "Overflow Reason"],
+        )
+        self.assertEqual("", rows.loc[0, "Overlay Marker"])
+
+        units = rows.attrs["overlay_renderer_diagnostics"]["units"]
+        ownership = [
+            unit["effective_source_ownership_rectangles"][0]
+            for unit in units
+        ]
+        for upper, lower in ((0, 1), (1, 2), (2, 3), (3, 4), (5, 6)):
+            self.assertLess(ownership[upper][3], ownership[lower][1])
+            self.assertFalse(
+                overlay._rects_overlap(ownership[upper], ownership[lower])
+            )
+        self.assertEqual(
+            758.6,
+            units[5]["raw_source_rectangles"][0][3],
+        )
+        self.assertEqual(
+            758.6,
+            units[6]["raw_source_rectangles"][0][1],
+        )
+
+        plates = [
+            units[position]["rendered_plate_rectangles"][0]
+            for position in target_positions
+        ]
+        self.assertEqual(
+            sorted(plate[1] for plate in plates),
+            [plate[1] for plate in plates],
+        )
+        for first_index, first in enumerate(plates):
+            self.assertGreaterEqual(first[0], 0)
+            self.assertGreaterEqual(first[1], 0)
+            self.assertLessEqual(first[2], 1242)
+            self.assertLessEqual(first[3], 900)
+            for second in plates[first_index + 1 :]:
+                self.assertFalse(overlay._rects_overlap(first, second))
+        self.assertEqual(
+            branding_before,
+            image.crop((1000, 500, 1201, 561)).tobytes(),
+        )
+
+    def _render_external_protected_contact(self, external_bottom):
+        rows = pd.DataFrame(
+            [
+                self._row(
+                    "用黑色毛毡剪出两只眼睛",
+                    "Cut out two eyes from black felt.",
+                    x1=506.4,
+                    x2=943.1,
+                    y1=712.1,
+                    y2=758.6,
+                    **{"Validation Status": "validated"},
+                )
+            ]
+        )
+        protected = pd.DataFrame(
+            [
+                {
+                    "text": "眼睛",
+                    "min_x": 503.1,
+                    "max_x": 592.8,
+                    "min_y": 662.3,
+                    "max_y": external_bottom,
+                }
+            ]
+        )
+        protected_before = protected.copy(deep=True)
+        source = Image.new("RGB", (1242, 900), "white")
+        source_draw = ImageDraw.Draw(source)
+        source_draw.rectangle(
+            (503.1, 662.3, 592.8, external_bottom),
+            fill=(31, 42, 53),
+        )
+        protected_crop = (503, 662, 594, int(external_bottom))
+        protected_pixels_before = source.crop(protected_crop).tobytes()
+
+        image, _legend, _legend_df = overlay.make_line_translation_overlay(
+            source,
+            rows,
+            "English — US",
+            protected_ocr_rows=protected,
+        )
+
+        pd.testing.assert_frame_equal(protected_before, protected)
+        protected_pixels_after = (
+            image.crop(protected_crop).tobytes()
+            if image is not None
+            else source.crop(protected_crop).tobytes()
+        )
+        self.assertEqual(
+            protected_pixels_before,
+            protected_pixels_after,
+        )
+        return rows, image
+
+    def test_exact_external_shared_edge_clips_only_semantic_ownership(self):
+        rows, image = self._render_external_protected_contact(712.1)
+
+        decision = rows.attrs["overlay_renderer_diagnostics"]["units"][0]
+        effective = decision["effective_source_ownership_rectangles"][0]
+        self.assertEqual(
+            (506.4, 712.1, 943.1, 758.6),
+            decision["raw_source_rectangles"][0],
+        )
+        self.assertEqual(712.6, effective[1])
+        self.assertEqual(0.5, effective[1] - 712.1)
+        self.assertTrue(decision["source_ownership_adjusted"])
+        self.assertIn(
+            rows.loc[0, "Overlay State"],
+            {"replacement", "expanded_replacement"},
+        )
+        self.assertIsNotNone(image)
+        self.assertNotEqual(
+            "preserved_unsupported",
+            rows.loc[0, "Overlay State"],
+        )
+
+    def test_small_external_overlap_clips_only_semantic_ownership(self):
+        rows, image = self._render_external_protected_contact(713.6)
+
+        decision = rows.attrs["overlay_renderer_diagnostics"]["units"][0]
+        effective = decision["effective_source_ownership_rectangles"][0]
+        self.assertEqual(714.1, effective[1])
+        self.assertEqual(0.5, effective[1] - 713.6)
+        self.assertTrue(decision["source_ownership_adjusted"])
+        self.assertIn(
+            rows.loc[0, "Overlay State"],
+            {"replacement", "expanded_replacement"},
+        )
+        self.assertIsNotNone(image)
+
+    def test_large_external_overlap_remains_strict_and_uses_footer(self):
+        rows, image = self._render_external_protected_contact(730.0)
+
+        decision = rows.attrs["overlay_renderer_diagnostics"]["units"][0]
+        self.assertEqual(
+            (506.4, 712.1, 943.1, 758.6),
+            decision["effective_source_ownership_rectangles"][0],
+        )
+        self.assertFalse(decision["source_ownership_adjusted"])
+        self.assertEqual("overflow", rows.loc[0, "Overlay State"])
+        self.assertEqual("source_region_collision", rows.loc[0, "Overflow Reason"])
+        self.assertEqual("rejected", rows.loc[0, "Overlay Collision"])
+        self.assertEqual("overflow", rows.loc[0, "Footer Entry Type"])
+        self.assertEqual("[1]", rows.loc[0, "Overlay Marker"])
+        self.assertEqual("footer_only", decision["placement_strategy"])
+        self.assertEqual(1, rows.attrs["overlay_renderer_diagnostics"]["footer_entry_count"])
+        self.assertIsNotNone(image)
+
+    def test_large_semantic_source_overlap_is_not_split_as_ocr_slack(self):
+        source_regions = {
+            0: [{"min_x": 20, "max_x": 300, "min_y": 20, "max_y": 80}],
+            1: [{"min_x": 20, "max_x": 300, "min_y": 50, "max_y": 110}],
+        }
+
+        ownership = overlay._effective_source_ownership_rects(source_regions)
+
+        self.assertEqual((20.0, 20.0, 300.0, 80.0), ownership[0][0])
+        self.assertEqual((20.0, 50.0, 300.0, 110.0), ownership[1][0])
+        self.assertTrue(overlay._rects_overlap(ownership[0][0], ownership[1][0]))
+
+    def test_sushi_overlap_routes_every_trusted_instruction_to_a_terminal_state(self):
+        def source_region(
+            segment_id,
+            text,
+            confidence,
+            min_x,
+            min_y,
+            max_x,
+            max_y,
+            reading_order,
+        ):
+            member = {
+                "text": text,
+                "confidence": confidence,
+                "min_x": min_x,
+                "min_y": min_y,
+                "max_x": max_x,
+                "max_y": max_y,
+            }
+            return {
+                "source_segment_id": segment_id,
+                "visual_line_id": segment_id,
+                "reading_order": reading_order,
+                "text": text,
+                "confidence": confidence,
+                "member_boxes": (member,),
+                "min_x": min_x,
+                "min_y": min_y,
+                "max_x": max_x,
+                "max_y": max_y,
+            }
+
+        nori_translation = (
+            "Nori: ch 10, work into the 3rd chain from the hook, 8 dc"
+        )
+        turn_translation = "Ch 2 to turn. Turn the piece. Work 8 dc"
+        repeat_translation = "Repeat to the desired length"
+        rows = pd.DataFrame(
+            [
+                self._row(
+                    "海苔\n起10ch，倒三回钩8F",
+                    nori_translation,
+                    x1=115.1,
+                    x2=751.9,
+                    y1=1566.8,
+                    y2=1653.7,
+                    **{
+                        "Validation Status": "validated",
+                        "Semantic Unit ID": "unit-0024",
+                        "Source Segment IDs": (
+                            "segment-0024",
+                            "segment-0025",
+                        ),
+                        "Source Regions": (
+                            source_region(
+                                "segment-0024",
+                                "起10ch，倒三回钩8F",
+                                0.947,
+                                340.1,
+                                1571.9,
+                                751.9,
+                                1623.1,
+                                24,
+                            ),
+                            source_region(
+                                "segment-0025",
+                                "海苔",
+                                1.0,
+                                115.1,
+                                1566.8,
+                                266.0,
+                                1653.7,
+                                25,
+                            ),
+                        ),
+                    },
+                ),
+                self._row(
+                    "起立两针。翻转织片。钩8F",
+                    turn_translation,
+                    x1=340.1,
+                    x2=925.8,
+                    y1=1620.5,
+                    y2=1671.6,
+                    **{
+                        "Validation Status": "validated",
+                        "Semantic Unit ID": "unit-0025",
+                        "Source Segment IDs": ("segment-0026",),
+                        "Source Regions": (
+                            source_region(
+                                "segment-0026",
+                                "起立两针。翻转织片。钩8F",
+                                0.948,
+                                340.1,
+                                1620.5,
+                                925.8,
+                                1671.6,
+                                26,
+                            ),
+                        ),
+                    },
+                ),
+                self._row(
+                    "重复到合适长度即可",
+                    repeat_translation,
+                    x1=347.8,
+                    x2=790.3,
+                    y1=1676.7,
+                    y2=1727.9,
+                    **{
+                        "Validation Status": "validated",
+                        "Semantic Unit ID": "unit-0026",
+                        "Source Segment IDs": ("segment-0027",),
+                        "Source Regions": (
+                            source_region(
+                                "segment-0027",
+                                "重复到合适长度即可",
+                                0.999,
+                                347.8,
+                                1676.7,
+                                790.3,
+                                1727.9,
+                                27,
+                            ),
+                        ),
+                    },
+                ),
+            ]
+        )
+        source = Image.new("RGB", (1179, 2556), (245, 238, 202))
+        source_draw = ImageDraw.Draw(source)
+        source_draw.rectangle((0, 1760, 1178, 2555), fill=(31, 42, 53))
+        protected_imagery = source.crop((0, 1760, 1179, 2556)).tobytes()
+
+        raw_ownership = lambda source_regions: {
+            owner: [overlay._rect_for_region(region) for region in regions]
+            for owner, regions in source_regions.items()
+        }
+        with mock.patch.object(
+            overlay,
+            "_effective_source_ownership_rects",
+            side_effect=raw_ownership,
+        ), mock.patch.object(
+            overlay,
+            "_render_translation_footer",
+            wraps=overlay._render_translation_footer,
+        ) as render_footer:
+            image, legend, legend_df = overlay.make_line_translation_overlay(
+                source,
+                rows,
+                "English — US",
+            )
+
+        self.assertEqual(
+            ["overflow", "overflow", "expanded_replacement"],
+            rows["Overlay State"].tolist(),
+        )
+        self.assertEqual(
+            ["source_region_collision", "source_region_collision", ""],
+            rows["Overflow Reason"].tolist(),
+        )
+        footer_entries = render_footer.call_args.args[1]
+        self.assertEqual(
+            [nori_translation, turn_translation],
+            [entry["text"] for entry in footer_entries],
+        )
+        self.assertNotIn(repeat_translation, [entry["text"] for entry in footer_entries])
+        for translation in (nori_translation, turn_translation, repeat_translation):
+            self.assertEqual(1, legend.count(translation))
+            self.assertEqual(
+                1,
+                (legend_df["Translation"] == translation).sum(),
+            )
+        self.assertEqual(
+            protected_imagery,
+            image.crop((0, 1760, 1179, 2556)).tobytes(),
+        )
+
+        invariant = rows.attrs["overlay_renderer_diagnostics"][
+            "terminal_state_invariant"
+        ]
+        self.assertEqual(3, invariant["intended_trusted_unit_count"])
+        self.assertEqual(3, invariant["terminal_unit_count"])
+        self.assertEqual(1, invariant["on_image_unit_count"])
+        self.assertEqual(2, invariant["footer_unit_count"])
+        self.assertEqual(0, invariant["justified_exclusion_unit_count"])
+        self.assertEqual(0, invariant["silent_remainder_count"])
+        self.assertEqual((), invariant["silent_remainder_unit_ids"])
 
     def test_genuinely_impossible_dense_row_still_uses_footer(self):
         dense_region = {
@@ -1611,6 +2448,21 @@ class SourceReplacementRendererTests(unittest.TestCase):
         self.assertIn("dense_row_reason=", report)
         self.assertIn("row_band=", report)
         self.assertIn("strategy=", report)
+        self.assertIn("Replacement candidate search: binary_boundary", report)
+        self.assertIn("Candidate-mode probes evaluated:", report)
+        self.assertIn("replacement_search=binary_boundary", report)
+        self.assertIn("candidate_mode_probes=", report)
+        self.assertIn(
+            "Protected-region collision rejections among evaluated candidates:",
+            report,
+        )
+        self.assertIn("Intended trusted visual units: 1", report)
+        self.assertIn("Terminal visual units: 1", report)
+        self.assertIn("On-image translated units: 1", report)
+        self.assertIn("Footer translated units: 0", report)
+        self.assertIn("Justified non-translation exclusions: 0", report)
+        self.assertIn("Silent visual remainder: 0", report)
+        self.assertIn("Silent visual remainder unit IDs: None", report)
         self.assertIn("source_anchor_top_range=", report)
         self.assertIn("neighbour_boundary_before=", report)
         self.assertIn("neighbour_boundary_after=", report)

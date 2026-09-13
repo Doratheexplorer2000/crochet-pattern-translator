@@ -7,6 +7,8 @@ import pandas as pd
 from PIL import Image, ImageDraw
 
 from pattern_translator.engine import broad_translation
+from pattern_translator.engine import line_translation
+from pattern_translator.engine import ocr_cleanup
 from pattern_translator.engine import ocr_lines
 from pattern_translator.engine import overlay
 from pattern_translator.engine import pattern_document
@@ -27,6 +29,83 @@ def _row(text, x1, y1, x2, y2, confidence=0.98):
 
 
 class PageMetadataCleanupTests(unittest.TestCase):
+    def test_credible_short_cjk_content_survives_the_pre_broad_pipeline(self):
+        labels = ("脚", "草莓", "断线", "眼睛", "手", "缝合", "杯口")
+        rows = []
+        for index, label in enumerate(labels):
+            top = index * 110.0
+            rows.extend(
+                [
+                    _row(label, 100, top, 160, top + 30, 1.0),
+                    _row("R1:6x", 102, top + 36, 230, top + 66, 0.98),
+                ]
+            )
+
+        kept, removed = pattern_document.filter_noise_and_watermarks(
+            pd.DataFrame(rows),
+            image_width=900,
+            image_height=900,
+        )
+
+        self.assertTrue(set(labels).issubset(set(kept["text"])))
+        self.assertFalse(set(labels) & set(removed.get("text", [])))
+
+        visual_lines = ocr_lines.merge_ocr_boxes_into_visual_lines(kept)
+        visual_text = set(visual_lines["text"])
+        self.assertTrue(set(labels).issubset(visual_text))
+
+        cleaned = ocr_cleanup.clean_ocr_text("\n".join(kept["text"]))
+        for label in labels:
+            self.assertIn(label, cleaned)
+
+        semantic_rows = visual_lines.copy()
+        semantic_rows["semantic_text"] = semantic_rows["text"].map(
+            line_translation.clean_single_ocr_line
+        )
+        segments, _segment_rows = broad_translation.build_source_segments(
+            semantic_rows
+        )
+        source_texts = {segment["text"] for segment in segments}
+        self.assertTrue(set(labels).issubset(source_texts))
+
+    def test_short_cjk_requires_credible_ocr_or_layout_evidence(self):
+        rows = pd.DataFrame(
+            [
+                _row("夢", 2, 2, 5, 5, 0.99),
+                _row("字", 100, 100, 140, 130, 0.30),
+                _row("R1:6x", 100, 145, 240, 175, 0.98),
+            ]
+        )
+
+        kept, removed = pattern_document.filter_noise_and_watermarks(
+            rows,
+            image_width=900,
+            image_height=900,
+        )
+
+        self.assertEqual(["R1:6x"], kept["text"].tolist())
+        self.assertEqual({"夢", "字"}, set(removed["text"]))
+        self.assertTrue(
+            removed["removed_reason"].str.contains("watermark/noise").all()
+        )
+
+    def test_repeated_short_cjk_and_watermark_keywords_remain_removable(self):
+        rows = [
+            _row("夢", 100, index * 45, 140, index * 45 + 30, 0.99)
+            for index in range(5)
+        ]
+        rows.append(_row("小红书", 100, 300, 220, 330, 0.99))
+
+        kept, removed = pattern_document.filter_noise_and_watermarks(
+            pd.DataFrame(rows),
+            image_width=900,
+            image_height=900,
+        )
+
+        self.assertTrue(kept.empty)
+        self.assertEqual(5, removed["text"].tolist().count("夢"))
+        self.assertIn("小红书", removed["original_text_before_filter"].tolist())
+
     def test_flower_short_cjk_continuation_is_kept_and_page_label_is_excluded(self):
         rows = pd.DataFrame(
             [

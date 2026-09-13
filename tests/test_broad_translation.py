@@ -10,6 +10,7 @@ import pandas as pd
 from pattern_translator.engine import broad_translation
 from pattern_translator.engine import line_translation
 from pattern_translator.engine import ocr_lines
+from pattern_translator.engine import pattern_document
 from pattern_translator.engine import shadow_title_classifier
 
 
@@ -217,6 +218,253 @@ class LunaPrimaryAcceptanceTests(unittest.TestCase):
 
 
 class PromptAndGlossaryContractTests(unittest.TestCase):
+    def test_chinese_cross_script_context_prefers_canonical_target_terms(self):
+        expected_terms = {
+            "st_003_single_crochet": ("X", "短針", "短针"),
+            "st_005_double_crochet": ("F", "長針", "长针"),
+            "st_009_increase": ("V", "加針", "加针"),
+            "st_012_double_crochet_increase": ("FV", "長針加針", "长针加针"),
+            "st_015_decrease": ("A", "減針", "减针"),
+            "st_018_double_crochet_decrease": ("FA", "長針減針", "长针减针"),
+        }
+        cases = (
+            (
+                "Simplified Chinese",
+                "Traditional Chinese",
+                "simplified_chinese_abbreviation",
+                "traditional_chinese",
+                "traditional_chinese_aliases",
+                "traditional_chinese_abbreviation",
+                1,
+            ),
+            (
+                "Traditional Chinese",
+                "Simplified Chinese",
+                "traditional_chinese_abbreviation",
+                "simplified_chinese_authoritative_term",
+                "simplified_chinese_aliases",
+                "simplified_chinese_abbreviation",
+                2,
+            ),
+        )
+        segments = [{"source_segment_id": "segment-0000", "text": "R1:12x"}]
+        for (
+            source_mode,
+            output_mode,
+            source_abbreviation_field,
+            target_term_field,
+            target_aliases_field,
+            target_abbreviation_field,
+            target_term_position,
+        ) in cases:
+            with self.subTest(route=(source_mode, output_mode)):
+                terms = broad_translation.build_glossary(source_mode, output_mode)
+                terms_by_id = {term["concept_id"]: term for term in terms}
+                for concept_id, expected in expected_terms.items():
+                    with self.subTest(concept_id=concept_id):
+                        abbreviation = expected[0]
+                        entry = terms_by_id[concept_id]
+                        self.assertEqual(
+                            abbreviation,
+                            entry[source_abbreviation_field],
+                        )
+                        self.assertEqual(
+                            expected[target_term_position],
+                            entry[target_term_field],
+                        )
+                        self.assertNotIn(
+                            abbreviation,
+                            entry.get(target_aliases_field, []),
+                        )
+                        self.assertNotIn(target_abbreviation_field, entry)
+
+                prompt = broad_translation.build_prompt(
+                    segments,
+                    terms,
+                    broad_translation._route_config(source_mode, output_mode),
+                )
+                payload = json.loads(prompt.split("INPUT: ", 1)[1])
+                policy = payload["terminology_policy"]
+                self.assertEqual(
+                    "case_insensitive",
+                    policy["source_abbreviation_matching"],
+                )
+                self.assertEqual(
+                    target_term_field,
+                    policy["preferred_target_term_field"],
+                )
+                self.assertEqual(
+                    "canonical_readable_crochet_terminology",
+                    policy["target_output_preference"],
+                )
+                self.assertIn(
+                    "not an equally preferred output form",
+                    prompt,
+                )
+                self.assertIn("case-insensitively", prompt)
+
+    def test_route_specific_target_conventions_remain_available(self):
+        segments = [{"source_segment_id": "segment-0000", "text": "R1:6sc"}]
+
+        english_to_tc = broad_translation.build_glossary(
+            "English — US", "Traditional Chinese"
+        )
+        sc_to_tc = next(
+            term
+            for term in english_to_tc
+            if term["concept_id"] == "st_003_single_crochet"
+        )
+        self.assertEqual(["sc"], sc_to_tc["english_us_abbreviations"])
+        self.assertEqual("短針", sc_to_tc["traditional_chinese"])
+        self.assertEqual("X", sc_to_tc["traditional_chinese_abbreviation"])
+        en_tc_prompt = broad_translation.build_prompt(
+            segments,
+            english_to_tc,
+            broad_translation._route_config("English — US", "Traditional Chinese"),
+        )
+        self.assertIn("terminology_policy", en_tc_prompt)
+
+        for output_mode, target_field in (
+            ("English — US", "english_us"),
+            ("Japanese", "japanese"),
+        ):
+            with self.subTest(route=("Simplified Chinese", output_mode)):
+                terms = broad_translation.build_glossary(
+                    "Simplified Chinese", output_mode
+                )
+                single_crochet = next(
+                    term
+                    for term in terms
+                    if term["concept_id"] == "st_003_single_crochet"
+                )
+                self.assertEqual(
+                    "X",
+                    single_crochet["simplified_chinese_abbreviation"],
+                )
+                self.assertIn(target_field, single_crochet)
+                prompt = broad_translation.build_prompt(
+                    segments,
+                    terms,
+                    broad_translation._route_config(
+                        "Simplified Chinese", output_mode
+                    ),
+                )
+                payload = json.loads(prompt.split("INPUT: ", 1)[1])
+                policy = payload["terminology_policy"]
+                self.assertEqual(
+                    "recognition_only_not_preferred_output",
+                    policy["source_abbreviation_role"],
+                )
+                self.assertEqual(
+                    target_field,
+                    policy["preferred_target_term_field"],
+                )
+
+    def test_chinese_source_routes_prefer_target_terminology_without_repair(self):
+        cases = (
+            ("Simplified Chinese", "English — US", "english_us", "english_us_abbreviations"),
+            ("Simplified Chinese", "English — UK", "english_uk", "english_uk_abbreviations"),
+            ("Traditional Chinese", "English — US", "english_us", "english_us_abbreviations"),
+            ("Traditional Chinese", "English — UK", "english_uk", "english_uk_abbreviations"),
+            ("Simplified Chinese", "Japanese", "japanese", None),
+            ("Traditional Chinese", "Japanese", "japanese", None),
+        )
+        segments = [
+            {"source_segment_id": "segment-0000", "text": "R2:12FV"},
+            {"source_segment_id": "segment-0001", "text": "R3:12(f,fv)"},
+            {"source_segment_id": "segment-0002", "text": "钩8F，重复(F,FA)*6"},
+            {"source_segment_id": "segment-0003", "text": "R3812(F.FV)"},
+        ]
+        for source_mode, output_mode, target_field, abbreviation_field in cases:
+            with self.subTest(route=(source_mode, output_mode)):
+                config = broad_translation._route_config(source_mode, output_mode)
+                terms = broad_translation.build_glossary(source_mode, output_mode)
+                prompt = broad_translation.build_prompt(segments, terms, config)
+                payload = json.loads(prompt.split("INPUT: ", 1)[1])
+                policy = payload["terminology_policy"]
+                self.assertEqual("case_insensitive", policy["source_abbreviation_matching"])
+                self.assertEqual(
+                    "recognition_only_not_preferred_output",
+                    policy["source_abbreviation_role"],
+                )
+                self.assertEqual(target_field, policy["preferred_target_term_field"])
+                if abbreviation_field is None:
+                    self.assertNotIn("preferred_target_abbreviation_field", policy)
+                    self.assertEqual(
+                        "canonical_japanese_crochet_terminology",
+                        policy["target_output_preference"],
+                    )
+                else:
+                    self.assertEqual(
+                        abbreviation_field,
+                        policy["preferred_target_abbreviation_field"],
+                    )
+                    self.assertEqual(
+                        "standard_english_crochet_terminology_and_abbreviations",
+                        policy["target_output_preference"],
+                    )
+                self.assertEqual(segments, payload["source_segments"])
+                self.assertIn("not a preferred target output form", prompt)
+                self.assertIn("case-insensitively", prompt)
+                self.assertIn("genuinely ambiguous", prompt)
+
+    def test_recognized_dot_shorthand_stays_visible_while_domains_are_protected(self):
+        for source_mode in ("Simplified Chinese", "Traditional Chinese"):
+            with self.subTest(source_mode=source_mode):
+                config = broad_translation._route_config(
+                    source_mode, "English — US"
+                )
+                terms = broad_translation.build_glossary(
+                    config.source_mode, config.output_mode
+                )
+                segments = [
+                    {"source_segment_id": "segment-0000", "text": "R3:12(F.FV)"},
+                    {"source_segment_id": "segment-0001", "text": "R4:12(f.fv)"},
+                    {"source_segment_id": "segment-0002", "text": "R5:12(FV.FA)"},
+                    {
+                        "source_segment_id": "segment-0003",
+                        "text": "访问 example.com 和 underTheFloweringTree.blogspot.com",
+                    },
+                ]
+
+                protected, replacements = (
+                    broad_translation._protect_segment_url_domains(
+                        segments, terms, config
+                    )
+                )
+
+                self.assertEqual("R3:12(F.FV)", protected[0]["text"])
+                self.assertEqual("R4:12(f.fv)", protected[1]["text"])
+                self.assertEqual("R5:12(FV.FA)", protected[2]["text"])
+                self.assertEqual({}, replacements["segment-0000"])
+                self.assertEqual({}, replacements["segment-0001"])
+                self.assertEqual({}, replacements["segment-0002"])
+                self.assertNotIn("example.com", protected[3]["text"])
+                self.assertNotIn(
+                    "underTheFloweringTree.blogspot.com",
+                    protected[3]["text"],
+                )
+                self.assertEqual(
+                    ["example.com", "underTheFloweringTree.blogspot.com"],
+                    list(replacements["segment-0003"].values()),
+                )
+
+    def test_dot_shorthand_is_accepted_and_not_marked_as_protected_identity(self):
+        result, caller, _prompts = _translate(
+            ["R3812(F.FV)"],
+            ["R3 8 12 (dc, dc inc)"],
+            source_mode="Traditional Chinese",
+            output_mode="English — US",
+        )
+
+        caller.assert_called_once()
+        self.assertEqual("validated", result.loc[0, "Validation Status"])
+        self.assertEqual("", result.loc[0, "Validation Failure Reason"])
+        self.assertEqual((), result.loc[0, "Protected URL/Domain Identities"])
+        annotated = pattern_document.annotate_overlay_content(result)
+        self.assertEqual("trusted", annotated.loc[0, "Translation Trust"])
+        self.assertEqual(0, annotated.loc[0, "Protected Identity Span Count"])
+
     def test_all_routes_receive_full_route_relevant_glossary_and_strict_schema(self):
         source_fields = {
             "English — US": {
@@ -269,6 +517,16 @@ class PromptAndGlossaryContractTests(unittest.TestCase):
                     terms,
                     payload["authoritative_crochet_glossary"],
                 )
+                if (
+                    output_mode in {"Traditional Chinese", "Simplified Chinese"}
+                    or source_mode in {"Traditional Chinese", "Simplified Chinese"}
+                ):
+                    self.assertEqual(
+                        "case_insensitive",
+                        payload["terminology_policy"]["source_abbreviation_matching"],
+                    )
+                else:
+                    self.assertNotIn("terminology_policy", payload)
                 self.assertIn("specialist crochet-pattern translation agent", prompt)
                 self.assertIn("segment_assignments", prompt)
                 self.assertIn("semantic_units", prompt)
@@ -295,10 +553,20 @@ class PromptAndGlossaryContractTests(unittest.TestCase):
                         present_across_glossary
                     )
                 )
+                required_target_fields = target_fields[output_mode]
+                if {
+                    source_mode,
+                    output_mode,
+                } == {"Traditional Chinese", "Simplified Chinese"}:
+                    required_target_fields = {
+                        (
+                            "traditional_chinese"
+                            if output_mode == "Traditional Chinese"
+                            else "simplified_chinese_authoritative_term"
+                        )
+                    }
                 self.assertTrue(
-                    target_fields[output_mode].issubset(
-                        present_across_glossary
-                    )
+                    required_target_fields.issubset(present_across_glossary)
                 )
                 for entry in terms:
                     present_language_fields = set(entry) & all_language_fields
@@ -311,7 +579,7 @@ class PromptAndGlossaryContractTests(unittest.TestCase):
             ("English — US", "Traditional Chinese"): (83, 21855),
             ("Simplified Chinese", "English — US"): (83, 23209),
             ("Simplified Chinese", "English — UK"): (82, 22972),
-            ("Simplified Chinese", "Traditional Chinese"): (83, 20882),
+            ("Simplified Chinese", "Traditional Chinese"): (83, 19330),
             ("Simplified Chinese", "Japanese"): (43, 9414),
             ("English — US", "Simplified Chinese"): (83, 23209),
             ("English — US", "Japanese"): (43, 9536),
@@ -321,7 +589,7 @@ class PromptAndGlossaryContractTests(unittest.TestCase):
             ("English — UK", "Japanese"): (42, 9326),
             ("Traditional Chinese", "English — US"): (83, 21855),
             ("Traditional Chinese", "English — UK"): (82, 21634),
-            ("Traditional Chinese", "Simplified Chinese"): (83, 20882),
+            ("Traditional Chinese", "Simplified Chinese"): (83, 19366),
             ("Traditional Chinese", "Japanese"): (43, 8722),
             ("Japanese", "English — US"): (43, 9536),
             ("Japanese", "English — UK"): (42, 9326),
@@ -565,6 +833,72 @@ class ProviderAndFallbackTests(unittest.TestCase):
         result = self._direct(caller)
         self.assertEqual(2, caller.call_count)
         self.assertEqual("第1圈：短针六针", result.loc[0, "Translation"])
+        self.assertEqual(2, result.attrs["broad_attempt_count"])
+        self.assertTrue(result.attrs["broad_retry_occurred"])
+
+    def test_late_structural_failure_retries_within_shared_budget(self):
+        events = []
+        caller = mock.Mock(
+            side_effect=[({"output": []}, 11.0), (self.valid, 0.5)]
+        )
+        clock = mock.Mock(side_effect=[0.0, 0.0, 11.0, 11.0, 11.0, 12.0])
+
+        with mock.patch.object(broad_translation.time, "perf_counter", clock):
+            result = broad_translation.translate_merged_ocr_lines_broad(
+                self.rows,
+                "English — US",
+                "Traditional Chinese",
+                diagnostic_logger=lambda phase, **fields: events.append(
+                    {"phase": phase, **fields}
+                ),
+                environ={"OPENAI_API_KEY": "test-key"},
+                luna_caller=caller,
+            )
+
+        self.assertEqual(2, caller.call_count)
+        self.assertEqual("第1圈：短针六针", result.loc[0, "Translation"])
+        self.assertEqual(2, result.attrs["broad_attempt_count"])
+        self.assertTrue(result.attrs["broad_retry_occurred"])
+        retry = next(
+            event for event in events if event["phase"] == "broad_retry_scheduled"
+        )
+        self.assertEqual("output_text_not_found", retry["reason"])
+        self.assertEqual("malformed_response", retry["failure_classification"])
+        request_ends = [
+            event for event in events if event["phase"] == "ai_request_end"
+        ]
+        self.assertEqual([1, 2], [event["call_ordinal"] for event in request_ends])
+        self.assertTrue(request_ends[0]["retry_scheduled"])
+        self.assertEqual("success", request_ends[1]["outcome"])
+
+    def test_structural_retry_is_skipped_when_shared_budget_is_insufficient(self):
+        caller = mock.Mock(return_value=({"output": []}, 89.5))
+        clock = mock.Mock(side_effect=[0.0, 0.0, 89.5, 89.5])
+
+        with mock.patch.object(broad_translation.time, "perf_counter", clock):
+            with self.assertRaises(broad_translation.BroadRecoverableError) as caught:
+                self._direct(caller)
+
+        caller.assert_called_once()
+        self.assertEqual("output_text_not_found", caught.exception.reason)
+        self.assertEqual(1, caught.exception.attempt_count)
+        self.assertFalse(caught.exception.retry_attempted)
+        self.assertEqual(89.5, caught.exception.elapsed_seconds)
+
+    def test_late_provider_json_failure_retries_within_shared_budget(self):
+        malformed_json = json.JSONDecodeError("invalid", "{", 1)
+        caller = mock.Mock(
+            side_effect=[malformed_json, (self.valid, 0.5)]
+        )
+        clock = mock.Mock(side_effect=[0.0, 0.0, 11.0, 11.0, 11.0, 12.0])
+
+        with mock.patch.object(broad_translation.time, "perf_counter", clock):
+            result = self._direct(caller)
+
+        self.assertEqual(2, caller.call_count)
+        self.assertEqual("第1圈：短针六针", result.loc[0, "Translation"])
+        self.assertEqual(2, result.attrs["broad_attempt_count"])
+        self.assertTrue(result.attrs["broad_retry_occurred"])
 
     def test_fully_blank_response_retries_once_then_falls_back(self):
         blank = _response_text(_keyed_response(self.segments, ["  "]))
@@ -638,6 +972,39 @@ class ProviderAndFallbackTests(unittest.TestCase):
         deterministic.assert_not_called()
         supplied_legacy_provider.assert_not_called()
         self.assertEqual("validated", result.loc[0, "Validation Status"])
+        self.assertEqual(1, result.attrs["broad_attempt_count"])
+        self.assertFalse(result.attrs["broad_retry_occurred"])
+
+    @mock.patch.dict(
+        os.environ,
+        {"PATTERN_BROAD_TRANSLATION_ENABLED": "1", "OPENAI_API_KEY": "test-key"},
+        clear=False,
+    )
+    def test_simplified_chinese_success_remains_one_broad_call(self):
+        valid = _response_text(
+            _keyed_response(self.segments, ["第1圈：六个短针"])
+        )
+        with mock.patch.object(
+            broad_translation,
+            "call_luna_once",
+            return_value=(valid, 0.01),
+        ) as provider, mock.patch.object(
+            line_translation,
+            "translate_ocr_line",
+            side_effect=AssertionError("legacy deterministic path"),
+        ) as deterministic:
+            result = ocr_lines.build_ocr_line_translations(
+                self.rows,
+                {},
+                pd.DataFrame(),
+                "Simplified Chinese",
+                "English — US",
+            )
+
+        provider.assert_called_once()
+        deterministic.assert_not_called()
+        self.assertEqual("validated", result.loc[0, "Validation Status"])
+        self.assertEqual(1, result.attrs["broad_attempt_count"])
 
     @mock.patch.dict(
         os.environ,
@@ -671,6 +1038,14 @@ class ProviderAndFallbackTests(unittest.TestCase):
             "deterministic_legacy",
             result.attrs["broad_fallback_mode"],
         )
+        failure = result.attrs["broad_failure_diagnostics"]
+        self.assertEqual("broad", failure["route"])
+        self.assertEqual("output_text_not_found", failure["reason"])
+        self.assertEqual("malformed_response", failure["failure_classification"])
+        self.assertEqual(2, failure["attempt_count"])
+        self.assertTrue(failure["retry_occurred"])
+        self.assertTrue(failure["fallback_invoked"])
+        self.assertEqual("deterministic_legacy", failure["fallback_mode"])
 
     @mock.patch.dict(
         os.environ,
@@ -732,6 +1107,11 @@ class ProviderAndFallbackTests(unittest.TestCase):
             "deterministic_legacy",
             result.attrs["broad_fallback_mode"],
         )
+        failure = result.attrs["broad_failure_diagnostics"]
+        self.assertEqual("timeout", failure["reason"])
+        self.assertEqual("request_timeout", failure["failure_classification"])
+        self.assertEqual(1, failure["attempt_count"])
+        self.assertFalse(failure["retry_occurred"])
 
     @mock.patch.dict(
         os.environ,
@@ -777,9 +1157,9 @@ class ProviderAndFallbackTests(unittest.TestCase):
             side_effect=merge_wrapper,
         ), mock.patch.object(
             shadow_title_classifier,
-            "resolve_title_route_indices",
+            "record_shadow_comparison_if_enabled",
             side_effect=AssertionError("title provider path"),
-        ) as title_route:
+        ) as title_shadow:
             result = ocr_lines.build_ocr_line_translations(
                 rows,
                 {},
@@ -791,7 +1171,7 @@ class ProviderAndFallbackTests(unittest.TestCase):
 
         self.assertEqual(2, broad_provider.call_count)
         supplied_legacy_provider.assert_not_called()
-        title_route.assert_not_called()
+        title_shadow.assert_not_called()
         self.assertEqual(2, len(merge_calls))
         self.assertTrue(all(used_original for used_original, _ in merge_calls))
         self.assertFalse(
